@@ -1,37 +1,14 @@
 #!/usr/bin/env bash
-# Quick status check — no Claude Code, no tokens.
-# Reads .status.json (written by cost-tracker hook) and prints a one-liner.
+# Quick status check, no Claude Code or tokens.
+# Prints the current task digest.
 # Run from project root: .claude-code-hermit/bin/hermit-status
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 AGENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-STATUS_FILE="$AGENT_DIR/sessions/.status.json"
-CONFIG_FILE="$AGENT_DIR/config.json"
-PROJECT_DIR="$(cd "$AGENT_DIR/../.." && pwd)"
+PROJECT_DIR="$(cd "$AGENT_DIR/.." && pwd)"
 PROJECT_NAME="$(basename "$PROJECT_DIR")"
-
-# Read agent name and all status fields in a single bun invocation
-FIELDS=$(bun -e "
-const fs = require('fs');
-const [configPath, statusPath] = [process.argv[1], process.argv[2]];
-let agent = '';
-try { agent = JSON.parse(fs.readFileSync(configPath, 'utf8')).agent_name || ''; } catch {}
-let fields = ['', '', '', ''];
-try {
-  const s = JSON.parse(fs.readFileSync(statusPath, 'utf8'));
-  fields = [
-    String(s.status ?? ''),
-    String(s.task ?? ''),
-    String(s.cost_usd ?? ''),
-    String(s.blockers ?? ''),
-  ];
-} catch {}
-console.log(agent + '\t' + fields.join('\t'));
-" "$CONFIG_FILE" "$STATUS_FILE" 2>/dev/null || echo "")
-
-IFS=$'\t' read -r AGENT_NAME STATUS TASK COST BLOCKERS <<< "$FIELDS"
-[ -z "$AGENT_NAME" ] && AGENT_NAME="hermit"
+AGENT_NAME=$(bun -e "try { console.log(JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).agent_name || 'hermit'); } catch { console.log('hermit'); }" "$AGENT_DIR/config.json")
 
 # Docker container status
 DOCKER_STATE=""
@@ -46,37 +23,8 @@ if command -v docker &>/dev/null && [ -f "$COMPOSE" ] && docker info &>/dev/null
   fi
 fi
 
-# If no status data, source session_state from runtime.json (SHELL.md has no **Status:** field)
-if [ -z "$STATUS" ]; then
-  RUNTIME_FILE="$AGENT_DIR/state/runtime.json"
-  if [ -f "$RUNTIME_FILE" ]; then
-    STATUS=$(bun -e "
-try {
-  const d = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
-  console.log(d.session_state ?? 'unknown');
-} catch {
-  console.log('unknown');
-}
-" "$RUNTIME_FILE" 2>/dev/null || echo "unknown")
-    echo "$AGENT_NAME ($PROJECT_NAME) | $STATUS | no cost data yet${DOCKER_STATE:+ | $DOCKER_STATE}"
-  else
-    echo "$AGENT_NAME ($PROJECT_NAME) | no session${DOCKER_STATE:+ | $DOCKER_STATE}"
-  fi
-  exit 0
-fi
-
-# Format fields
-[ -n "$TASK" ] && TASK="\"$TASK\"" || TASK="—"
-
-COST_STR="—"
-if [ -n "$COST" ]; then
-  COST_STR="\$${COST}"
-fi
-
-BLOCKER_STR="no blockers"
-[ -n "$BLOCKERS" ] && BLOCKER_STR="BLOCKED: $BLOCKERS"
-
-echo "$AGENT_NAME ($PROJECT_NAME) | ${STATUS} | $TASK | $COST_STR | $BLOCKER_STR${DOCKER_STATE:+ | $DOCKER_STATE}"
+echo "$AGENT_NAME ($PROJECT_NAME)${DOCKER_STATE:+ | $DOCKER_STATE}"
+"$SCRIPT_DIR/hermit-run" task list "$AGENT_DIR" --open
 
 if [ "$DOCKER_STATE" = "docker:up" ]; then
   echo "  attach: .claude-code-hermit/bin/hermit-docker attach"

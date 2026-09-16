@@ -14,7 +14,7 @@ export type { ChannelEnvelope };
 
 export interface StageContext {
   skipHarnessCommand?: boolean;
-  conversation?: { key: string; record: Conversation };
+  conversation?: { key: string; record: Conversation } | { key: string; owner: 'resident' };
   /** Resolved hermit state dir — computed once for the whole pipeline. */
   dir: string;
   /** The submitted prompt text. */

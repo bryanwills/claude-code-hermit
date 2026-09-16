@@ -4,16 +4,15 @@
 // Usage:
 //   bun heartbeat.ts precheck [--peek] <hermit-state-dir>
 //     The monitor's poll and /heartbeat run's mutating tick. --peek is
-//     read-only. Prints one verdict line: OK | EVALUATE | AUTO_CLOSE | ALERT |
+//     read-only. Prints one verdict line: OK | EVALUATE | ALERT |
 //     SKIP|<reason>. The monitor greps these, so the grammar is load-bearing.
 //
 //   bun heartbeat.ts tick <hermit-dir>
 //     One deterministic tick: the mutating precheck plus the bookkeeping the run
-//     handler used to narrate (waiting timeout, budget composition, the
-//     auto-close Monitoring line). Prints one JSON line the skill branches on.
+//     handler uses for budget and runnable task notices. Prints one JSON line the skill branches on.
 //
-//   bun heartbeat.ts ack-next-task <hermit-dir> <token>
-//     Park an unchanged queued task after its notice was delivered.
+//   bun heartbeat.ts ack-queue <hermit-dir> <token>
+//     Acknowledge an unchanged runnable record after pickup or notification.
 //
 //   bun heartbeat.ts start-check <hermit-dir>
 //   bun heartbeat.ts start-commit <hermit-dir> <task-id>
@@ -32,7 +31,7 @@
 
 export {}; // module scope: every import here is dynamic, and top-level await needs it
 
-const USAGE = 'Usage: bun heartbeat.ts <precheck [--peek] <dir> | tick <dir> | ack-next-task <dir> <token> | start-check <dir> | start-commit <dir> <task-id> | alert-state <state-file>>';
+const USAGE = 'Usage: bun heartbeat.ts <precheck [--peek] <dir> | tick <dir> | ack-queue <dir> <token> | control-state <dir> | start-check <dir> | start-commit <dir> <task-id> | alert-state <state-file>>';
 
 const verb = process.argv[2];
 process.argv.splice(2, 1);
@@ -48,11 +47,20 @@ switch (verb) {
     await run(process.argv.slice(2));
     break;
   }
-  case 'ack-next-task': {
-    const { acknowledgeNextTask } = await import('./lib/heartbeat/tick');
+  case 'ack-queue': {
+    const { acknowledgeQueue } = await import('./lib/heartbeat/tick');
     const { pinStateDirOrExit } = await import('./lib/cc-compat');
-    const dir = pinStateDirOrExit(process.argv[2], 'heartbeat ack-next-task');
-    console.log(JSON.stringify(acknowledgeNextTask(dir, process.argv[3])));
+    const dir = pinStateDirOrExit(process.argv[2], 'heartbeat ack-queue');
+    console.log(JSON.stringify(acknowledgeQueue(dir, process.argv[3])));
+    break;
+  }
+  case 'control-state': {
+    const { effectiveHeartbeatMode } = await import('./lib/heartbeat/control');
+    const { readConfigRaw } = await import('./lib/config-read');
+    const dir = process.argv[2];
+    if (!dir) { console.error(USAGE); process.exit(1); }
+    const mode = effectiveHeartbeatMode(dir);
+    console.log(mode === 'stopped' ? 'stopped' : mode === 'auto' && readConfigRaw(dir)?.heartbeat?.enabled === false ? 'disabled' : 'active');
     break;
   }
   case 'start-check':

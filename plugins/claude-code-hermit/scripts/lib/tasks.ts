@@ -7,14 +7,19 @@ import path from 'node:path';
 import { parseFrontmatter, globDirRecursive } from './frontmatter';
 import { serializeValue, writeFileAtomic } from './md-write';
 import { acquireLockWithWait, releaseLock } from './lockfile';
-import { checkKey } from './conversations';
+import { checkKey, list as listConversations } from './conversations';
+import { findResident } from './session-registry';
+import { compactibleTokens, isOwnTurn } from './context-signal';
+import { readContextSurface } from './context-surface';
+import { allocateTaskShares, BY_TASK_RETENTION_DAYS, computeIndex, readCostIndex, costIndexPath } from './cost-log';
+import { todayYMD } from './time';
 import { costLogPath } from './cc-compat';
 
 export const TASK_ID = /^T-\d{8}-\d{6}(-[a-z0-9])?$/;
 const SLUG = /^[\w.:~+@;=-]+$/;
 const HOUR = 3600000;
 const requiredStrings = ['id', 'type', 'title', 'created', 'summary', 'audience', 'status', 'opened_at', 'requester', 'handle', 'owner'] as const;
-const nullableStrings = ['closed_at', 'closed_by', 'closed_actor', 'closed_reason', 'requester_name', 'origin_message_id', 'approver', 'due', 'conversation', 'card_chat_id', 'card_message_id', 'waiting_on', 'waiting_since', 'result', 'result_at', 'stall_at', 'stall_status', 'stall_next', 'dedupe_key'] as const;
+const nullableStrings = ['closed_at', 'closed_by', 'closed_actor', 'closed_reason', 'requester_name', 'origin_message_id', 'approver', 'due', 'conversation', 'card_chat_id', 'card_message_id', 'waiting_on', 'waiting_since', 'result', 'result_at', 'stall_at', 'stall_status', 'stall_next', 'dedupe_key', 'check'] as const;
 export type Task = Record<typeof requiredStrings[number], string> & Record<typeof nullableStrings[number], string | null> & { tags: string[]; claims: string[]; result_rev: number; body: string };
 const clean = (value: string) => value.replace(/[\r\n]+/g, ' ');
 const iso = (value: string) => /^\d{4}-\d\d-\d\dT/.test(value) && Number.isFinite(Date.parse(value));
@@ -52,6 +57,7 @@ export function decodeTask(text: string): Task {
     if (!/^\d+$/.test(String(fm.result_rev))) throw new Error();
     fm.result_rev = Number(fm.result_rev);
     const record = { ...fm, body: text.slice(end + 4).replace(/^\n/, '') } as Task;
+    for (const key of nullableStrings) if (!(key in record)) record[key] = null;
     validateTask(record);
     return record;
   } catch { throw new Error('invalid-record'); }
@@ -86,8 +92,8 @@ function validRequester(value: string): boolean {
 
 function append(record: Task, section: string, actor: string, text: string, now: string): void {
   const heading = `## ${section}\n`;
+  if (!record.body.includes(heading)) record.body = record.body.trimEnd() + '\n\n' + heading;
   const start = record.body.indexOf(heading);
-  if (start === -1) throw new Error('invalid-record');
   const next = record.body.indexOf('\n## ', start + heading.length);
   const at = next === -1 ? record.body.length : next;
   record.body = record.body.slice(0, at).trimEnd() + `\n- ${now} ${clean(actor)}: ${clean(text)}\n` + record.body.slice(at);
@@ -167,29 +173,34 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
       for (let n = 2; records.some(r => r.status === 'open' && r.handle === handle); n++) handle = `${base}-${n}`;
       record = {
         ...Object.fromEntries(nullableStrings.map(key => [key, null])),
-        id: allocateTaskId(records.map(r => r.id), now), type: 'task', title, created: now, summary: required(flags, 'done'),
+        id: allocateTaskId(records.map(r => r.id), now), type: 'task', title, created: now, summary: flag(flags, 'done') ?? (flags['note-stdin'] ? title : required(flags, 'done')),
         tags: ['task', requester], audience: conversation ?? 'operator', status: 'open', opened_at: now,
         requester, requester_name: flag(flags, 'requester-name') ?? null, origin_message_id: flag(flags, 'origin-message-id') ?? null,
         approver: flag(flags, 'approver') ?? null, due: dateFlag(flags, 'due'), conversation, handle, owner,
         dedupe_key: dedupe, claims: (flags.claim as string[] | undefined) ?? [], result_rev: 0,
-        body: '## Progress\n\n## Decisions\n\n## Approvals\n\n## Outcome\n',
+        body: '## Progress\n\n## Decisions\n\n## Approvals\n\n## Lessons\n\n## Outcome\n',
       } as Task;
+      record.check = checkFlag(flags);
       card(record, flag(flags, 'card'));
       append(record, 'Progress', requester, 'Opened: ' + record.summary, now);
+      if (flags['note-stdin'] && input.trim()) append(record, 'Progress', requester, input.trim(), now);
       records.push(record);
       digest = openDigest(record, records, true);
     } else {
       const found = records.find(r => r.id === id);
       if (!found) throw new Error('not-found');
       record = found;
+      if (verb === 'check-snapshot') return { check: record.check, result_rev: record.result_rev, status: record.status };
+      if (verb === 'check-result' && (record.status !== 'open' || !record.check || !/^\d+$/.test(flag(flags, 'result-rev') ?? '') || Number(flags['result-rev']) !== record.result_rev)) throw new Error('stale-check');
       if (record.status !== 'open') throw new Error('not-open');
       const actor = flag(flags, 'actor') ?? 'hermit';
       const line = clean(input.trim());
       if (verb === 'note') {
-        const metadata = ['due', 'card', 'decision', 'approval', 'done', 'clear-waiting'].some(key => key in flags);
+        const metadata = ['due', 'card', 'check', 'decision', 'approval', 'done', 'clear-waiting'].some(key => key in flags);
         if (!line && !metadata) throw new Error('empty');
         progress = !!line;
         if (line) append(record, flags.decision ? 'Decisions' : 'Progress', actor, line, now);
+        if ('check' in flags && record.check !== checkFlag(flags)) { record.check = checkFlag(flags); record.result_rev++; }
         if ('due' in flags) record.due = dateFlag(flags, 'due');
         card(record, flag(flags, 'card'));
         if (flags['clear-waiting']) { record.waiting_on = null; record.waiting_since = null; }
@@ -207,6 +218,18 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
           append(record, 'Approvals', match[1], match[2], now);
         }
         digest = { id, result_rev: record.result_rev };
+      } else if (verb === 'lesson') {
+        if (!line) throw new Error('empty');
+        for (const lesson of input.trim().split(/\r?\n/).filter(line => line.trim())) append(record, 'Lessons', actor, lesson, now);
+        digest = { id };
+      } else if (verb === 'check-result') {
+        const exit = flag(flags, 'exit');
+        if (!flags['output-stdin'] || !/^-?\d+$/.test(exit ?? '')) throw new Error('invalid-check-result');
+        if (Number(exit) === 0) {
+          finish(record, 'check', 'hermit', 'check:exit-0', now);
+          if (line) append(record, 'Outcome', 'hermit', line, now);
+        } else append(record, 'Progress', 'hermit', `check:exit-${exit} ${line}`, now);
+        digest = { id, closed_by: record.closed_by, result_rev: record.result_rev };
       } else if (verb === 'block') {
         if (flags['result-stdin']) {
           if (!line) throw new Error('empty');
@@ -238,12 +261,12 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
           else throw new Error('check-needs-evidence');
         }
         finish(record, by, closer, reason, now);
-        digest = { id, closed_by: by, result_rev: record.result_rev };
+        digest = { id, closed_by: by, result_rev: record.result_rev, next_queued: nextQueued(records) };
       } else if (verb === 'cancel') {
         const closer = required(flags, 'actor');
         if (!flags['reason-stdin'] || !line) throw new Error('empty-reason');
         finish(record, 'cancelled', closer, line, now);
-        digest = { id, closed_by: 'cancelled' };
+        digest = { id, closed_by: 'cancelled', next_queued: nextQueued(records) };
       } else throw new Error('invalid-verb');
     }
     const encoded = encodeTask(record);
@@ -263,24 +286,69 @@ export function taskListing(record: Task, records: Task[], shared = false): stri
   if (record.due && Date.parse(record.due) < Date.now()) labels.push('late');
   if (record.result) labels.push('unconfirmed');
   else if (record.waiting_on) labels.push(`waiting on ${record.waiting_on}`);
-  if (record.owner === 'resident' && records.some(r => r.id !== record.id && r.status === 'open' && r.owner === 'resident' && !r.result && (r.opened_at < record.opened_at || r.opened_at === record.opened_at && r.id < record.id))) labels.push('queued');
+  if (isRunnable(record) && records.some(r => isRunnable(r) && (r.opened_at < record.opened_at || r.opened_at === record.opened_at && r.id < record.id))) labels.push('queued');
   if (shared) labels.push('shared');
   return labels.length ? labels : ['open'];
 }
 
-export function listTasks(dir: string, flags: TaskFlags = {}) {
-  const records = readTasks(dir);
-  const selected = records.filter(r => (flags.all || r.status === 'open') && ['conversation', 'requester', 'handle', 'id', 'dedupe-key'].every(key => !flag(flags, key) || r[key === 'dedupe-key' ? 'dedupe_key' : key as 'id'] === flag(flags, key)));
-  const rows = selected.slice(0, 20).map(r => ({ id: r.id, handle: r.handle, listing: taskListing(r, records), requester: r.requester, title: r.title, due: r.due, result_rev: r.result_rev }));
-  return { rows, total: selected.length, omitted: selected.length - rows.length, execution: readExecution(dir) };
+export function isRunnable(record: Task): boolean {
+  return record.status === 'open' && record.owner === 'resident' && !record.result && !record.waiting_on;
+}
+function nextQueued(records: Task[]) {
+  const next = records.find(isRunnable);
+  return next ? { id: next.id, handle: next.handle, title: next.title } : null;
+}
+function checkFlag(flags: TaskFlags): string | null {
+  const value = flag(flags, 'check');
+  return !value || ['null', 'none', 'clear'].includes(value) ? null : value;
 }
 
-export interface Execution { state: 'in_flight' | 'idle' | 'unknown'; turn_id: string | null; at: string | null; source: string | null; cc_session_id: string | null; reason: string | null }
-export function readExecution(dir: string): Execution {
+export function listTasks(dir: string, flags: TaskFlags = {}) {
+  const records = readTasks(dir);
+  const owner = flag(flags, 'owner');
+  if (owner && owner !== 'resident') {
+    if (!owner.startsWith('helper:')) throw new Error('invalid-owner');
+    if (owner !== 'helper:*') checkKey(owner.slice(7));
+  }
+  const limit = flags.limit === undefined ? 20 : Number(flags.limit);
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('invalid-limit');
+  const selected = records.filter(r => (!flags.all || flags.open ? r.status === 'open' : true)
+    && (!owner || (owner === 'helper:*' ? r.owner.startsWith('helper:') : r.owner === owner))
+    && (!flags['with-check'] || !!r.check)
+    && ['conversation', 'requester', 'handle', 'id', 'dedupe-key'].every(key => !flag(flags, key) || r[key === 'dedupe-key' ? 'dedupe_key' : key as 'id'] === flag(flags, key)));
+  const rows = selected.slice(0, limit).map(r => ({ id: r.id, handle: r.handle, listing: taskListing(r, records), requester: r.requester, title: r.title, due: r.due, result_rev: r.result_rev, owner: r.owner, result: r.result, waiting_on: r.waiting_on, closed_by: r.closed_by, check: r.check }));
+  return { rows, total: selected.length, omitted: selected.length - rows.length, execution: readExecution(dir, { registryFallback: true }) };
+}
+
+export interface Execution { state: 'in_flight' | 'idle' | 'unknown'; turn_id: string | null; at: string | null; source: string | null; cc_session_id: string | null; reason: string | null; registry?: string | null; waitingFor?: string | null; display?: string }
+export function readExecution(dir: string, options: { registryFallback?: true } = {}): Execution {
   const raw = readJson(path.join(dir, 'state/execution.json'));
   const empty: Execution = { state: 'unknown', turn_id: null, at: null, source: null, cc_session_id: null, reason: null };
-  if (!raw || !['in_flight', 'idle', 'unknown'].includes(raw.state) || !iso(raw.at ?? '')) return empty;
-  return { ...empty, ...raw, state: raw.state === 'in_flight' && Date.now() - Date.parse(raw.at) > HOUR ? 'unknown' : raw.state };
+  const result: Execution = !raw || !['in_flight', 'idle', 'unknown'].includes(raw.state) || !iso(raw.at ?? '') ? empty
+    : { ...empty, ...raw, state: raw.state === 'in_flight' && Date.now() - Date.parse(raw.at) > HOUR ? 'unknown' : raw.state };
+  if (options.registryFallback && result.state === 'unknown') {
+    const runtime = readJson(path.join(dir, 'state/runtime.json'));
+    const resident = findResident(runtime, runtime?.config_dir) as (ReturnType<typeof findResident> & { waitingFor?: string });
+    result.registry = resident?.status ?? null;
+    result.waitingFor = typeof resident?.waitingFor === 'string' ? resident.waitingFor : null;
+    if (resident) result.display = `execution: unknown (registry: ${resident.status}${result.waitingFor ? ', ' + result.waitingFor : ''}, live process)`;
+  }
+  return result;
+}
+export function passesExecutionBoundary(dir: string, options: { minTokens?: number } = {}): { ok: true } | { ok: false; reason: string } {
+  const execution = readExecution(dir);
+  if (execution.state !== 'idle') return { ok: false, reason: 'execution-not-idle' };
+  const runtime = readJson(path.join(dir, 'state/runtime.json'));
+  if (!execution.cc_session_id || execution.cc_session_id !== runtime?.cc_session_id) return { ok: false, reason: 'stale-identity' };
+  if (!execution.at || Date.now() - Date.parse(execution.at) < 60000) return { ok: false, reason: 'idle-too-fresh' };
+  if (Object.values(listConversations(dir)).some(entry => entry.status === 'running')) return { ok: false, reason: 'helper-running' };
+  const resident = findResident(runtime, runtime?.config_dir);
+  if (resident && !['idle', 'shell'].includes(resident.status)) return { ok: false, reason: 'registry-busy' };
+  if (options.minTokens !== undefined) {
+    const entry = readTaskCostRows(dir).findLast(row => isOwnTurn(row, execution.cc_session_id!));
+    if (!entry || compactibleTokens(entry, readContextSurface(dir)?.surface_upper_bound_tokens ?? null) < options.minTokens) return { ok: false, reason: 'under-token-floor' };
+  }
+  return { ok: true };
 }
 export function observeExecution(dir: string, state: Execution['state'], session: string | null, source: string | null, reason: string | null): void {
   try {
@@ -348,7 +416,26 @@ export interface PersonTasks { identity: string; name: string | null; promised: 
 interface TaskSummary { id: string; handle: string; title: string; due: string | null; cost_usd: number; listing: string[] }
 export function taskStandup(dir: string, days = 7) {
   const records = readTasks(dir);
-  const costs = readTaskCostRows(dir).filter(r => Date.parse(r.timestamp ?? r.observed_at) >= Date.now() - days * 86400000);
+  const timezone = readConfigRaw(dir)?.timezone ?? 'UTC';
+  const from = todayYMD(timezone, new Date(Date.now() - days * 86400000));
+  const to = todayYMD(timezone);
+  const totals: Record<string, number> = {};
+  let preUpgrade = false;
+  if (days <= BY_TASK_RETENTION_DAYS) {
+    const index = readCostIndex(costIndexPath(dir)) ?? computeIndex(costLogPath(dir), timezone);
+    for (const [id, buckets] of Object.entries(index.by_task) as [string, Record<string, { cost: number }>][]) {
+      totals[id] = Object.entries(buckets).reduce((sum, [date, bucket]) => sum + (date >= from && date <= to ? bucket.cost : 0), 0);
+    }
+  } else {
+    for (const row of readTaskCostRows(dir)) {
+      const at = new Date(row.timestamp ?? row.observed_at);
+      if (!Number.isFinite(at.getTime())) continue;
+      const date = todayYMD(timezone, at);
+      if (date < from || date > to) continue;
+      if (!row.bucket) preUpgrade = true;
+      for (const share of allocateTaskShares(row)) totals[share.task_id] = (totals[share.task_id] ?? 0) + share.cost;
+    }
+  }
   const people = new Map<string, PersonTasks>();
   const person = (identity: string, name: string | null = null) => {
     if (!people.has(identity)) people.set(identity, { identity, name, promised: [], late: [], waiting: [] });
@@ -357,15 +444,14 @@ export function taskStandup(dir: string, days = 7) {
     return p;
   };
   for (const record of records.filter(r => r.status === 'open').sort((a, b) => (a.due ?? 'z').localeCompare(b.due ?? 'z'))) {
-    const rows = costs.filter(r => r.task_id === record.id);
-    const listing = taskListing(record, records, costs.some(r => r.task_ids?.length > 1 && r.task_ids.includes(record.id)));
-    const summary = { id: record.id, handle: record.handle, title: record.title, due: record.due, cost_usd: rows.reduce((sum, r) => sum + (Number(r.estimated_cost_usd) || 0), 0), listing };
+    const listing = taskListing(record, records);
+    const summary = { id: record.id, handle: record.handle, title: record.title, due: record.due, cost_usd: totals[record.id] ?? 0, listing };
     const p = person(record.requester, record.requester_name);
     p.promised.push(summary);
     if (listing.includes('late')) p.late.push(summary);
     if (record.waiting_on) person(record.waiting_on).waiting.push(summary);
   }
-  return { byPerson: [...people.values()].sort((a, b) => a.identity.localeCompare(b.identity)), pre_upgrade: costs.some(r => !r.bucket) ? 'pre-upgrade' : null, execution: readExecution(dir) };
+  return { byPerson: [...people.values()].sort((a, b) => a.identity.localeCompare(b.identity)), closed: Object.fromEntries(['check', 'confirmed', 'cancelled'].map(by => [by, records.filter(r => r.closed_by === by && r.closed_at && todayYMD(timezone, new Date(r.closed_at)) >= from).map(r => ({ id: r.id, handle: r.handle, title: r.title, cost_usd: totals[r.id] ?? 0 }))])), pre_upgrade: preUpgrade ? 'pre-upgrade' : null, execution: readExecution(dir, { registryFallback: true }) };
 }
 export function startupTasks(dir: string): string[] {
   const list = listTasks(dir);

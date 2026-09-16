@@ -13,7 +13,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 
 ## Scope
 
-Read the following (gracefully skip any file that doesn't exist). The nine sources are independent — read them concurrently:
+Read the following (gracefully skip any file that doesn't exist). The sources are independent — read them concurrently:
 
 1. `.claude-code-hermit/state/alert-state.json` — the `alerts` object, keyed by alert id (`checklist:*`, `proposal-pending:PROP-NNN`, `micro-proposal-pending:*`). Each entry has `text`, `count`, `first_seen`, `last_seen`, `suppressed`, `consecutive_clean`.
 2. `.claude-code-hermit/state/runtime.json` — `last_activity`, `session_id`.
@@ -22,8 +22,7 @@ Read the following (gracefully skip any file that doesn't exist). The nine sourc
 5. `.claude-code-hermit/proposals/PROP-*.md` — glob; count by `status` frontmatter field, and read `id`, `title`, `accepted_date`, `resolved_date`, `tags` for the stale-proposal and fragile-zone analysis.
 6. `.claude-code-hermit/state/micro-proposals.json` — count entries with `status: "pending"`.
 7. Glob counts: `.claude-code-hermit/raw/**` (excluding `.archive/`), `.claude-code-hermit/compiled/**`, `.claude-code-hermit/raw/.archive/**`.
-8. `.claude-code-hermit/sessions/S-*-REPORT.md` — glob all, sort descending by filename, read the 5 most recent; parse `status`, `tags`, `proposals_created` frontmatter.
-9. `.claude-code-hermit/sessions/SHELL.md` — current session `tags`, blockers, and `## Findings` entries (fallback source for recent learnings).
+8. `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task-report.ts .claude-code-hermit --limit 5` for normalized recent task records: titles, outcomes, waiting reasons and lessons. Never read frozen session archives or the old live shell document.
 
 ## Analysis
 
@@ -44,11 +43,11 @@ Read the following (gracefully skip any file that doesn't exist). The nine sourc
 
 **Channel availability:** From `config.json.channels`, for each configured channel, check whether `default_chat_id` or (failing that) `dm_channel_id` is set — the same fallback chain the outbound resolver uses. Report "ready" or "not yet paired (no chat id — send a message first)".
 
-**Fragile zones:** From the last 5 session reports, gather the `tags` array from sessions with `status: partial` or `status: blocked`. Also gather `tags` from proposals with `status: dismissed` or `status: blocked`. Surface the top 2–3 tag clusters that appear repeatedly across fragile outcomes. If no blocked/partial sessions exist: "No fragile zones detected."
+**Fragile zones:** From the last five normalized task records, identify repeated themes in cancelled outcomes and open waiting reasons. Combine these with proposal tags for dismissed or blocked proposals. Surface the top two or three themes with the actual outcomes; unconfirmed is not completed. If none recur, report "No fragile zones detected."
 
 **Stale proposals:** From proposals, find those with `status: accepted` and `resolved_date` absent or `null`. Sort by `accepted_date` ascending (oldest first). Show up to 3. Compute days open = today minus `accepted_date`. If none: "No accepted proposals awaiting resolution."
 
-**Recent learnings:** From `reflection-state.json`, read `queue` entries with `status: accepted` or `status: pending` and surface the most recent 3 question/observation fields. If the queue is empty or absent, scan the current SHELL.md Progress Log for notable Findings entries (lines beginning with `-` under `## Findings`). Surface top 3. If nothing: "No recent learnings — reflect hasn't run yet."
+**Recent learnings:** From `reflection-state.json`, read `queue` entries with `status: accepted` or `status: pending` and surface the most recent 3 question/observation fields. If the queue is empty or absent, use the normalized records’ `lessons`. Surface top 3. If nothing: "No recent learnings — reflect hasn't run yet."
 
 ## Output
 
@@ -81,7 +80,7 @@ Reply in ≤1500 chars. Use exactly this section structure:
 
 ### Fragile zones
 - [tag or theme]: [one-line reason]
-(or: No fragile zones detected — no blocked/partial sessions yet.)
+(or: No fragile zones detected — no recurring cancelled or waiting tasks yet.)
 
 ### Stale proposals
 - PROP-NNN: [title] (accepted N days ago)

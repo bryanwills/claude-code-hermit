@@ -937,7 +937,7 @@ describe('update-alert-state', () => {
     });
     expect(state.total_ticks).toBe(5); // precheck-owned — must survive untouched
     expect(stdout.heartbeat_result).toBe('ALERT');
-    expect(monitoring).toEqual(['[12:00] Heartbeat: Session idle 3h']);
+    expect(monitoring).toEqual([]);
     expect(stdout.notifications).toEqual(['Session idle 3h']); // first observation notifies
   }));
 
@@ -978,7 +978,7 @@ describe('update-alert-state', () => {
     expect(state.alerts['checklist:idle0001'].count).toBe(2);
     expect(state.alerts['checklist:idle0001'].suppressed).toBe(false);
     expect(state.alerts['checklist:idle0001'].text).toBe('Session idle 5h'); // label refreshed
-    expect(monitoring).toEqual(['[12:00] Heartbeat: Session idle 5h']);
+    expect(monitoring).toEqual([]);
     expect(stdout.notifications).toEqual([]); // repeat fire — no re-notification
   }));
 
@@ -987,8 +987,8 @@ describe('update-alert-state', () => {
       '{"alerts":{"checklist:abc12345":{"count":5,"consecutive_clean":0,"suppressed":false,"first_seen":"2026-07-01","last_seen":"2026-07-09","text":"disk 90% full"}},"self_eval":{},"total_ticks":20,"last_digest_date":"2026-07-10"}'); // digest already sent today — isolates this assertion to the suppression transition alone
     const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([{ key: 'checklist:abc12345', text: 'disk 90% full' }]));
     expect(state.alerts['checklist:abc12345']).toMatchObject({ count: 6, suppressed: true, consecutive_clean: 0 });
-    // Monitoring line (SHELL.md) keeps "above alert"; the channel notification names the alert instead.
-    expect(monitoring).toEqual(['[12:00] Heartbeat: above alert suppressed after 5 fires (first: 2026-07-01). Daily digest only.']);
+    // Suppression still notifies the channel without writing to frozen session files.
+    expect(monitoring).toEqual([]);
     expect(stdout.notifications).toEqual(['Heartbeat: "disk 90% full" suppressed after 5 fires — daily digest only.']);
   }));
 
@@ -1013,7 +1013,7 @@ describe('update-alert-state', () => {
     const { state, stdout, monitoring } = await updateAlertState(dir, firingPayload([]));
     expect(state.alerts).not.toHaveProperty('checklist:aaa11111');
     expect(state.alerts).not.toHaveProperty('checklist:bbb22222');
-    expect(monitoring).toEqual(['[12:00] Heartbeat: resolved — flaky check']); // suppressed one resolves silently
+    expect(monitoring).toEqual([]); // suppressed one resolves silently
   }));
 
   // self_eval is derived from files this script reads, so nothing the subagent
@@ -1144,14 +1144,13 @@ describe('update-alert-state', () => {
     expect(readJson(stateFile)).toEqual(JSON.parse(before));
   }));
 
-  test('update-alert-state (rejected tick leaves state untouched and logs one indeterminate Monitoring line)', withDir(async (dir) => {
+  test('update-alert-state (rejected tick leaves state untouched and leaves the frozen Monitoring section untouched)', withDir(async (dir) => {
     const before = '{"alerts":{"custom:x":{"count":1,"consecutive_clean":0,"suppressed":false,"first_seen":"2026-07-01","last_seen":"2026-07-01","text":"t"}},"self_eval":{},"total_ticks":9,"last_clean_eval_at":"2026-07-09T12:00:00.000Z"}';
     write(hermit(dir, 'state', 'alert-state.json'), before);
     const { state, stdout, monitoring } = await updateAlertState(dir, '{"firing":null}');
     expect(state).toEqual(JSON.parse(before)); // untouched — last_clean_eval_at and the live alert both survive
     expect(stdout).toMatchObject({ heartbeat_result: 'INDETERMINATE', reason: 'missing-or-malformed-firing' });
-    expect(monitoring).toHaveLength(1);
-    expect(monitoring[0]).toContain('evaluation indeterminate (missing-or-malformed-firing)');
+    expect(monitoring).toHaveLength(0);
   }));
 
   // A bare `null` return parses but has no properties — the reject path must
@@ -1330,8 +1329,7 @@ describe('update-alert-state', () => {
     expect(state.alerts['micro-proposal-pending:MP-1']).toBeDefined();
     expect(state.alerts['proposal-pending:PROP-009']).toBeDefined();
     expect(stdout.notifications).toEqual([]);
-    expect(monitoring.some((l: string) => l.includes('MP-1'))).toBe(true);
-    expect(monitoring.some((l: string) => l.includes('PROP-009'))).toBe(true);
+    expect(monitoring).toEqual([]);
   }));
 
   test('update-alert-state (#594 regression: model omitting/garbling a pending micro-proposal key never resolves it)', withDir(async (dir) => {
@@ -1511,7 +1509,7 @@ describe('update-alert-state', () => {
     const first = await updateAlertState(dir, firingPayload([]));
     expect(first.stdout.notifications).toHaveLength(1);
     expect(first.stdout.notifications[0]).not.toMatch(/micro-proposals\.json|MP-/); // channel voice: no paths, no ids
-    expect(first.monitoring.join('\n')).toContain('micro-proposals.json'); // technical detail is file-only
+    expect(first.monitoring).toEqual([]); // Frozen session files are not updated.
     expect(first.state.structured_read_failure_notified_date).toBe('2026-07-10'); // NOW, tz UTC
 
     const second = await updateAlertState(dir, firingPayload([]));
@@ -2792,10 +2790,10 @@ console.log('EVALUATE');
   });
 
   // 20d. AUTO_CLOSE → HEARTBEAT_EVALUATE
-  test('heartbeat-monitor (AUTO_CLOSE → HEARTBEAT_EVALUATE)', async () => {
+  test('heartbeat-monitor (retired AUTO_CLOSE is an unknown verdict)', async () => {
     const r = await monitorOnce('process.stdout.write("AUTO_CLOSE\\n");\n');
     r.cleanup();
-    expect(r.stdout).toBe('HEARTBEAT_EVALUATE');
+    expect(r.stdout).toBe('HEARTBEAT_ERROR: unknown verdict: AUTO_CLOSE');
   });
 
   // 20e. OK → silent (no output)
@@ -3014,6 +3012,14 @@ if(m%2===1) process.exit(1);
 const runReflectPrecheck = (dir: string, opts: { cwd?: string; env?: Record<string, string> } = {}) =>
   runPinnedScript('reflect-precheck.ts', hermit(dir), [hermit(dir), PLUGIN_ROOT], opts);
 
+async function seedComputeActivity(dir: string) {
+  const opened = await runScript('task.ts', { args: ['open', hermit(dir), '--title', 'Compute activity', '--requester', 'operator', '--done', 'Verified'], cwd: dir });
+  expect(opened.exitCode).toBe(0);
+  const id = JSON.parse(opened.stdout).id;
+  const result = await runScript('task.ts', { args: ['block', hermit(dir), id, '--result-stdin'], stdin: 'Completed work', cwd: dir });
+  expect(result.exitCode).toBe(0);
+}
+
 function seedReflect(dir: string, stateJson: object) {
   write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
   write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
@@ -3040,8 +3046,8 @@ describe('reflect-precheck', () => {
     expect(r.stdout.trimEnd()).toBe('EMPTY');
   }));
 
-  // 22. EMPTY path: progress log line appended to SHELL.md
-  test('reflect-precheck (EMPTY: progress log line written to SHELL.md)', withDir(async (dir) => {
+  // 22. EMPTY path leaves frozen SHELL.md unchanged.
+  test('reflect-precheck (EMPTY: frozen SHELL.md is unchanged)', withDir(async (dir) => {
     const today = isoSec(new Date());
     seedReflect(dir, {
       last_reflection: today,
@@ -3049,7 +3055,7 @@ describe('reflect-precheck', () => {
     });
     await runReflectPrecheck(dir);
     const shell = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
-    expect(shell).toContain('reflect');
+    expect(shell).not.toContain('reflect');
   }));
 
   // 23. EMPTY path: empty_runs incremented in reflection-state.json
@@ -3095,9 +3101,7 @@ describe('reflect-precheck', () => {
     seedReflect(dir, {
       counters: { total_runs: 2, empty_runs: 1, last_run_at: '2026-01-01T00:00:00Z', since: since30() },
     });
-    // Create a session report (mtime = now, which is after last_run_at)
-    write(hermit(dir, 'sessions', 'S-001-REPORT.md'),
-      '---\ntitle: Test\ncreated: 2026-04-29\n---\nBody\n');
+    await seedComputeActivity(dir);
     const r = await runReflectPrecheck(dir);
     expect(r.stdout).toContain('compute');
   }));
@@ -3163,7 +3167,7 @@ describe('reflect-precheck', () => {
   }));
 
   // 28. ARCHIVE + other phases due → RUN with archive_due in phases JSON
-  //     (in_progress session forces compute=true; large SHELL forces archive_due)
+  //     (a task result forces compute=true; large SHELL forces archive_due)
   describe('ARCHIVE + other phases', () => {
     let wd: Workdir;
     let out = '';
@@ -3171,6 +3175,7 @@ describe('reflect-precheck', () => {
     beforeAll(async () => {
       wd = setupWorkdir();
       seedArchivePrecheck(wd.dir, 'in_progress', true);
+      await seedComputeActivity(wd.dir);
       const r = await runReflectPrecheck(wd.dir);
       out = r.stdout;
     });
@@ -3199,6 +3204,7 @@ describe('reflect-precheck', () => {
     beforeAll(async () => {
       wd = setupWorkdir();
       seedArchivePrecheck(wd.dir, 'in_progress', true);
+      await seedComputeActivity(wd.dir);
       fs.mkdirSync(hermit(wd.dir, 'sessions', 'snapshots'), { recursive: true });
       // Pre-create the file linkSync would target (HERMIT_NOW pinned) → EEXIST.
       write(hermit(wd.dir, 'sessions', 'snapshots', 'SHELL-20260506-2200.md'), '');

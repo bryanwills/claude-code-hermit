@@ -16,7 +16,7 @@
  *     --reinit=true, created on fresh. = templates/* and bin/* .
  *   - PRESERVE (operator-editable or accumulated state): created only if absent,
  *     in BOTH modes. = OPERATOR.md, HEARTBEAT.md, knowledge-schema.md,
- *     sessions/SHELL.md, and every state/* file (reflection-state, alert-state, micro-proposals, *.jsonl).
+ *     every state/* file (reflection-state, alert-state, micro-proposals, *.jsonl).
  *   - NEVER created: state/pending-close.json (lazily created by daily-auto-close).
  * On a FRESH hatch every class is created, so behaviour is identical to today;
  * the classes only diverge on --reinit.
@@ -80,12 +80,12 @@ function copy(src: string, dest: string): void {
 }
 
 // --- directory tree (mkdir -p is idempotent; not counted) ---
-for (const d of ['sessions', 'proposals', 'templates', 'state', 'raw/.archive', 'compiled', 'bin']) {
+for (const d of ['proposals', 'templates', 'state', 'raw/.archive', 'compiled', 'bin']) {
   fs.mkdirSync(path.join(hermit, d), { recursive: true });
 }
 
 // --- REFRESH: hermit-owned pristine templates ---
-for (const name of ['SHELL.md.template', 'SESSION-REPORT.md.template', 'PROPOSAL.md.template']) {
+for (const name of ['PROPOSAL.md.template']) {
   const dest = path.join(hermit, 'templates', name);
   refresh(dest, () => copy(path.join(TEMPLATES, name), dest));
 }
@@ -115,12 +115,6 @@ fs.mkdirSync(path.join(hermit, 'tasks'), { recursive: true });
 seedIfAbsent(path.join(hermit, 'knowledge-schema.md'), () =>
   copy(path.join(TEMPLATES, 'knowledge-schema.md.template'), path.join(hermit, 'knowledge-schema.md')),
 );
-// A template SHELL.md is what every session close leaves behind; seeding it puts
-// the first boot on the same idle fast path instead of `open`ing a task-less arc.
-seedIfAbsent(path.join(hermit, 'sessions', 'SHELL.md'), () =>
-  copy(path.join(TEMPLATES, 'SHELL.md.template'), path.join(hermit, 'sessions', 'SHELL.md')),
-);
-
 // --- PRESERVE: state files (accumulated runtime/learning/proposal data) ---
 seedIfAbsent(path.join(hermit, 'state', 'alert-state.json'), () =>
   copy(path.join(TEMPLATES, 'alert-state.json.template'), path.join(hermit, 'state', 'alert-state.json')),

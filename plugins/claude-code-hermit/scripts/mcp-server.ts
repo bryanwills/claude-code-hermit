@@ -17,7 +17,8 @@ import { isPaused } from './lib/pause';
 import { postToSession } from './lib/peer-post';
 import { readRuntimeState, type RuntimeRead } from './lib/runtime';
 import { findResident } from './lib/session-registry';
-import { readFileWithFrontmatter } from './lib/frontmatter';
+import { readTaskReports } from './lib/task-report';
+import { readExecution } from './lib/tasks';
 
 type Json = any;
 
@@ -55,7 +56,7 @@ const TOOLS = [
   },
   {
     name: 'get_status',
-    description: 'Runtime digest, .status.json facts, pause, liveness, and resident session for one hermit.',
+    description: 'Runtime digest, task records, pause, liveness, and resident process for one hermit.',
     inputSchema: ROOT_PROP,
   },
   {
@@ -65,7 +66,7 @@ const TOOLS = [
   },
   {
     name: 'get_brief',
-    description: 'Current .status.json facts plus last-brief.json, or the latest S-NNN-REPORT.md if no brief is stored.',
+    description: 'Task records plus last-brief.json, or the latest task record if no brief is stored.',
     inputSchema: ROOT_PROP,
   },
   {
@@ -177,9 +178,10 @@ function residentOf(runtime: Json): Json | null {
 }
 
 function loadStatus(hermit: string): Json {
-  const raw = readJson(path.join(hermit, 'sessions', '.status.json'));
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  return raw;
+  // Bounded like task-report.ts: records are never pruned, and this lands in the caller's context.
+  const tasks = readTaskReports(hermit)
+    .sort((a, b) => (b.closed_at ?? b.opened_at).localeCompare(a.closed_at ?? a.opened_at));
+  return { execution: readExecution(hermit), tasks: tasks.slice(0, 20), tasks_omitted: Math.max(0, tasks.length - 20) };
 }
 
 function runtimeDigest(runtime: RuntimeRead): Json {
@@ -189,7 +191,6 @@ function runtimeDigest(runtime: RuntimeRead): Json {
   return {
     kind: 'ok',
     runtime_mode: typeof d.runtime_mode === 'string' && d.runtime_mode ? d.runtime_mode : 'unknown',
-    session_state: d.session_state ?? null,
     shutdown_completed_at: typeof d.shutdown_completed_at === 'string' && d.shutdown_completed_at
       ? d.shutdown_completed_at
       : null,
@@ -202,27 +203,6 @@ function utf8Truncate(s: string, maxBytes: number): { text: string; truncated: b
   let end = maxBytes;
   while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
   return { text: buf.subarray(0, end).toString('utf8'), truncated: true };
-}
-
-function latestReportPath(sessionsDir: string): string | null {
-  let bestN = -1;
-  let bestName: string | null = null;
-  let names: string[];
-  try {
-    names = fs.readdirSync(sessionsDir);
-  } catch {
-    return null;
-  }
-  for (const name of names) {
-    const m = /^S-(\d+)-REPORT\.md$/.exec(name);
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (n > bestN) {
-      bestN = n;
-      bestName = name;
-    }
-  }
-  return bestName ? path.join(sessionsDir, bestName) : null;
 }
 
 function listHermits(inventory: string[]): Json {
@@ -334,18 +314,11 @@ function loadLastBrief(hermit: string): { kind: string | null; text: string; gen
 }
 
 function loadLatestReport(hermit: string): Json {
-  const file = latestReportPath(path.join(hermit, 'sessions'));
-  if (!file) return null;
-  const parsed = readFileWithFrontmatter(file);
-  if (!parsed) return null;
-  const cap = utf8Truncate(parsed.body, BRIEF_CAP_BYTES);
-  const fmId = parsed.fm && typeof parsed.fm.id === 'string' ? parsed.fm.id : null;
-  return {
-    id: fmId ?? path.basename(file).replace(/-REPORT\.md$/, ''),
-    frontmatter: parsed.fm,
-    summary: cap.text,
-    truncated: cap.truncated,
-  };
+  const reports = readTaskReports(hermit).sort((a, b) => b.opened_at.localeCompare(a.opened_at));
+  const report = reports[0];
+  if (!report) return null;
+  const cap = utf8Truncate([report.title, ...report.lessons].join('\n'), BRIEF_CAP_BYTES);
+  return { ...report, summary: cap.text, truncated: cap.truncated };
 }
 
 function getVersion(root: string): Json {

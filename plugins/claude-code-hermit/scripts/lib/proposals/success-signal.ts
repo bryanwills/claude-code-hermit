@@ -17,7 +17,7 @@
 //   OP in {<, <=, >, >=}; NUMBER positive float; N positive integer.
 
 import path from 'node:path';
-import { readFrontmatter, globDir } from '../frontmatter';
+import { readTaskReports } from '../task-report';
 
 type Json = any;
 
@@ -106,32 +106,9 @@ function runEvaluate(stateDir: string, acceptedDateStr: string, acceptedInSessio
     return;
   }
 
-  const sessionsDir = path.join(stateDir, 'sessions');
-  const reportFiles = globDir(sessionsDir, /^S-\d+-REPORT\.md$/);
-
-  const candidates: { id: string; date: Date; cost_usd: number }[] = [];
-  for (const file of reportFiles) {
-    try {
-      const fm = readFrontmatter(file);
-      if (!fm) continue;
-      const id = fm.id || path.basename(file).replace(/-REPORT\.md$/, '');
-      if (acceptedInSession && acceptedInSession !== 'null' && id === acceptedInSession) continue;
-      if (!fm.date) continue;
-      const reportDate = new Date(fm.date);
-      if (isNaN(reportDate.getTime())) continue;
-      if (reportDate < acceptedDate) continue;
-      // cost_usd is populated only when the cost-tracker hook is active; the
-      // template default is 0.00. Treat <= 0 as unrecorded (not a real $0
-      // session) and skip it, so an install without cost tracking can't
-      // spuriously satisfy a cost-reduction predicate. The window simply takes
-      // longer to fill (INSUFFICIENT_DATA holds) until N recorded sessions exist.
-      const cost = parseFloat(fm.cost_usd || 0);
-      if (!(cost > 0)) continue;
-      candidates.push({ id, date: reportDate, cost_usd: cost });
-    } catch {
-      // readFrontmatter is fail-open, but downstream date/float parsing can still throw.
-    }
-  }
+  const candidates = readTaskReports(stateDir).filter(record => record.closed_at && record.cost > 0)
+    .map(record => ({ id: path.basename(record.source_path, '.md'), date: new Date(record.closed_at!), cost_usd: record.cost }))
+    .filter(record => record.id !== acceptedInSession && record.date >= acceptedDate);
 
   candidates.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 

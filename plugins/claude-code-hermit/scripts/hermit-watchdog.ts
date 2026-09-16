@@ -33,7 +33,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
-import { readExecution } from './lib/tasks';
+import { readExecution, passesExecutionBoundary } from './lib/tasks';
+import { sha256 } from './lib/hash';
 import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary, parseDuration as parseDurationMs, resolveHermitNowMs } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
@@ -309,7 +310,7 @@ export type CompactFlavor = 'boundary' | 'mid-arc';
  *
  * Both conditions are required, because neither alone bounds the claim the boundary
  * message makes ("the previous work arc is complete and archived"):
- *   - `session_state === 'idle'` is unbounded in time. Only `/session-start` writes
+ *   - `session_state === 'idle'` is unbounded in time. Only `/resident-start` writes
  *     `in_progress` (session-archive.ts verbOpen) — routines, heartbeats, and channel
  *     replies never flip it — so an always-on hermit sits at 'idle' for hours while
  *     still doing real, unarchived work.
@@ -875,7 +876,7 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
   }
 
   try {
-    // Mark runtime before killing so session-start recovery sees the reason
+    // Mark runtime before killing so resident-start recovery sees the reason
     runtime.last_error = 'unclean_shutdown';
     runtime.watchdog_restart_reason = reason;
     writeRuntimeJson(runtime);
@@ -1302,7 +1303,7 @@ export const WEDGE_FLOOR_DEFAULT = '4h';
  * grace. Trust mirrors doctor: a tick predating started_at belongs to a prior session's
  * monitor and is not proof the current one is alive. A monitor never registered
  * (runtimeData null, so started_at unknown) returns false — re-registering that is
- * session-start's job, not the watchdog's.
+ * resident-start's job, not the watchdog's.
  */
 function monitorLivenessStale(
   livenessFile: string,
@@ -1365,7 +1366,7 @@ function routineMonitorStale(config: Json): boolean {
   const anyEnabled = routines.some((r: Json) => r && r.enabled === true && r.id !== 'heartbeat-restart');
   if (!anyEnabled) return false;
   const monRt = readJson(path.join(STATE_DIR, 'routine-monitor.runtime.json'));
-  if (!monRt) return false; // not loaded — session-start's job, not the watchdog's
+  if (!monRt) return false; // not loaded — resident-start's job, not the watchdog's
   // Boot gate ahead of the fallback bail: croncreate-fallback writes no liveness file,
   // so the boot id is the only evidence its durable:false crons died with that process.
   if (monitorBootStale(monRt)) return true;
@@ -1401,12 +1402,12 @@ async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive
       || typeof live?.pid !== 'number' || pidAlive(live.pid)) continue;
     const runtime = readRuntimeJson();
     const guard = passesLifecycleGuards(runtime ?? {});
-    const execution = readExecution(HERMIT_ROOT);
-    if (guard.ok && execution.state === 'idle') {
+    const boundary = passesExecutionBoundary(HERMIT_ROOT);
+    if (guard.ok && boundary.ok) {
       await doRestart(sessionName, 'monitor-dead', runtime, config.timezone ?? 'UTC', config);
       appendEvent('monitor-restart', `${record} supervisor dead`);
     } else {
-      appendEvent('monitor-dead-deferred', guard.ok ? execution.state : guard.reason);
+      appendEvent('monitor-dead-deferred', guard.ok ? (boundary.ok ? 'idle' : boundary.reason) : guard.reason);
     }
     return;
   }
@@ -1429,6 +1430,8 @@ async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive
   const doRoutines = routineStale && rearmDamperOpen(lastRearm.routines);
   if (!doHeartbeat && !doRoutines) return; // stale but still inside the per-monitor damper window
 
+  if (!passesExecutionBoundary(HERMIT_ROOT).ok) return;
+
   // `load` arms both monitors, so a both-stale pass is one injection: sending
   // `heartbeat start` behind it would load a second skill body only to be told the
   // leg it re-registers is already FRESH. A heartbeat-only staleness still takes the
@@ -1445,6 +1448,69 @@ async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive
   const targets = [doHeartbeat ? 'heartbeat' : null, doRoutines ? 'routine-monitor' : null].filter(Boolean).join('+');
   appendEvent('monitor-rearm', `${targets} liveness stale`);
   process.stderr.write(`[watchdog] monitor re-arm "${sessionName}" (${targets})\n`);
+}
+
+export function contextPolicyHash(dir: string): string {
+  const read = (file: string) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
+  const configText = read(path.join(dir, 'config.json'));
+  // A malformed config settles to defaults elsewhere in the watchdog; hash its raw text
+  // rather than throwing out of main() ahead of the dead-session tiers.
+  let config: Json;
+  try { config = configText ? JSON.parse(configText) : {}; } catch { config = null; }
+  if (!config || typeof config !== 'object') config = { raw: configText };
+  delete config._hermit_versions;
+  for (const channel of Object.values(config.channels ?? {})) {
+    if (channel && typeof channel === 'object') {
+      delete (channel as Json).dm_channel_id;
+      delete (channel as Json).default_chat_id;
+    }
+  }
+  return sha256(JSON.stringify([
+    read(path.join(dir, 'OPERATOR.md')), read(path.join(dir, 'TASKS.md')),
+    read(path.join(path.dirname(dir), 'CLAUDE.local.md')),
+    read(path.join(path.dirname(dir), '.claude/settings.json')), config,
+  ]));
+}
+
+export function maybeStandaloneClear(config: Json, world: World = REAL_WORLD): string | null {
+  const clear = config.context_hygiene?.clear ?? {};
+  if (clear.enabled === false) return null;
+  const runtime = readRuntimeJson(world.paths.stateDir);
+  if (!runtime) return null;
+  const guard = passesLifecycleGuards(runtime, world);
+  if (!guard.ok) return `lifecycle:${guard.reason}`;
+  const boundary = passesExecutionBoundary(world.paths.hermitRoot, { minTokens: clear.min_tokens ?? 20000 });
+  if (!boundary.ok) return boundary.reason;
+  const file = path.join(world.paths.stateDir, 'context-clear.json');
+  const previous = world.files.readJson(file);
+  const policyHash = contextPolicyHash(world.paths.hermitRoot);
+  const now = world.clock.nowMs();
+  const quietAge = getOperatorLastActionAgeSecs(world);
+  const reason = previous?.policy_hash && previous.policy_hash !== policyHash ? 'policy'
+    : runtime.last_context_reset_at && now - Date.parse(runtime.last_context_reset_at) >= parseDurationMs(clear.max_age ?? '24h', 86400000) ? 'max-age'
+    : quietAge !== null && quietAge * 1000 >= parseDurationMs(clear.quiet ?? '1h', 3600000) ? 'quiet' : null;
+  if (reason && previous?.last_trigger?.reason === reason
+    && typeof previous.last_trigger.reset_at === 'string'
+    && previous.last_trigger.reset_at === runtime.last_context_reset_at) return 'already-triggered';
+  const state = readWatchdogState(world);
+  const hash = getPaneHash(guard.sessionName, world);
+  const stable = hash !== null && state.last_pane_hash_standalone === hash;
+  state.last_pane_hash_standalone = hash;
+  writeWatchdogState(state, world);
+  if (!reason) return null;
+  if (!stable) return 'quiescence-pending';
+  if (!tryAcquireLifecycleLock(world)) return 'lock-held';
+  try {
+    applyContextReset(world.paths.hermitRoot, runtime, {
+      kind: 'cleared', trigger: `clear:${reason}`,
+      hhmm: nowHHMM(config.timezone ?? 'UTC', new Date(now)),
+    });
+    world.tmux.send(guard.sessionName, '/clear');
+  } finally { releaseLock(lifecycleLockPath(world)); }
+  const postReset = readRuntimeJson(world.paths.stateDir);
+  world.files.writeJson(file, { policy_hash: policyHash, last_trigger: { reason, reset_at: postReset?.last_context_reset_at ?? null } });
+  appendEvent('context-clear', `clear:${reason}`, world);
+  return `clear:${reason}`;
 }
 
 // --- Post-close context reset ---
@@ -1993,7 +2059,7 @@ function maybeEscapePausedSession(timezone: string): void {
   if (runtime.runtime_mode === 'interactive') return; // never auto-manage an attended session
   if (runtime.transition) return; // archiving/cleaning recovery mid-flight
   if (runtime.shutdown_requested_at || runtime.shutdown_completed_at) return;
-  if (runtime.session_state !== 'in_progress') return; // nothing plausibly in flight
+  if (readExecution(HERMIT_ROOT).state === 'idle') return; // nothing in flight
 
   const sessionName: string = runtime.tmux_session ?? '';
   if (!sessionName || !tmuxSessionAlive(sessionName)) return;
@@ -2037,7 +2103,7 @@ async function main(): Promise<void> {
   maybeEscapePausedSession(timezone);
 
   // 0a. Post-close clear — independent of watchdog.enabled; runs on any hermit with a scheduler
-  maybePostCloseClear(config);
+  maybeStandaloneClear(config);
   maybeAutoIdle(config);
 
   // 0b. Context-size clear — independent of watchdog.enabled; runs on any always-on hermit.
@@ -2104,7 +2170,7 @@ async function main(): Promise<void> {
   // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit.
   //
   // `session_state: 'idle'` used to exit here outright. It cannot: 'in_progress' is written
-  // only by the model-driven /session-start open path (session-archive.ts), and session-close
+  // only by the model-driven /resident-start open path (session-archive.ts), and session-close
   // returns it to 'idle', so a healthy hermit rests at 'idle' between arcs. Exiting on it
   // disabled the alert tiers (3b/3c) on every hermit, permanently — and self-sealingly, since
   // leaving 'idle' requires the model to take a turn, which is exactly what a blocking dialog
@@ -2120,8 +2186,6 @@ async function main(): Promise<void> {
   const sessionName = runtime.tmux_session ?? '';
   if (!sessionName) process.exit(0);
 
-  const sessionState = runtime.session_state ?? '';
-
   // 3. Dead-session detection
   // Deliberately NOT gated on isPaused() (PROP-015): the channel MCP plugin
   // lives inside the session, so a dead+paused session can't hear "resume" —
@@ -2132,31 +2196,28 @@ async function main(): Promise<void> {
   // about the same session moments later, and nothing in between mutates tmux state
   // (evaluateReauth only spawns a detached relay, capturePane is a read-only subcommand).
   // Recomputing it there would spawn tmux twice per tick on the common alive path.
-  let sessionAlive: boolean | null = null;
-  if (['in_progress', 'waiting', 'suspect_process'].includes(sessionState)) {
-    sessionAlive = tmuxSessionAlive(sessionName);
-    if (!sessionAlive) {
-      // A gone tmux session with FRESH shared-state activity is the orphan shape
-      // (process survived, tmux didn't) — restarting would spawn a second claude
-      // beside the live one. Abort and alert instead; only restart when the
-      // signal is stale, i.e. the old process really is dead.
-      const age = sharedLivenessAgeSecs();
-      const ws = readWatchdogState();
-      const looksAlive = age !== null && age < LIVENESS_FRESH_SECS;
-      if (looksAlive && !ws.orphan_notified) {
-        pushOperatorMessage(composeOrphanMessage(timezone));
-        appendEvent('restart-aborted', 'liveness-fresh-no-tmux');
-        ws.orphan_notified = true;
-        writeWatchdogState(ws);
-      }
-      if (looksAlive) process.exit(0);
-      if (ws.orphan_notified) {
-        ws.orphan_notified = false;
-        writeWatchdogState(ws);
-      }
-      await doRestart(sessionName, 'dead-process', runtime, timezone, config);
-      process.exit(0);
+  let sessionAlive = tmuxSessionAlive(sessionName);
+  if (!sessionAlive) {
+    // A gone tmux session with FRESH shared-state activity is the orphan shape
+    // (process survived, tmux didn't) — restarting would spawn a second claude
+    // beside the live one. Abort and alert instead; only restart when the
+    // signal is stale, i.e. the old process really is dead.
+    const age = sharedLivenessAgeSecs();
+    const ws = readWatchdogState();
+    const looksAlive = age !== null && age < LIVENESS_FRESH_SECS;
+    if (looksAlive && !ws.orphan_notified) {
+      pushOperatorMessage(composeOrphanMessage(timezone));
+      appendEvent('restart-aborted', 'liveness-fresh-no-tmux');
+      ws.orphan_notified = true;
+      writeWatchdogState(ws);
     }
+    if (looksAlive) process.exit(0);
+    if (ws.orphan_notified) {
+      ws.orphan_notified = false;
+      writeWatchdogState(ws);
+    }
+    await doRestart(sessionName, 'dead-process', runtime, timezone, config);
+    process.exit(0);
   }
 
   // The pane is read once here and shared by 3a, 3a-bis and 3b. It has to come before
@@ -2318,11 +2379,7 @@ async function main(): Promise<void> {
   // only because the idle gate above exited first; now that it doesn't, the aliveness
   // condition this tier always documented has to actually be tested. 3b needs no equivalent —
   // capturePane returns null on a dead session and the `paneContent !== null` check catches it.
-  // Reuses step 3's verdict when it ran; falls back to a fresh check when it didn't —
-  // 'idle' (the path this fix enables) and any other unlisted session_state. The fallback
-  // is cached back, not discarded: on an idle arc step 3 never ran, so this is the tick's
-  // only has-session call and step 5 below reuses it rather than spawning tmux again.
-  sessionAlive = sessionAlive ?? tmuxSessionAlive(sessionName);
+  // Reuses step 3's has-session verdict.
   if (sessionAlive) {
     // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
     // `session_id` is the logical S-NNN arc id and resolves to a path that never exists.

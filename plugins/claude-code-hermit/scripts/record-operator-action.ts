@@ -99,6 +99,7 @@ export function openTurnMarker() {
 // tests/auto-close.test.ts syncs this list against the actual sendKeys call
 // sites — extend it when adding a new injection.
 const INJECTED_EXACT = new Set([
+  '/claude-code-hermit:resident-start',
   '/claude-code-hermit:heartbeat run',
   '/claude-code-hermit:heartbeat start',
   '/claude-code-hermit:heartbeat stop',

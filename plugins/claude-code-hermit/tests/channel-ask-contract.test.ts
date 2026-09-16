@@ -50,14 +50,7 @@ const TERMINAL_ONLY: Record<string, string> = {
   'docker-security': 'one-time container hardening wizard, terminal by nature',
   'hermit-evolve': 'plugin upgrade wizard, run interactively by the maintainer',
   'channel-responder': 'owns the reply protocol itself (see its own §0 / §6)',
-  // Pre-existing gap, out of scope for PROP-017 (which scoped de-strand work
-  // to proposal-act + hermit-settings only). Both already have a distinct
-  // non-interactive bypass (session-start's `--task` flag) that a future
-  // proposal should wire channel-responder through, rather than retrofitting
-  // the options[]/on_resolve bridge onto open-ended "what should I work on"
-  // prompts.
-  session: 'pre-existing gap — tracked as a follow-up, not PROP-017 scope',
-  'session-start': 'pre-existing gap — has its own --task bypass, not PROP-017 scope',
+
 };
 
 function listSkillNames(): string[] {

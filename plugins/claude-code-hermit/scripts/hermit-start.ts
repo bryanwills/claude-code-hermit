@@ -153,7 +153,6 @@ const DEFAULT_CONFIG: Json = {
     { id: 'heartbeat-restart', schedule: '0 4 * * *', skill: 'claude-code-hermit:hermit-routines load', run_during_waiting: true, enabled: true },
     { id: 'reflect', schedule: '0 9 * * *', skill: 'claude-code-hermit:reflect', enabled: true },
     { id: 'weekly-review', schedule: '0 23 * * 0', skill: 'claude-code-hermit:weekly-review', enabled: true },
-    { id: 'daily-auto-close', schedule: '0 0 * * *', skill: 'claude-code-hermit:session-close --scheduled', model: 'haiku', run_during_waiting: true, enabled: true, precheck: 'auto-close' },
     { id: 'doctor', schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor --maintainer', model: 'haiku', run_during_waiting: true, enabled: true, precheck: 'doctor', precheck_timeout_s: 120 },
   ],
   monitors: [],
@@ -182,6 +181,7 @@ const DEFAULT_CONFIG: Json = {
   tasks: {
     handle_in_dm: false,
     duties_open_records: true,
+    queue_nudge_minutes: 60,
   },
   heartbeat: {
     enabled: true,
@@ -252,6 +252,7 @@ const DEFAULT_CONFIG: Json = {
     backend: 'claude',
   },
   context_hygiene: {
+    clear: { enabled: true, quiet: '1h', max_age: '24h', min_tokens: 20000 },
     compact: {
       enabled: true,
       min_context_tokens: 100000,
@@ -270,7 +271,6 @@ const DEFAULT_CONFIG: Json = {
   storage_drift: {
     ignore: [],
   },
-  post_close_clear: true,
 };
 
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
@@ -474,13 +474,13 @@ function checkStaleRuntime(config: Json, sessionName: string): void {
         console.log(
           `[hermit] Warning: Previous session crashed (runtime.json says ${state}, tmux session "${prevTmux}" is gone).`,
         );
-        console.log('[hermit] /session-start will offer recovery.');
+        console.log('[hermit] /resident-start will offer recovery.');
         runtime.last_error = 'unclean_shutdown';
         writeRuntimeJson(runtime);
       }
     } else if (mode === 'interactive' && !pyTruthy(shutdownCompleted)) {
       console.log('[hermit] Warning: Previous interactive session did not close cleanly.');
-      console.log('[hermit] /session-start will offer recovery.');
+      console.log('[hermit] /resident-start will offer recovery.');
       runtime.last_error = 'unclean_shutdown';
       writeRuntimeJson(runtime);
     }
@@ -495,7 +495,7 @@ function checkStaleRuntime(config: Json, sessionName: string): void {
   if (pyTruthy(transition)) {
     const target = 'transition_target' in runtime ? runtime.transition_target : 'unknown';
     console.log(`[hermit] Warning: Interrupted transition detected: ${transition} (target: ${target})`);
-    console.log('[hermit] /session-start will resume or clean up.');
+    console.log('[hermit] /resident-start will resume or clean up.');
   }
 }
 
@@ -1390,7 +1390,7 @@ export function maybeInstallWatchdogScheduler(
  * migration) is refused — 'invalid' as hard as 'missing', since a corrupt record
  * may hold the only copy of state (see RuntimeRead in lib/runtime.ts).
  * Deliberately rebuilds nothing either way: runtime.json is the declared single
- * source of truth (skills/session-start/SKILL.md), so a synthesized record would
+ * source of truth (skills/resident-start/SKILL.md), so a synthesized record would
  * defeat the recovery branches that read it.
  *
  * Parseable is not the same as usable: a stub record (no runtime_mode, or no
@@ -1506,10 +1506,10 @@ async function main(): Promise<void> {
   const hbEnabled = pyTruthy('enabled' in hb ? hb.enabled : false);
   const hasRoutines = pyTruthy(config.routines);
   // Domain hermits (e.g. homeassistant-hermit) declare a boot_skill that
-  // wraps /claude-code-hermit:session-start plus their own domain setup.
+  // wraps /claude-code-hermit:resident-start plus their own domain setup.
   // When set, it replaces the core session skill in the bootstrap — the
-  // domain skill is responsible for calling session-start itself.
-  const bootSkill = config.boot_skill || '/claude-code-hermit:session';
+  // domain skill is responsible for calling resident-start itself.
+  const bootSkill = config.boot_skill || '/claude-code-hermit:resident-start';
 
   const steps: string[] = [];
   // `hermit-routines load` arms both monitors, so the heartbeat skill is a boot
@@ -1582,7 +1582,6 @@ async function main(): Promise<void> {
     if (existing === null) {
       writeRuntimeJson({
         version: 1,
-        session_state: 'idle',
         session_id: null,
         created_at: localISOStamp(),
         runtime_mode: 'interactive',
@@ -1597,7 +1596,7 @@ async function main(): Promise<void> {
         last_shell_snapshot_at: null,
       });
     } else {
-      // Preserve lifecycle fields for session-start recovery.
+      // Preserve lifecycle fields for resident-start recovery.
       existing.version = 1;
       existing.runtime_mode = 'interactive';
       existing.tmux_session = null;
@@ -1690,7 +1689,6 @@ async function main(): Promise<void> {
   if (existing === null) {
     writeRuntimeJson({
       version: 1,
-      session_state: 'idle',
       session_id: null,
       created_at: localISOStamp(),
       runtime_mode: runtimeMode,
@@ -1705,7 +1703,7 @@ async function main(): Promise<void> {
       last_shell_snapshot_at: null,
     });
   } else {
-    // Preserve lifecycle fields for session-start recovery.
+    // Preserve lifecycle fields for resident-start recovery.
     existing.version = 1;
     existing.runtime_mode = runtimeMode;
     existing.tmux_session = sessionName;

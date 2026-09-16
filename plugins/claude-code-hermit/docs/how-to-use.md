@@ -87,24 +87,21 @@ Behavioral "when X, do Y" rules belong in `CLAUDE.md`, not here — see [the FAQ
 
 ---
 
-## Your First Session
+## Your First Task
 
-```
-/claude-code-hermit:session
-```
+Tell the hermit what outcome you need, for example: "Add request validation to the API and verify invalid payloads are rejected." Your `TASKS.md` policy determines when an assignment gets a record.
 
-Tell it what you need, add optional tags (e.g., `feature, api`). Hermit proposes a plan, records its steps in the Progress Log, and waits for your go-ahead. As it works, `SHELL.md` tracks everything — the plan, progress log, blockers, findings. Cost is tracked separately in `.status.json` and injected into context at session start.
+The record in `tasks/T-*.md` keeps the requester, owner, definition of done, progress and lessons together. The hermit updates it through `task.ts`, rather than editing the file by hand. In a guild channel, the assignment can also get its own resident-owned thread.
 
-Check status anytime — just type `!status`:
+Ask "What are you working on?" for a brief or "Show open tasks" for the queue. A result awaiting confirmation remains open. A passing recorded check or named human confirmation closes it as done; cancellation closes it without claiming completion. Closing a task can continue the next runnable record immediately.
 
-```
-Session S-001 | in_progress | feature, api
-Working on: Add input validation to the API endpoints
-Progress: Step 3 - Add request body validation
-Blockers: none
+For boot recovery and readiness, run:
+
+```text
+/claude-code-hermit:resident-start
 ```
 
-When it finishes, it archives the report and says "What's next?" — tell it what's next and keep going. Cumulative cost and session history carry forward. Run `/session-close` when you're actually done.
+This initializes the resident without selecting a task. Always-on launches run it automatically.
 
 ---
 
@@ -172,7 +169,7 @@ See [Always-On Operations](always-on-ops.md) for tmux setup and operational deta
 
 **Disconnected?** — Restart Claude Code. Hermit detects the active session and shows where you left off. Type "continue."
 
-**What's next?** — When it finishes, just tell it what's next. It archives and rolls over automatically.
+**What's next?** — When it finishes, just tell it what's next. It records the outcome and continues the next runnable commitment.
 
 **Found an improvement?** — `/claude-code-hermit:proposal-create` captures it without interrupting the current work.
 
@@ -180,18 +177,17 @@ See [Always-On Operations](always-on-ops.md) for tmux setup and operational deta
 
 ---
 
-## Session State
+## Task and Runtime State
 
 ```
 .claude-code-hermit/
-├── sessions/
-│   ├── SHELL.md               <- live session
-│   ├── S-001-REPORT.md        <- archived reports
-│   └── NEXT-TASK.md           <- from accepted proposals
+├── tasks/
+│   └── T-*.md                 <- commitments, progress, outcomes and lessons
 ├── proposals/
 │   └── PROP-001.md            <- improvement ideas
 ├── state/                     <- runtime observations (agent-owned)
-│   ├── runtime.json           <- session state + config/auth, inbox/PID, and peer-name stamp
+│   ├── runtime.json           <- process identity, config/auth and recovery state
+│   ├── execution.json         <- hook-observed idle/in-flight state
 │   ├── alert-state.json       <- heartbeat alert dedup + self-eval evidence
 │   ├── reflection-state.json  <- last reflection timestamp + scheduled check state
 │   ├── routine-metrics.jsonl <- append-only routine fire log
@@ -204,11 +200,12 @@ See [Always-On Operations](always-on-ops.md) for tmux setup and operational deta
 ├── compiled/                  <- durable domain outputs (briefings, decisions, review-weekly-YYYY-Www.md)
 ├── knowledge-schema.md        <- what this hermit produces and when
 ├── OPERATOR.md                <- your rulebook
+├── TASKS.md                   <- your task-record policy
 ├── HEARTBEAT.md               <- background checklist
 └── config.json                <- settings
 ```
 
-> Files in `state/` are managed by the plugin at runtime — do not edit them manually. Files you own and can edit: `config.json`, `OPERATOR.md`, `HEARTBEAT.md`.
+> Files in `state/` are managed by the plugin at runtime — do not edit them manually. Files you own and can edit: `config.json`, `OPERATOR.md`, `TASKS.md`, `HEARTBEAT.md`. Task files are script-owned; ask the hermit to update them.
 
 ---
 
@@ -282,7 +279,7 @@ Most common actions auto-trigger from natural language — just say what you mea
 
 | Category       | Skills                                                             |
 | -------------- | ------------------------------------------------------------------ |
-| **Session**    | `session`, `session-start`, `session-close`, `task`                        |
+| **Tasks**      | `resident-start`, `task`                        |
 | **Status**     | `brief`                                                            |
 | **Monitoring** | `watch`, `heartbeat`                                               |
 | **Learning**   | `proposal-create`, `proposal-list`, `proposal-act`, `reflect`      |

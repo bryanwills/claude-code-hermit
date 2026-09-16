@@ -1,3 +1,4 @@
+import { readTasks } from '../tasks';
 import { lookup } from '../conversations';
 import { resolveSlashCommand } from '../channel-slash-address';
 import { channelBotIdentity, isAllowedSender, isSelfMentioned } from '../channel-auth';
@@ -26,6 +27,12 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
   );
   const safeArgs = safeForLLM(args.slice(0, MAX_ARGS_LEN));
   if (!record) {
+    const residentTask = !conversationCommand && readTasks(ctx.dir).find(task => task.status === 'open'
+      && task.owner === 'resident' && task.conversation === key);
+    if (residentTask) {
+      ctx.conversation = { key, owner: 'resident' };
+      return { context: `[resident task thread ${safeForLLM(key)}]` };
+    }
     // `!help` is answerable anywhere, so it gets its annotation rather than the
     // "needs a binding" refusal — without one the model has nothing to act on.
     if (conversationCommand) {

@@ -251,13 +251,13 @@ test('bootstrap (no manifest): diff + absent reported, identical skipped, manife
   expect(d.manifest_bootstrap).toBe(true);
 
   const tNames = d.templates_changed.map((f: any) => f.name);
-  expect(tNames).toContain('SHELL.md.template');
+  expect(tNames).not.toContain('SHELL.md.template');
   expect(tNames).toContain('PROPOSAL.md.template');
   expect(tNames).not.toContain('SESSION-REPORT.md.template'); // identical -> excluded
 
   const shell = d.templates_changed.find((f: any) => f.name === 'SHELL.md.template');
-  expect(shell.class).toBe('unmodified'); // bootstrap: no manifest entry -> unmodified
-  expect(shell.boot_critical).toBeUndefined();
+  expect(shell).toBeUndefined();
+  expect(fs.readFileSync(path.join(hermitDir(proj), 'templates', 'SHELL.md.template'), 'utf8')).toBe('DIFFERENT CONTENT\n');
 
   const proposal = d.templates_changed.find((f: any) => f.name === 'PROPOSAL.md.template');
   expect(proposal.class).toBe('missing');
@@ -292,16 +292,16 @@ test('manifest: unmodified (on-disk == baseline, upstream changed) -> overwrite'
   writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');
   fs.mkdirSync(path.join(hermitDir(proj), 'templates'), { recursive: true });
   const onDisk = 'OLD TEMPLATE\n';
-  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'SHELL.md.template'), onDisk);
+  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'PROPOSAL.md.template'), onDisk);
   // SESSION-REPORT identical to upstream -> excluded
   fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'SESSION-REPORT.md.template'), 'REPORT TEMPLATE\n');
   // Manifest records the current on-disk hash as baseline (operator never touched it)
   writeManifest(proj, {
-    'templates/SHELL.md.template': { sha256: sha256(Buffer.from(onDisk)), plugin_version: '1.1.5' },
+    'templates/PROPOSAL.md.template': { sha256: sha256(Buffer.from(onDisk)), plugin_version: '1.1.5' },
   });
   const d = await runPlan(proj, 'local');
   expect(d.manifest_bootstrap).toBeUndefined();
-  const shell = d.templates_changed.find((f: any) => f.name === 'SHELL.md.template');
+  const shell = d.templates_changed.find((f: any) => f.name === 'PROPOSAL.md.template');
   expect(shell).toBeDefined();
   expect(shell.class).toBe('unmodified');
 }));
@@ -310,16 +310,16 @@ test('manifest: customized-kept (on-disk != baseline, upstream == baseline) -> k
   writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');
   fs.mkdirSync(path.join(hermitDir(proj), 'templates'), { recursive: true });
   // Upstream template content (from the fake plugin root)
-  const upstream = 'SHELL TEMPLATE V1\n';
+  const upstream = 'PROPOSAL TEMPLATE\n';
   // Operator edited on-disk
   const onDisk = 'OPERATOR CUSTOMIZED\n';
-  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'SHELL.md.template'), onDisk);
+  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'PROPOSAL.md.template'), onDisk);
   // Manifest baseline == upstream (template hasn't changed since hatch)
   writeManifest(proj, {
-    'templates/SHELL.md.template': { sha256: sha256(Buffer.from(upstream)), plugin_version: '1.1.6' },
+    'templates/PROPOSAL.md.template': { sha256: sha256(Buffer.from(upstream)), plugin_version: '1.1.6' },
   });
   const d = await runPlan(proj, 'local');
-  const shell = d.templates_changed.find((f: any) => f.name === 'SHELL.md.template');
+  const shell = d.templates_changed.find((f: any) => f.name === 'PROPOSAL.md.template');
   expect(shell).toBeDefined();
   expect(shell.class).toBe('customized-kept');
 }));
@@ -329,12 +329,12 @@ test('manifest: conflict (on-disk != baseline, upstream != baseline) -> conflict
   fs.mkdirSync(path.join(hermitDir(proj), 'templates'), { recursive: true });
   const onDisk = 'OPERATOR EDIT\n';
   const originalBaseline = 'OLD TEMPLATE V0\n'; // neither upstream nor on-disk
-  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'SHELL.md.template'), onDisk);
+  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'PROPOSAL.md.template'), onDisk);
   writeManifest(proj, {
-    'templates/SHELL.md.template': { sha256: sha256(Buffer.from(originalBaseline)), plugin_version: '1.1.0' },
+    'templates/PROPOSAL.md.template': { sha256: sha256(Buffer.from(originalBaseline)), plugin_version: '1.1.0' },
   });
   const d = await runPlan(proj, 'local');
-  const shell = d.templates_changed.find((f: any) => f.name === 'SHELL.md.template');
+  const shell = d.templates_changed.find((f: any) => f.name === 'PROPOSAL.md.template');
   expect(shell).toBeDefined();
   expect(shell.class).toBe('conflict');
 }));
@@ -356,12 +356,12 @@ test('manifest: missing (on-disk absent) -> missing regardless of manifest', wit
 test('manifest-entry-absent: file on-disk but no manifest entry -> unmodified', withProj(async (proj) => {
   writeConfig(proj, '{"_hermit_versions":{"claude-code-hermit":"1.1.6"}}');
   fs.mkdirSync(path.join(hermitDir(proj), 'templates'), { recursive: true });
-  // SHELL.md.template differs from upstream but has no manifest entry
-  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'SHELL.md.template'), 'SOME CONTENT\n');
+  // PROPOSAL.md.template differs from upstream but has no manifest entry
+  fs.writeFileSync(path.join(hermitDir(proj), 'templates', 'PROPOSAL.md.template'), 'SOME CONTENT\n');
   writeManifest(proj, {}); // empty manifest (has entries for nothing)
   const d = await runPlan(proj, 'local');
   expect(d.manifest_bootstrap).toBeUndefined(); // manifest exists, just no entry
-  const shell = d.templates_changed.find((f: any) => f.name === 'SHELL.md.template');
+  const shell = d.templates_changed.find((f: any) => f.name === 'PROPOSAL.md.template');
   expect(shell).toBeDefined();
   expect(shell.class).toBe('unmodified'); // no manifest entry -> seed-as-unmodified
 }));

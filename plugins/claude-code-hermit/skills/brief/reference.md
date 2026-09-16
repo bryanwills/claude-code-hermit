@@ -1,83 +1,24 @@
-# Brief — Evaluation Reference
+# Brief evaluation reference
 
-This file is the instruction spec for the isolated-context subagent dispatched by `brief/SKILL.md`.
-The subagent reads only files (no inherited session context) and returns the structured JSON
-below; the calling main session composes and delivers the brief.
+Return structured JSON for the calling skill to compose and deliver. Read fresh bounded digests; never read frozen session archives or NEXT-TASK.md.
 
-## Inputs (read fresh — do not reuse cached values)
+## Inputs
 
-- `.claude-code-hermit/sessions/S-*-REPORT.md` — archived session reports (today's or latest, depending on mode)
-- `.claude-code-hermit/state/proposals-index.json` — the proposal metadata index; for pending-review scan
-- `.claude-code-hermit/OPERATOR.md` — operator priorities (morning only; skip silently if absent)
-- `.claude-code-hermit/NEXT-TASK.md` — queued work (morning only; skip silently if absent)
+The caller supplies `plugin_root` (absolute), `mode` (`morning`, `evening`, `daily`, `default-no-session`), `today` (ISO date), and morning `context_recovery`.
 
-The calling skill passes the following scalars in the dispatch prompt (do not re-read from files):
+Run `bun <plugin_root>/scripts/task-report.ts .claude-code-hermit --limit 20` for normalized records and `bun <plugin_root>/scripts/task.ts list .claude-code-hermit --open --owner resident --json` for open resident work. Run `bun <plugin_root>/scripts/duties.ts summary .claude-code-hermit` for requested and observed duties, returning any discrepancy in `findings`.
 
-- `plugin_root` — resolved absolute path to the plugin (`${CLAUDE_PLUGIN_ROOT}` is not substituted here)
-- `mode` — one of: `morning`, `evening`, `daily`, `default-no-session`
-- `today` — ISO date string (e.g. `2026-06-14`)
-- `context_recovery` — `true` or `false` (morning only: main judged auto-memory sparse)
+## Per-mode instructions
 
-## Per-mode Instructions
+For morning, run `bun <plugin_root>/scripts/proposal.ts index .claude-code-hermit`, then read `state/proposals-index.json`; put proposed auto-detected entries in `pending_proposals`. Read `OPERATOR.md` for `operator_priorities` if present. Populate `queued_work` from runnable open resident records. If `context_recovery` is true, summarize the newest normalized record; otherwise `report_summary` is null.
 
-### morning
+For evening and daily, select records whose `closed_at` date matches `today`, and open records whose `opened_at` date matches `today`. Populate `sessions_today` with task source paths as the compatibility `session` identifier and one-line title/outcome summaries. Populate `findings` from lessons and `tomorrow` from open work and waiting reasons. Do not count `cancelled` or `unconfirmed` as done.
 
-1. Run `bun <plugin_root>/scripts/proposal.ts index .claude-code-hermit` (one bounded output
-   line — it validates the index against disk), then read
-   `.claude-code-hermit/state/proposals-index.json`. Collect entries where `status: proposed`
-   AND `source: auto-detected`. Populate `pending_proposals` as `["PROP-NNN: <title>", ...]`.
-   Empty list if none, or if the index is unreadable.
-2. Read `.claude-code-hermit/OPERATOR.md` if it exists. Extract actionable priority items
-   (bullet points, numbered items, any section labelled "Priorities", "TODO", or "Current Focus").
-   Populate `operator_priorities` as a list of strings. Empty list if absent or no priorities found.
-3. Read `.claude-code-hermit/NEXT-TASK.md` if it exists. Extract the queued items. Populate
-   `queued_work` as a list of strings. Empty list if absent.
-4. If `context_recovery` is `true`: find the most recent `.claude-code-hermit/sessions/S-*-REPORT.md`
-   (highest numbered) and read its YAML frontmatter: `date`, `tags`, `task` (Working-on/Goal), `status`,
-   and `next_start` (Next Start Point). Populate `report_summary` from those fields. A report whose
-   frontmatter lacks the `next_start` key is legacy — read it in full instead and extract the same
-   fields from `## Summary`/`## Overview`. Set `report_summary: null` if
-   `context_recovery` is `false`.
-5. Set `sessions_today: []`, `findings: []`, `tomorrow: []`.
+For default-no-session, summarize the most recent normalized record. Map `done` to `completed`, waiting work to `blocked`, and other outcomes to `partial`, naming the actual outcome in the summary. Use `opened_at` for date, empty tags, title for working_on, and waiting reason or open work for next_start_point. No records means null summary, never an archive fallback.
 
-### evening
+## Return value
 
-1. Sort `.claude-code-hermit/sessions/S-*-REPORT.md` by filename descending. Collect reports
-   where the `date:` YAML frontmatter field matches `today` (or, for legacy reports with no
-   `date:` frontmatter, where `## Summary` contains that date). Read each collected report's YAML frontmatter; a
-   report whose frontmatter lacks the `next_start` key is legacy — read its body in full instead.
-2. For each collected report: produce one entry in `sessions_today` with `session: S-NNN` and
-   a one-line `summary` (the `task` field; for a legacy report, the Working-on/Goal line or first
-   sentence of `## Summary`).
-3. Aggregate `findings`: for a legacy report, collect bullet points from its `## Findings` section
-   (or `## Key Findings`). For a non-legacy report, Grep the file for `^## (Key )?Findings`
-   with a bounded `-A` to extract just that section rather than reading the full body. Deduplicate
-   across reports. Populate as a list of strings.
-4. Aggregate `tomorrow`: collect the `next_start` field from each collected report; for a legacy
-   report, collect items from its `## Next Steps`, `## Tomorrow`, or equivalent future-looking
-   section instead. Populate as a list of strings.
-5. Set `report_summary: null`, `pending_proposals: []`, `operator_priorities: []`, `queued_work: []`.
-
-### daily
-
-1. Same report collection as evening (steps 1–4): collect reports with `date:` matching `today`,
-   frontmatter first (legacy reports in full), populate `sessions_today`, `findings`, `tomorrow`.
-2. Set `report_summary: null`, `pending_proposals: []`, `operator_priorities: []`, `queued_work: []`.
-
-### default-no-session
-
-1. Find the most recent `.claude-code-hermit/sessions/S-*-REPORT.md` (highest numbered). Read its
-   YAML frontmatter: `date`, `tags`, `task` (Working-on/Goal), `status`, `next_start` (Next Start
-   Point). Populate `report_summary` from those fields.
-2. A report whose frontmatter lacks the `next_start` key is legacy — read it in full instead and
-   extract the same fields from `## Summary`/`## Overview`.
-3. Set `sessions_today: []`, `findings: []`, `tomorrow: []`,
-   `pending_proposals: []`, `operator_priorities: []`, `queued_work: []`.
-
-## Return Value
-
-Return a single JSON object — no prose, no markdown wrapping. Every field is required; use
-`null`/`[]` for fields not relevant to the active mode.
+Keep the existing compatibility keys below; `sessions_today` contains task records. Every field is required; unused fields are null or empty arrays.
 
 <!-- brief-eval-schema:start -->
 ```json

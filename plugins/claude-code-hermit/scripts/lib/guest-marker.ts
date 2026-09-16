@@ -9,7 +9,7 @@
  * marker. Re-deriving it per turn is not an option either — the check spawns tmux,
  * and this sits on the Stop path.
  *
- * Frozen-at-session-start is also the semantics we want: if the resident dies
+ * Frozen-at-SessionStart is also the semantics we want: if the resident dies
  * mid-session the ex-guest keeps not touching the liveness signal, the file goes
  * stale, and the watchdog restarts the resident.
  *

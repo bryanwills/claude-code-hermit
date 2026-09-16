@@ -619,7 +619,7 @@ describe('reflect-precheck: cost-spike observation', () => {
       by_date[day(priorDayCosts.length + 1 - i)] = { cost, tokens: 0, session_ids: [] };
     });
     fs.writeFileSync(path.join(hermitDir, 'state', 'cost-index.json'), JSON.stringify({
-      version: 3, byte_offset: 0, total_cost_usd: 0, total_tokens: 0, total_sessions: 0,
+      version: 4, by_task: {}, byte_offset: 0, total_cost_usd: 0, total_tokens: 0, total_sessions: 0,
       last_session_id: null, by_source: {}, by_date, by_week: {}, by_month: {},
       skipped_corrupt_lines: 0, updated_at: new Date().toISOString(),
     }), 'utf-8');

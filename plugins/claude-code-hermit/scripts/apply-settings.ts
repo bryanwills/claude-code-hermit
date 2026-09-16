@@ -114,7 +114,7 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/apply-settings.ts*)',
   'Bash(bun */scripts/channel-log.ts*)',
   'Bash(bun */scripts/channel-send.ts*)',
-  // The binding store's only writer. channel-responder, watch and session-start all
+  // The binding store's only writer. channel-responder, watch and SessionStart all
   // reach for it on an ordinary inbound message, with no operator present to answer
   // a prompt; the script validates its own key and verbs and pins its state dir
   // because thread-create reads the bot token.
@@ -122,7 +122,6 @@ const HERMIT_ALLOW = [
   'Bash(bun */scripts/task.ts*)',
   'Bash(bun */scripts/duties.ts*)',
   'Bash(bun */scripts/channel-access.ts*)',
-  'Bash(bun */scripts/session-archive.ts*)',
   'Bash(bun */scripts/routines.ts precheck*)',
   'Bash(bun */scripts/routines.ts finish*)',
   'Bash(bun */scripts/routines.ts cron-registry*)',

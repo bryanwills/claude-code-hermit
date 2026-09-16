@@ -1,3 +1,4 @@
+import { readTaskReports } from './lib/task-report';
 import { observeExecution, startupTasks } from './lib/tasks';
 // Suppress EPIPE errors (e.g. when stdout pipe closes early in tests)
 process.stdout.on('error', () => {});
@@ -42,6 +43,7 @@ const COMPACT_CAP = 1200; // total stdout when source === "compact" (delta capsu
 // Lower-priority sections are dropped entirely once HARD_CAP is reached.
 const BUDGETS = {
   operator:      2000,
+  taskPolicy:    1500,
   session:       3000,
   knowledge:     2500, // compiled/ artifacts — read from config, 2500 default
   schemaDrift:    400, // only emitted when compiled/ types are undeclared in knowledge-schema.md
@@ -147,14 +149,7 @@ function buildCompactionPointers(agentDir: string): string {
   const lang = operatorLanguage(agentDir);
   if (lang) parts.push(`operator language: ${safe(lang)} (reply in this language)`);
 
-  try {
-    const runtime = JSON.parse(fs.readFileSync(path.resolve(agentDir, 'state', 'runtime.json'), 'utf-8'));
-    const sessionState = typeof runtime.session_state === 'string' ? runtime.session_state : null;
-    const waitingReason = typeof runtime.waiting_reason === 'string' ? runtime.waiting_reason : null;
-    if (sessionState) {
-      parts.push(`session_state: ${safe(sessionState)}` + (waitingReason ? ` (waiting_reason: ${safe(waitingReason)})` : ''));
-    }
-  } catch {}
+  parts.push('Task policy: read TASKS.md before intake or confirmation.');
 
   // Read once, process per field: the two SHELL.md-derived pointers are emitted at
   // opposite ends of the capsule (see the ordering note below), but a second read of the
@@ -221,10 +216,8 @@ function buildCompactionPointers(agentDir: string): string {
   } catch {}
 
   try {
-    const reports = globDir(path.resolve(agentDir, 'sessions'), /^S-\d+-REPORT\.md$/)
-      .map(f => path.basename(f))
-      .reverse();
-    if (reports.length > 0) parts.push(`latest report: sessions/${reports[0]}`);
+    const report = readTaskReports(agentDir).at(-1);
+    if (report) parts.push(`latest task: tasks/${path.basename(report.source_path)}`);
   } catch {}
 
   try {
@@ -389,7 +382,7 @@ function main(source: string | null, sessionId: string | null) {
   // (resume/compact reuse it; /clear mints a new one): this session is the resident now, so drop
   // the verdict rather than leave it silently muting its own liveness signal.
   clearGuest(stateDir, sessionId);
-  observeExecution(AGENT_DIR, 'unknown', sessionId, null, `session-start:${source ?? 'startup'}`);
+  observeExecution(AGENT_DIR, 'unknown', sessionId, null, `resident-start:${source ?? 'startup'}`);
   seedOperatorActivity();
   if (source === 'compact') {
     emitCompactCapsule();
@@ -463,6 +456,11 @@ function emitFullContext(source: string | null) {
   } catch {
     // No OPERATOR.md — skip silently
   }
+
+  try {
+    const policy = fs.readFileSync(path.resolve(AGENT_DIR, 'TASKS.md'), 'utf8');
+    if (policy.trim()) emit('Task policy (TASKS.md)', guarded('TASKS.md', policy.slice(0, BUDGETS.taskPolicy)));
+  } catch { /* no task policy yet */ }
 
   // -------------------------------------------------------
   // 2. Remove stale eval hash (was done inline in the bash hook)
@@ -659,51 +657,10 @@ function emitFullContext(source: string | null) {
   // -------------------------------------------------------
   if (totalChars < HARD_CAP && !(source === 'resume' && hasActiveSession)) {
     try {
-      const sessionsDir = path.resolve(AGENT_DIR, 'sessions');
-      const reports = fs.readdirSync(sessionsDir)
-        .filter(f => /^S-\d+-REPORT\.md$/.test(f))
-        .sort()
-        .reverse();
-
-      if (reports.length > 0) {
-        const reportPath = path.join(sessionsDir, reports[0]);
-        const parsed = readFileWithFrontmatter(reportPath);
-        const fm = parsed?.fm;
-        const reportContent = parsed?.content ?? fs.readFileSync(reportPath, 'utf-8');
-
-        let reportExcerpt = `[${reports[0]}]\n`;
-        if (fm && Object.prototype.hasOwnProperty.call(fm, 'next_start')) {
-          // New-format report: the frontmatter row is the index — skip the
-          // Overview body entirely.
-          reportExcerpt += `status=${fm.status || 'unknown'} ${fm.task || ''}`.trimEnd();
-          if (fm.next_start) reportExcerpt += `\nnext: ${fm.next_start}`;
-          // The report's blockers row keeps resolved entries as `[resolved] <text>` —
-          // that is the record. Naming one here would hand the next session a blocker
-          // the last one cleared, which is the whole failure the mark exists to stop.
-          const blockers = (Array.isArray(fm.blockers) ? fm.blockers : [])
-            .filter((b: string) => !isResolvedBlockerLine(b));
-          if (blockers.length > 0) {
-            const extra = blockers.length > 1 ? ` (+${blockers.length - 1} more)` : '';
-            reportExcerpt += `\nblockers: ${blockers[0]}${extra}`;
-          }
-        } else {
-          // Legacy report — no structured fields, fall back to the Overview body.
-          const overview = extractSection(reportContent, 'Overview');
-          if (overview && overview.trim()) {
-            reportExcerpt += `## Overview\n${overview.trimEnd()}`;
-          } else {
-            // No Overview header — emit first 20 lines
-            reportExcerpt += reportContent.split('\n').slice(0, 20).join('\n');
-          }
-        }
-
-        emit('Last Report', guarded(`sessions/${reports[0]}`, reportExcerpt.slice(0, BUDGETS.report)));
-      } else {
-        emit('Last Report', 'No previous sessions');
-      }
-    } catch {
-      emit('Last Report', 'No previous sessions');
-    }
+      const reports = readTaskReports(AGENT_DIR);
+      const latest = reports.at(-1);
+      if (latest) emit('Last Task', guarded(latest.source_path, JSON.stringify(latest).slice(0, BUDGETS.report)));
+    } catch { /* malformed records do not break startup */ }
   }
 
   // -------------------------------------------------------

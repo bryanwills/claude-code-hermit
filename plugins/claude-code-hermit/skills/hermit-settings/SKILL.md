@@ -260,7 +260,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     1. morning      30 8 * * *     claude-code-hermit:brief --morning    enabled   —
     2. evening      30 22 * * *    claude-code-hermit:brief --evening    enabled   —
     3. reflect      0 9 * * *      claude-code-hermit:reflect            enabled   reflect
-    4. weekly-deps  0 9 * * 1      claude-code-hermit:session-start ...  disabled  tools/deps-gate.sh
+    4. weekly-deps  0 9 * * 1      claude-code-hermit:task list  disabled  tools/deps-gate.sh
 
   (or "No routines configured" if empty)
   Gate = the routine's `precheck`, run by the routine monitor before it wakes the session;

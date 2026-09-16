@@ -11,8 +11,9 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-import { runScript, runProposal } from './helpers/run';
+import { runScript, runProposal, SCRIPTS_DIR } from './helpers/run';
 
 // ---------- helpers ----------
 
@@ -28,35 +29,49 @@ function withStateDir(fn: (sdir: string) => Promise<void> | void, subdir = 'sess
     try {
       await fn(sdir);
     } finally {
-      try { fs.rmSync(workdir, { recursive: true, force: true }); } catch {}
+      recordIds.delete(sdir);
+      try { fs.rmSync(workdir, { recursive: true }); } catch {}
     }
   };
 }
 
-/** Write a session report fixture with a given id, date, and cost_usd. */
-function writeReport(sdir: string, id: string, date: string, cost: string) {
-  fs.writeFileSync(path.join(sdir, 'sessions', `${id}-REPORT.md`), `---
-id: ${id}
-status: completed
-date: ${date}
-duration: ~1h
-cost_usd: ${cost}
-tokens: 10000
-tags: []
-task: "test task"
-escalation: balanced
-operator_turns: 2
-closed_via: operator
----
-# Session Report: ${id}
-## Completed
-Test.
+const recordIds = new Map<string, Map<string, string>>();
+
+/** Seed historical records exclusively through task.ts, with an isolated subprocess clock. */
+function writeReport(sdir: string, label: string, date: string, cost: string) {
+  const clock = path.join(sdir, 'clock.js');
+  fs.writeFileSync(clock, `
+const RealDate = Date;
+globalThis.Date = class extends RealDate {
+  constructor(...args) { super(...(args.length ? args : [process.env.TASK_FIXTURE_DATE])); }
+  static now() { return new RealDate(process.env.TASK_FIXTURE_DATE).getTime(); }
+};
 `);
+  const task = (verb: string, args: string[], input = '') => {
+    const result = spawnSync(process.execPath, ['--preload', clock, path.join(SCRIPTS_DIR, 'task.ts'), verb, sdir, ...args], {
+      cwd: path.dirname(sdir),
+      env: { ...process.env, AGENT_DIR: sdir, CLAUDE_PROJECT_DIR: path.dirname(sdir), TASK_FIXTURE_DATE: date },
+      input, encoding: 'utf8',
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+    return JSON.parse(result.stdout);
+  };
+  const record = task('open', ['--title', label, '--requester', 'operator', '--done', 'Verified']);
+  const blocked = task('block', [record.id, '--result-stdin'], 'Test result');
+  task('close', [record.id, '--by', 'confirmed', '--actor', 'operator', '--result-rev', String(blocked.result_rev), '--reason-stdin'], 'Verified');
+  let ids = recordIds.get(sdir);
+  if (!ids) { ids = new Map(); recordIds.set(sdir, ids); }
+  ids.set(label, record.id);
+  const indexPath = path.join(sdir, 'state', 'cost-index.json');
+  const index = fs.existsSync(indexPath) ? JSON.parse(fs.readFileSync(indexPath, 'utf8')) : { version: 4, by_task: {} };
+  index.by_task[record.id] = { [date.slice(0, 10)]: { cost: Number(cost), tokens: 10000 } };
+  fs.writeFileSync(indexPath, JSON.stringify(index));
 }
 
 /** Evaluate-mode run; asserts exit 0 and returns the parsed JSON verdict line. */
 async function evaluate(sdir: string, acceptedDate: string, acceptedInSession: string, predicate: string) {
-  const r = await runProposal(sdir, ['success-signal', acceptedDate, acceptedInSession, predicate]);
+  const r = await runProposal(sdir, ['success-signal', acceptedDate, recordIds.get(sdir)?.get(acceptedInSession) ?? acceptedInSession, predicate]);
   expect(r.exitCode).toBe(0);
   return JSON.parse(r.stdout);
 }
@@ -183,19 +198,19 @@ describe('evaluate mode', () => {
     expect(d.verdict).toBe('INSUFFICIENT_DATA');
   }));
 
-  test('evaluate: malformed report does not crash (fail-open)', withStateDir(async (sdir) => {
-    // Write a non-YAML file that will fail frontmatter parse.
+  test('evaluate: frozen session reports are ignored', withStateDir(async (sdir) => {
+    // Legacy archives are never inputs to task evaluation.
     fs.writeFileSync(path.join(sdir, 'sessions', 'S-BAD-REPORT.md'), 'not a frontmatter file\n');
     writeReport(sdir, 'S-001', '2026-05-01T10:00:00Z', '0.20');
     writeReport(sdir, 'S-002', '2026-05-02T10:00:00Z', '0.20');
     writeReport(sdir, 'S-003', '2026-05-03T10:00:00Z', '0.20');
     const d = await evaluate(sdir, '2026-04-30T00:00:00Z', 'null', 'avg_session_cost_usd < 0.30 over 3 sessions');
-    // Bad file is skipped; valid ones are evaluated normally.
+    // The frozen archive cannot affect task evaluation.
     expect(d.verdict).toBe('MET');
   }));
 
-  test('evaluate: missing sessions dir returns INSUFFICIENT_DATA (not crash)', withStateDir(async (sdir) => {
-    // No sessions/ directory (only state/ exists).
+  test('evaluate: missing tasks dir returns INSUFFICIENT_DATA (not crash)', withStateDir(async (sdir) => {
+    // No tasks/ directory (only state/ exists).
     const d = await evaluate(sdir, '2026-04-30T00:00:00Z', 'null', 'avg_session_cost_usd < 0.30 over 3 sessions');
     expect(d.verdict).toBe('INSUFFICIENT_DATA');
   }, 'state'));

@@ -6,21 +6,14 @@
 // Zero npm dependencies, Node stdlib only.
 //
 // Fail-safe contract: ANY validation failure or write failure leaves
-// alert-state.json byte-identical, appends one `Heartbeat: evaluation
-// indeterminate` line to SHELL.md Monitoring, and prints one stdout JSON line
+// alert-state.json byte-identical and prints one stdout JSON line
 // with heartbeat_result:"INDETERMINATE" and a reason. The caller (SKILL.md
 // step 5) echoes HEARTBEAT_INDETERMINATE (<reason>) instead of HEARTBEAT_OK.
 // Only a genuinely unparseable input payload exits 1; every other reject path
 // exits 0 (unchanged from before this refactor).
 //
-// On success, appends this tick's monitoring lines to SHELL.md itself and prints
-// one JSON line on stdout: how many landed, the operator notifications derived
-// from this tick's transitions, the self-evaluation entries that crossed a
-// proposal threshold, and the derived heartbeat_result — so side effects are
-// gated on a durable write. The lines were previously handed back for
-// the model to append one Edit at a time; nothing about that needed a model, and
-// each Edit was a full-context call. Sending stays with the caller, which owns the
-// channel.
+// On success, prints notifications, self-evaluation proposals and the verdict.
+// Sending stays with the caller after the durable state write.
 //
 // The eval JSON is read from stdin (not argv) so free-text alert content can't
 // break shell quoting.
@@ -36,7 +29,6 @@ import {
 } from '../alert-state';
 import { currentHHMM, todayYMD, resolveHermitNowMs } from '../time';
 import { readSettledConfig } from '../config-read';
-import { appendShellLine } from '../md-write';
 import { canonicalChecklistKeys, normalizeItemKey, normalizeCustomKey } from '../heartbeat-items';
 
 type Json = any;
@@ -115,24 +107,11 @@ function resolveFiring(entries: RawFiring[], canonical: Set<string> | null): Fir
   return out;
 }
 
-// Reject path: prints the INDETERMINATE stdout contract and appends one
-// Monitoring line, without touching alert-state.json. Exit code matches
+// Reject path: prints the INDETERMINATE contract without touching alert-state.json. Exit code matches
 // today's contract: 1 only for invalid-json (unparseable payload), 0 for
 // every other reason.
 function indeterminate(reason: string, exitCode: 0 | 1 = 0): never {
-  const config = readSettledConfig(stateDir);
-  const timezone = config.timezone ?? 'UTC';
-  const nowDate = new Date(resolveHermitNowMs());
-  const nowIso = nowDate.toISOString();
-  const hhmm = currentHHMM(timezone, nowDate) ?? nowIso.slice(11, 16);
-  const appendError = appendShellLine(
-    path.join(stateDir, 'sessions'),
-    'Monitoring',
-    `[${hhmm}] Heartbeat: evaluation indeterminate (${reason}) — state untouched.`,
-  );
   process.stdout.write(JSON.stringify({
-    appended: appendError ? 0 : 1,
-    ...(appendError ? { append_error: appendError } : {}),
     notifications: [],
     self_eval_proposals: [],
     heartbeat_result: 'INDETERMINATE',
@@ -313,22 +292,7 @@ function apply(payloadJson: string): void {
   const wrote = writeAlertState(stateFile, updated);
   if (!wrote) indeterminate('write-failed'); // fail-safe: no durable write → emit no side effects
 
-  // Ordered, after the durable write. Every failure mode here is file-level (SHELL.md
-  // unreadable, no ## Monitoring section, write refused), so the first error is the
-  // whole story and retrying the remaining lines would only repeat it. Reported
-  // in-band rather than thrown: alert-state.json is already committed, and the
-  // notifications below matter more than the audit trail.
-  let appended = 0;
-  let appendError: string | null = null;
-  for (const line of result.monitoringLines) {
-    appendError = appendShellLine(path.join(stateDir, 'sessions'), 'Monitoring', line);
-    if (appendError) break;
-    appended++;
-  }
-
   process.stdout.write(JSON.stringify({
-    appended,
-    ...(appendError ? { append_error: appendError } : {}),
     notifications: result.notifications,
     self_eval_proposals: selfEvalProposals,
     // Never OK when a structured pending decision couldn't be verified this tick.

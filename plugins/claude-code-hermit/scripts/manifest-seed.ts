@@ -5,7 +5,7 @@
 //
 // Usage: bun manifest-seed.ts <hermit-state-dir>     # e.g. .claude-code-hermit
 //   stdin: { "pluginVersion": "1.2.9", "entries": [
-//     { "key": "templates/SHELL.md.template", "file": "/abs/path/to/file" },
+//     { "key": "templates/PROPOSAL.md.template", "file": "/abs/path/to/file" },
 //     { "keyPrefix": "bin", "dir": "/abs/state-templates/bin" }
 //   ] }
 //
@@ -127,6 +127,10 @@ function apply(raw: string): void {
   }
 
   // Merge: foreign keys preserved, re-seeded keys overwritten.
+  for (const key of ['templates/SHELL.md.template', 'templates/SESSION-REPORT.md.template']) {
+    delete baseFiles[key];
+    delete seeded[key];
+  }
   const preserved = Object.keys(baseFiles).filter((k) => !(k in seeded)).length;
   const out = { version: 1, files: { ...baseFiles, ...seeded } };
 

@@ -1,6 +1,6 @@
 ---
 name: reflection-judge
-description: Post-processes reflect candidates — validates that cross-session evidence citations actually exist in S-NNN-REPORT.md before proposals or micro-approvals are queued. Returns ACCEPT | DOWNGRADE:<new-tier> | SUPPRESS per observation.
+description: Post-processes reflect candidates — validates that cross-session evidence citations actually exist in normalized task records before proposals or micro-approvals are queued. Returns ACCEPT | DOWNGRADE:<new-tier> | SUPPRESS per observation.
 model: sonnet
 effort: medium
 tools:
@@ -32,13 +32,13 @@ Sessions: <S-001, S-002, ...> (or "none" if no sessions cited)
 Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 ```
 
-**Blindness (before any candidate):** if the first line does not match `^Anchor: root=/`, or a Glob of `<root>/config.json` matches nothing, emit `GATE_BLIND: <title> — <reason>` for every candidate and stop. Missing reports, an empty ledger, or a missing SHELL.md are real absences handled by the existing verdict rules, not blindness.
+**Blindness (before any candidate):** if the first line does not match `^Anchor: root=/`, or a Glob of `<root>/config.json` matches nothing, emit `GATE_BLIND: <title> — <reason>` for every candidate and stop. Missing records or an empty ledger are real absences handled by the existing verdict rules, not blindness.
 
 `Evidence Source:` is optional. Default: `archived-session`.
 
 `Evidence Origin:` is optional. Default: `own-work`. These two fields are orthogonal — do not fold them together.
 
-`Artifact:` is optional. A valid artifact is a **machine-written state file** only (`.claude/cost-log.jsonl`, `state/proposal-metrics.jsonl`, `state/observations.jsonl`). SHELL.md, session reports, and `compiled/` prose are never artifacts — a candidate citing one of those as its Artifact gets the line ignored (judge as if no Artifact were present).
+`Artifact:` is optional. A valid artifact is a **machine-written state file** only (`.claude/cost-log.jsonl`, `state/proposal-metrics.jsonl`, `state/observations.jsonl`). Task records and `compiled/` prose are never artifacts — a candidate citing one of those as its Artifact gets the line ignored (judge as if no Artifact were present).
 
 Multiple candidates may be passed in one invocation.
 
@@ -85,15 +85,13 @@ and do not proceed to evidence verification or tier check.
 
 ### 1. Evidence verification (when sessions are cited)
 
-For each cited session ID:
-- Glob `<session-id>-REPORT.md` with `path: <root>/sessions`.
-- **If a report file is found:** read it. Focus on `## Findings`, `## Blockers`, `## Overview`.
-- **If no report file is found** (the cited session is the current, unarchived one — the ID may be literally `current`, the in-progress session's assigned ID, or any ID that matches the Session Info block in `<root>/sessions/SHELL.md`): read `<root>/sessions/SHELL.md` instead. Focus on `## Findings` and `## Blockers`. Proceed with the same "confirms the pattern" check below, and treat the source as `current-session` for verdict tagging.
-- Determine: does this session actually describe the claimed pattern?
-
-A session "confirms" the pattern if:
-- The same problem, friction, or observation is described (not just tangentially mentioned)
-- The description is independent — not just a copy of the candidate summary
+The caller supplies `Task records:` containing the fresh normalized rows from
+`task-report.ts`, including each `source_path`, title, outcome, waiting reason and lessons.
+Use those adapter rows only; missing rows are missing evidence, not permission to search archives.
+For each cited task ID in the compatibility `Sessions:` field, match its normalized `source_path`.
+Verify the claimed pattern in `title`, `lessons`, `waiting_on`, and `outcome`. Missing citations
+are missing evidence; never fall back to frozen session archives or the old live shell document.
+A confirming record must describe the same observation independently of the candidate summary.
 
 ### 1.4 Artifact verification
 
@@ -108,7 +106,17 @@ A session "confirms" the pattern if:
 
 ### 1.6 Provenance weighting
 
-When reading each cited report in § 1, also read its `closed_via:` frontmatter field. Treat a missing `closed_via` as `operator` (legacy reports predate the field). Citations from **operator-supervised** sessions (`closed_via: operator`) carry stronger evidential weight than citations from **auto-closed idle** sessions (`closed_via: auto`) — two auto-closed sightings do not equal two supervised sightings. For **Tier 2 or Tier 3** candidates whose confirming recurrence rests *entirely* on auto-closed sessions, lean toward `DOWNGRADE:<N>` with reason `auto-closed-evidence`: the pattern may be real but its significance is unconfirmed under supervision. Mixed or operator-supervised evidence carries full weight. Tier 1 is reversible and low-stakes — provenance does not downgrade it. Never suppress on provenance alone; there is no suppress code for it.
+Use normalized outcomes to weigh evidence. `done` means checked or confirmed; `cancelled`
+is not success, and `unconfirmed` contains a result awaiting closure. For Tier 2 or Tier 3
+candidates supported only by unconfirmed results, consider a downgrade for unconfirmed evidence.
+Never suppress solely because the outcome is unconfirmed.
+
+Preserve provenance supplied with a candidate: `closed_via: auto` identifies auto-closed
+historical evidence and `closed_via: operator` identifies supervised evidence. For Tier 2
+or Tier 3 recurrence supported entirely by auto-closed evidence, use the downgrade reason
+`auto-closed-evidence`; mixed or supervised evidence carries full weight. Tier 1 is not
+downgraded for provenance. This metadata never authorizes opening frozen session reports,
+and provenance alone is never a suppression reason.
 
 ### 2. Tier check
 

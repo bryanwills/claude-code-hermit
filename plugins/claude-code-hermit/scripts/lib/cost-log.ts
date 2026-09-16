@@ -38,7 +38,7 @@ import { todayYMD, thisWeekKey, thisMonthYYYYMM } from './time';
 
 type Json = any;
 
-const INDEX_VERSION = 3;
+const INDEX_VERSION = 4;
 
 // Stamped on every cost row cost-tracker.ts and subagent-cost.ts write. Rows written before
 // the prompt-only attribution fix carry no such field, and consumers that need trustworthy
@@ -56,6 +56,7 @@ const SOURCE_ATTRIBUTION_VERSION = 2;
 
 // Doctor's last-7-day scans read today + the trailing 7 days; keep one extra day of buffer.
 const BY_DATE_RETENTION_DAYS = 8;
+export const BY_TASK_RETENTION_DAYS = 90;
 const BY_WEEK_RETENTION_WEEKS = 14;
 const BY_MONTH_RETENTION_MONTHS = 13;
 
@@ -83,6 +84,7 @@ function _emptyIndex(): Json {
     last_session_id: null,
     by_source: {},
     by_date: {},
+    by_task: {},
     by_week: {},
     by_month: {},
     skipped_corrupt_lines: 0,
@@ -113,6 +115,13 @@ function _monthsAgo(n: number, now: Date = new Date()): Date {
 // it so fixed-date fixtures don't age out of the window as wall-clock time advances.
 function _pruneBuckets(index: Json, timezone: string, asOf: Date = new Date()): void {
   const nowMs = asOf.getTime();
+  const taskCutoff = todayYMD(timezone, new Date(nowMs - BY_TASK_RETENTION_DAYS * 86400000));
+  for (const [id, dates] of Object.entries(index.by_task) as [string, Record<string, unknown>][]) {
+    for (const date of Object.keys(dates)) {
+      if (date < taskCutoff) delete dates[date];
+    }
+    if (!Object.keys(dates).length) delete index.by_task[id];
+  }
   const dateCutoff = todayYMD(timezone, new Date(nowMs - BY_DATE_RETENTION_DAYS * 86400000));
   for (const date of Object.keys(index.by_date)) {
     if (date < dateCutoff) delete index.by_date[date];
@@ -129,6 +138,16 @@ function _pruneBuckets(index: Json, timezone: string, asOf: Date = new Date()): 
 
 // Process one log line into the index in-place. `timezone` determines which calendar
 // day/week/month the line's timestamp buckets into.
+export function allocateTaskShares(row: Json): { task_id: string; cost: number; tokens: number }[] {
+  if (row.bucket !== 'tasks') return [];
+  const ids: string[] = row.task_ids?.length ? row.task_ids : row.task_id ? [row.task_id] : [];
+  return ids.map(task_id => ({
+    task_id,
+    cost: (row.estimated_cost_usd || 0) / ids.length,
+    tokens: (row.total_tokens || 0) / ids.length,
+  }));
+}
+
 function _processLine(index: Json, line: string, timezone: string): void {
   try {
     const entry = JSON.parse(line);
@@ -158,6 +177,12 @@ function _processLine(index: Json, line: string, timezone: string): void {
     index.by_source[source].tokens += tokens;
 
     if (date) {
+      for (const share of allocateTaskShares(entry)) {
+        const dates = index.by_task[share.task_id] ??= {};
+        const bucket = dates[date] ??= { cost: 0, tokens: 0 };
+        bucket.cost += share.cost;
+        bucket.tokens += share.tokens;
+      }
       if (!index.by_date[date]) index.by_date[date] = { cost: 0, tokens: 0, session_ids: [] };
       index.by_date[date].cost += cost;
       index.by_date[date].tokens += tokens;
@@ -259,7 +284,10 @@ function updateCostIndex(logPath: string, indexPath: string, timezone: string = 
   }
 
   // No new bytes
-  if (index.byte_offset === fileSize) return index;
+  if (index.byte_offset === fileSize) {
+    _pruneBuckets(index, timezone, asOf);
+    return _writeIndex(indexPath, index);
+  }
 
   // Read only the new bytes
   const newByteCount = fileSize - index.byte_offset;

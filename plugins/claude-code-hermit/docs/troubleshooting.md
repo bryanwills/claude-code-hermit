@@ -21,7 +21,7 @@ Hermit uses proactive channel sends for heartbeat alerts, morning briefs, and id
 - **Check `channels.<name>.enabled`:** `enabled: false` skips the channel. Default (omitted) is treated as enabled.
 - **Verify resolver output:** run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-outbound-channel.ts .claude-code-hermit`. On success it prints `{"id":"<channel>","chat_id":"<id>"}` (exit 0). On miss it prints `{"error":"no_reachable_channel"}` (exit 1). When `channels.primary` is unset the resolver returns the first eligible entry in `channels` (operator's config order); set `channels.primary: "<name>"` in `config.json` to pin a preferred channel.
 - **Verify the `reply` tool is available:** Channels must be started with `--channels` for the plugin's `reply` tool to be accessible. Check boot output.
-- **`channel-send-unavailable` alert:** If sends are failing, heartbeat records this as a deduped alert. Check SHELL.md Findings for the unsent message content.
+- **`channel-send-unavailable` alert:** If sends are failing, heartbeat records this as a deduped alert. Check the channel alert and retry the send once delivery is available.
 - **Always-on vs interactive:** In interactive mode, channel plugins may not be running. Proactive sends only work when Claude Code is launched with `--channels`.
 - **Channel unreachable or skipped?** Enable `push_notifications` in `config.json` (`true`) to receive a desktop notification (plus mobile push if Remote Control is connected) on proactive alerts. Fires when no channel is enabled (channels block absent, empty, or all entries `enabled: false`) OR when a configured channel is unreachable (missing `dm_channel_id`, empty `allowed_users`). Also fires as a last-resort signal if a successful resolve's reply call fails (e.g. token expired). In always-on Docker or headless tmux only the Remote Control mobile push will be visible. Push is one-way — operator→hermit replies (micro-proposals, session recovery prompts) still require a channel. Toggle via `/claude-code-hermit:hermit-settings push-notifications`.
 
@@ -55,10 +55,10 @@ Periodic plugin checks are ordinary routines. For example, a weekly check uses `
 - Test manually: `echo '{}' | bun scripts/cost-tracker.ts`
 - Hooks may not fire for subagent tool calls — see [Architecture](architecture.md).
 
-## Session-Start Hangs
+## Resident Startup Hangs
 
 - **Workspace trust:** Run `claude` interactively once first and accept the trust prompt. Then restart headless.
-- **Orphaned SHELL.md:** A crash left an active session. Attach to tmux and choose resume/new, or delete `sessions/SHELL.md`.
+- **Interrupted work:** inspect open task records and the execution observation with `/claude-code-hermit:task`. Restart through `hermit-start` when process metadata needs recovery; do not delete records.
 - **Auth expired:** Check with `claude --version`. Run `claude /login` if needed.
 
 ## Costs Unexpectedly High
@@ -66,7 +66,7 @@ Periodic plugin checks are ordinary routines. For example, a weekly check uses `
 - Check `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in `config.json` `env` (default 65). Adjust with `/hermit-settings env`.
 - Check heartbeat interval — 5m with Opus is expensive. Default is 30m; widen to `2h`+ if you want slower pickup of pending proposals and budget alerts.
 - Check if watches are running with short intervals (`/claude-code-hermit:watch stop`).
-- Review SHELL.md size — bloated files cost tokens on every read.
+- Review context-hygiene settings and the task cost breakdown for repeated work.
 - Use `/cost` to check current session spend.
 
 ## No Auto-Proposals Appearing
@@ -82,9 +82,9 @@ Periodic plugin checks are ordinary routines. For example, a weekly check uses `
 - **50-line rule:** The SessionStart hook reads only the first 50 lines. Critical context must be at the top.
 - Verify the SessionStart hook is registered in `hooks/hooks.json`.
 
-## Orphaned Session on Every Start
+## Interrupted Work on Every Start
 
-SHELL.md from a crashed session persists. Choose **resume** or **start new** (generates a partial report). If this keeps happening, check system stability, rate limits, disk space, and consider Docker for auto-restart.
+`resident-start` reports interrupted execution alongside open task records. An open commitment is not evidence that the process is still busy. Inspect `state/execution.json` and process health; check system stability, rate limits and disk space if crashes recur. Boot recovery never confirms or cancels work for you.
 
 ## Stuck "shutting down" / orphaned process
 
@@ -97,9 +97,9 @@ After a survivor-blocked stop the shutdown gate keeps the channel silent, becaus
 - Check the `routines` array in config.json — each routine must have `enabled: true`.
 - Verify state: `/claude-code-hermit:hermit-routines status`. Monitor mode shows the monitor's liveness + interval and the anchor's CronList entry; fallback mode lists one CronCreate per enabled routine, prefixed with `[hermit-routine:<id>]`.
 - If `status` shows nothing loaded: confirm `always_on: true` in config.json (only always-on hermits auto-register on launch). Manual fix: run `/claude-code-hermit:hermit-routines load`.
-- Inspect fire history: `tail .claude-code-hermit/state/routine-metrics.jsonl` — a `started` (or `fired`) event means the routine ran; `skipped-waiting` means `run_during_waiting: false` suppressed it because session was `waiting`; `skipped-paused` means the hermit was paused; `skipped-late` means the occurrence was past `routine_max_lateness_minutes` when the monitor reached it. The `delivery` field is `monitor` or `cron-create`.
+- Inspect fire history: `tail .claude-code-hermit/state/routine-metrics.jsonl` — a `started` (or `fired`) event means the routine ran; `skipped-paused` means the hermit was paused; `skipped-late` means the occurrence was past `routine_max_lateness_minutes` when the monitor reached it. The `delivery` field is `monitor` or `cron-create`.
 - A `failed-artifact-missing` / `failed-artifact-unchanged` / `failed-verification-error` event means the routine declared an `expect_artifact` contract and its run did not satisfy it: the file was never written, was left byte-identical to what was there before the fire, or could not be checked. The routine ran — this is not a scheduling problem. Check the skill that was supposed to write the file, and confirm the declared path still matches what it produces (`expect_artifact` in `config.json`).
-- **Monitor mode** defers only while an operator turn is genuinely open, indicated by a `state/operator-turn-open.json` marker written on operator prompts and cleared at Stop (60-min TTL backstop against an orphaned marker). A stuck `session_state: in_progress` no longer starves routines on its own. Time an occurrence spends deferred by an open turn does not count toward lateness, so it fires at the first poll after the turn clears; an occurrence already past the limit when the turn opens, or one whose deferral was interrupted by downtime, still records `skipped-late`. After downtime, only the latest missed occurrence is eligible, and only within `routine_max_lateness_minutes` (default 60). Older occurrences within the 24-hour scan window record `skipped-late`; occurrences outside that window are abandoned without a skip row. The routine waits for its next scheduled run. Set the limit to `1440` to retain the previous 24-hour catch-up window; CronCreate fallback does not enforce this limit.
+- **Monitor mode** defers only while an operator turn is genuinely open, indicated by a `state/operator-turn-open.json` marker written on operator prompts and cleared at Stop (60-min TTL backstop against an orphaned marker). An open task record does not starve routines. Time an occurrence spends deferred by an open turn does not count toward lateness, so it fires at the first poll after the turn clears; an occurrence already past the limit when the turn opens, or one whose deferral was interrupted by downtime, still records `skipped-late`. After downtime, only the latest missed occurrence is eligible, and only within `routine_max_lateness_minutes` (default 60). Older occurrences within the 24-hour scan window record `skipped-late`; occurrences outside that window are abandoned without a skip row. The routine waits for its next scheduled run. Set the limit to `1440` to retain the previous 24-hour catch-up window; CronCreate fallback does not enforce this limit.
 - **CronCreate fallback/anchor mode** is idle-gated by the harness. If Claude was mid-task when the cron time hit, the fire is **deferred until idle, not dropped**. Long mid-task spans push fires later but never lose them. CronCreate auto-expires after 7 days — the daily `heartbeat-restart` routine (4am) re-runs `load` to reset the clock; if you've disabled it, fallback-mode routines will silently stop firing after a week.
 
 ## Routine Monitor Not Ticking
@@ -111,10 +111,10 @@ After a survivor-blocked stop the shutdown gate keeps the channel silent, becaus
 
 ## Queued Task Not Picked Up
 
-- Your hermit must be in `idle` state (check `session_state` in `.claude-code-hermit/state/runtime.json`). Pickup only runs between tasks.
-- Pickup requires `always_on: true`. An interactive hermit is presented the queued task at its next `session-start` instead of having the heartbeat start it.
-- `sessions/NEXT-TASK.md` must exist; with no file the tick reports nothing to pick up.
-- Pickup is gated by escalation level: `conservative` notifies and parks the session in `waiting`, `balanced` auto-starts, `autonomous` runs fully unattended.
+- Ask for open resident tasks. A runnable record must have `owner: resident`, no result and no `waiting_on` value.
+- Close/cancel returns the next runnable record immediately. For unattended pickup, check heartbeat liveness and `tasks.queue_nudge_minutes` (default 60).
+- Conservative escalation notifies the requester; balanced and autonomous escalation continue work in that turn.
+- A notice already acknowledged for the current record state does not repeat. Changing the result revision changes its acknowledgement token.
 
 ## Morning Brief Not Sending
 
@@ -128,14 +128,11 @@ Reflect checks dismissed and deferred proposals before creating new ones. If you
 - Run `/claude-code-hermit:hermit-evolve` to ensure the latest reflect skill is active.
 - If significantly more evidence has accumulated since the dismissal, Hermit may intentionally revisit — this is by design.
 
-## SHELL.md Getting Large / Bloated
+## Context Keeps Growing
 
-A bloated SHELL.md costs tokens on every read. Keep it lean:
+Check `context_hygiene.clear.enabled` and the watchdog tick. A standalone clear waits for the token floor, matching idle execution identity, at least 60 seconds idle, no running helper, an idle/shell registry entry and an unchanged pane across two ticks. Unknown or busy observations deliberately defer it. Inspect `state/watchdog-events.jsonl` for `clear:<reason>` fires.
 
-- Use `/compact` between steps to free context.
-- The progress log should stay under ~30 entries. If it's growing beyond that, close the session and start a new one.
-- The `session-diff` hook auto-populates `## Changed` — don't manually list files.
-- If SHELL.md is already bloated, run `/claude-code-hermit:session-close` to archive it and start fresh.
+Open tasks do not need closing to permit a safe clear. Their progress and lessons survive in their records. Compaction remains a separate summarizing mechanism.
 
 ## Docker Build Fails
 

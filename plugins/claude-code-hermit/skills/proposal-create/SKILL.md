@@ -56,9 +56,9 @@ HERMIT_GATE
 - `PROCEED|CREATE` — proceed with the steps below
 - `DROP|DUPLICATE:<PROP-ID>` — stop, report to the caller: "Proposal already exists as <PROP-ID>"
 - `DROP|SUPPRESS:<code>` — stop, report the suppression reason (from the agent's line 1) to the caller
-- `GATE_FAILED` (unrecognized/empty line 1 — agent errored, returned malformed output, or was terminated before emitting a verdict): fail closed — do not create the proposal. Note it in the SHELL.md Progress Log:
+- `GATE_FAILED` (unrecognized/empty line 1 — agent errored, returned malformed output, or was terminated before emitting a verdict): fail closed — do not create the proposal. When inside an open task record turn, note it with the record id; otherwise report it to the caller:
   ```bash
-  bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section progress <<'HERMIT_LINE'
+  bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
   gate-failed: proposal-triage — <title> — <the agent's line 1, verbatim>
   HERMIT_LINE
   ```
@@ -102,11 +102,11 @@ Findings: <one-line summary for the SHELL.md Findings entry>
 HERMIT_PROPOSAL
 ```
 
-The script assigns the canonical ID `PROP-NNN-<slug>-HHMMSS` (resolves the next `NNN`, generates the slug, stamps `HHMMSS` in `config.json`'s timezone, claims it atomically with a same-second collision-suffix letter on conflict), writes `.claude-code-hermit/proposals/<id>.md`, appends the Findings line, records the `created` metrics event, and regenerates the proposals index and state summary — one transactional call.
+The script assigns the canonical ID `PROP-NNN-<slug>-HHMMSS` (resolves the next `NNN`, generates the slug, stamps `HHMMSS` in `config.json`'s timezone, claims it atomically with a same-second collision-suffix letter on conflict), writes `.claude-code-hermit/proposals/<id>.md`, records the `created` metrics event, and regenerates the proposals index and state summary — one transactional call.
 
 - **stdout is the canonical ID** on success (e.g. `PROP-009-capability-brainstorm-103612`) — record it for all cross-references; it equals the filename stem, there is no separate short form.
 - **`ERROR|<token>` on stdout** means nothing was created — report the token to the caller/operator; never retry with a guessed ID.
-- **`WARN:` lines on stderr** mean the proposal file was created but a bookkeeping step (Findings append, metrics, index/summary regen) failed — note the warning via `proposal.ts shell-append` rather than retrying the whole call.
+- **`WARN:` lines on stderr** mean the proposal file was created but a bookkeeping step (metrics, index/summary regen) failed — note the warning via `task.ts note .claude-code-hermit <id>` when in an open task record turn; otherwise report it. Never retry the whole call.
 
 Header fields:
 - `Title:` — required.

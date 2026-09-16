@@ -80,9 +80,9 @@ them for decisions. Start/stop decisions read from the runtime registry.
 6. Read `state/monitors.runtime.json` (create if missing: `{"monitors": [], "last_cleared": null}`)
 7. Append entry to `monitors[]` with `source: "adhoc"`, the returned `task_id`, and the exact `command`, `description` and `timeout_ms` used for registration.
 8. Write registry back
-9. Log to SHELL.md `## Monitoring`:
+9. When running inside an open task record, note the watch with its id:
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section monitoring <<'HERMIT_LINE'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
    - [ACTIVE] <instruction> (started HH:MM)
    HERMIT_LINE
    ```
@@ -130,7 +130,7 @@ them for decisions. Start/stop decisions read from the runtime registry.
 
 ### Starting config watches (`/watch start`)
 
-Called automatically by session-start (step 11b). Can also be called manually.
+Called automatically by resident-start on a genuine boot. Can also be called manually.
 
 1. Read `config.json` → `monitors[]`, filter `enabled: true`
 2. Read `state/monitors.runtime.json`
@@ -145,9 +145,9 @@ Called automatically by session-start (step 11b). Can also be called manually.
       - `timeout_ms`: `min(config.timeout_ms ?? 1800000, 1800000)`
    c. Append to registry with `source: "config"`, the returned `task_id`, and the exact `command`, `description` and `timeout_ms` used for registration.
 4. Write registry back
-5. If any watches were registered: log to SHELL.md `## Monitoring`:
+5. If any watches were registered during an open task record turn, note them with its id:
    ```bash
-   bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts shell-append .claude-code-hermit --section monitoring <<'HERMIT_LINE'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
    [HH:MM] Watches registered: <id1>, <id2> (<N> total)
    HERMIT_LINE
    ```

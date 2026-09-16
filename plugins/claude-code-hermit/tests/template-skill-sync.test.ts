@@ -230,12 +230,6 @@ describe('routine model defaults', () => {
     routines = JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf-8')).routines || [];
   } catch {}
 
-  test('daily-auto-close has model: haiku', () => {
-    const entry = routines.find((r: any) => r.id === 'daily-auto-close');
-    expect(entry).toBeTruthy();
-    expect(entry.model).toBe('haiku');
-  });
-
   test('doctor has model: haiku', () => {
     const entry = routines.find((r: any) => r.id === 'doctor');
     expect(entry).toBeTruthy();

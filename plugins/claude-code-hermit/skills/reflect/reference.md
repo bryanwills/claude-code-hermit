@@ -3,7 +3,7 @@
 This file is the instruction spec for the isolated-context subagent dispatched by SKILL.md step 6.
 The subagent reads only files (no inherited session context); writes and notifications are handled by the
 calling main session after it receives the subagent's structured JSON return value. Where an instruction
-below says "update frontmatter", "append metrics", "write SHELL.md finding", or "note in Findings",
+below says "update frontmatter", "append metrics", "return a finding", or "note in Findings",
 populate the corresponding field in the return JSON instead — the main session applies those actions.
 
 ## Inputs (read fresh — do not reuse cached values)
@@ -16,7 +16,7 @@ without erroring. `memory_dir` is the auto-memory directory this file calls `mem
 
 - `.claude-code-hermit/state/reflection-state.json` — for `last_resolution_check`, `last_sparse_nudge`
 - `.claude-code-hermit/proposals/PROP-*.md` — for accepted proposals (Resolution Check)
-- `.claude-code-hermit/sessions/S-*-REPORT.md` — 3 most recent (frontmatter first; open a full body only per the Step 1 rule below)
+- Normalized records from `bun <plugin_root>/scripts/task-report.ts .claude-code-hermit --recent --limit 3`: the three most recent outcomes `done`, `cancelled`, or `unconfirmed`. Never open frozen session archives.
 - routine fires, failures and cost — via `routines.ts health` in Step 2, never by reading
   `routine-metrics.jsonl` or `cost-log.jsonl` directly
 - `MEMORY.md` — operator's auto-memory index (procedure detection)
@@ -66,25 +66,17 @@ Run this step only if `resolution_check` is listed in `phases_json`.
 
    **If `success_signal` is null** — use the prose pattern-absence test:
 
-   Read the YAML frontmatter of the 3 most recent `sessions/S-*-REPORT.md` files (sort descending by
-   filename, take the top 3): `task`, `tags`, `lessons`, `blockers`, `artifacts`, `next_start`, `status`,
-   `date`. Test pattern presence against those fields first. A report whose frontmatter lacks the
-   `next_start` key is **legacy** — read it in full (do not truncate its body). For non-legacy
-   reports, open the full body only when the pattern concerns prose the frontmatter row cannot witness
-   (e.g. Progress Log detail, section wording) — and then only that one report, not all 3. If a body you
-   do open exceeds your read window, note the truncation explicitly rather than silently trimming.
+   Reuse the three normalized records. Check the proposal's pattern against each title,
+   lessons, outcome and waiting reason. A result with outcome `unconfirmed` is evidence of an
+   observation, not proof of completion.
 
-   **Same-area guard (absence must be meaningful):** before counting absence, establish work-area overlap —
-   collect the proposal's `tags` plus the `tags:` frontmatter of its `related_sessions` reports into a
-   tag pool; at least one of the 3 checked sessions must share ≥1 tag from that pool (fallback when the
-   pool is empty: a proposal-title keyword match in a session body). If none of the 3 sessions overlaps,
-   the absence is vacuous — skip this proposal (add `action: "skip"` to `resolution_actions`).
+   **Same-area guard:** establish overlap using proposal-title or Evidence keywords in record
+   titles or lessons. If no record overlaps, skip the proposal. Do not open legacy `related_sessions`
+   reports for tags or cadence. Resolve task IDs in that compatibility field against normalized
+   records and use their `opened_at` dates for `original_cadence_days`; missing task references
+   mean sparse evidence. A single matching record has cadence 0 days.
 
-   **Compute original cadence:** for each report in `related_sessions`, read its `date:` frontmatter.
-   `original_cadence_days = max(date) - min(date)` in whole days. Single session → 0. Unreadable /
-   empty `related_sessions` → treat as **sparse**.
-
-   If the pattern IS present in any of the 3 sessions: add `action: "skip"`, no other fields.
+   If the pattern IS present in any of the 3 records: add `action: "skip"`, no other fields.
 
    If the pattern is **absent** from all 3:
    - **Frequent** (`original_cadence_days ≤ 14`) and ≥ 14 days elapsed since `accepted_date`:
@@ -93,7 +85,7 @@ Run this step only if `resolution_check` is listed in `phases_json`.
    - **Sparse** (`original_cadence_days > 14`) and elapsed ≥ `2 × original_cadence_days` since
      `accepted_date` and debounce allows (same `last_sparse_nudge` check as UNMET branch):
      → nudge (populate `shell_findings_line`:
-     `"PROP-NNN appears resolved (pattern absent 3/3 recent sessions, original cadence Nd, Xd since accept). Run /claude-code-hermit:proposal-act resolve PROP-NNN to confirm."`)
+     `"PROP-NNN appears resolved (pattern absent 3/3 recent records, original cadence Nd, Xd since accept). Run /claude-code-hermit:proposal-act resolve PROP-NNN to confirm."`)
    - Elapsed guard not yet met: add `action: "skip"`, no other fields.
 
 **d.** Set `last_resolution_check` in the return value to the last PROP-NNN checked (or null if the
@@ -108,9 +100,8 @@ Run this step only if `resolution_check` is listed in `phases_json`.
 
 ## Step 2 — Routine Check
 
-Run this step only if `session_state` in `.claude-code-hermit/state/runtime.json` is `idle` (the
-calling skill reads runtime.json in main; the dispatch prompt may pass this). If not in idle state,
-emit `routine_candidates: []` and skip this step.
+Run this step when the calling skill's execution observation is `idle`. If it is unknown
+or in flight, emit `routine_candidates: []` and skip this step.
 
 Run this once and use its output for every detection below. Do not read
 `routine-metrics.jsonl` or `cost-log.jsonl` yourself — the counting, the 14-day window, and the
@@ -162,10 +153,9 @@ the window it is more likely a dropped wake than a live turn.
 
 **Uncited-routine detection:**
 
-For each routine with `fires >= 5`: read the 3 most recent `sessions/S-*-REPORT.md`
-(reuse the frontmatter rows already read in Step 1 if available; open a body only for a legacy report
-or when the row's `task`/`lessons`/`artifacts` don't settle the citation check). If no session report cites the routine's
-`routine_id` or skill output as producing findings, decisions, or follow-ups — apply the
+For each routine with `fires >= 5`, reuse the three normalized records. If no record's
+lessons or title cites the routine's `routine_id` or output as producing findings, decisions,
+or follow-ups, apply the
 Three-Condition Rule:
 1. Repeated pattern: ≥5 fires with zero citation.
 2. Meaningful consequence: routine runs but produces no downstream effect.
@@ -177,7 +167,7 @@ nothing:
 ```json
 { "routine_id": "<id>", "action": "disable", "tier": 1, "schedule": null,
   "evidence": "<fire count + window + citation count + $cost_usd over the window>",
-  "sessions": ["<S-NNN>", ...],
+  "sessions": ["<T-id>", ...],
   "shell_findings_line": null }
 ```
 
@@ -191,21 +181,17 @@ Read three sources directly:
    Look for workflow-pattern entries (topic files flagged as workflow patterns, lines with `workflow` in the
    description).
 
-2. The `lessons` frontmatter array of the 3 most recent `sessions/S-*-REPORT.md` files (reuse the rows
-   from Step 1 if available). For a legacy report (no `next_start` frontmatter key), read its `## Lessons`
-   section instead.
+2. The `lessons` of the three normalized records from the adapter. These come from each
+   record's `## Lessons` section.
 
-3. The `## Completed` section of the same 3 most recent `sessions/S-*-REPORT.md` files (written in every
-   close mode, so auto-closed sessions count). It is the session's Progress Log verbatim, so it mixes
-   real work with bookkeeping: timestamped lifecycle lines (task switches, heartbeat and auto-close
-   notices, guest reports, routine fires) are not procedures — read only entries describing work the
-   hermit carried out by hand. Recurrence signal and output schema are unchanged.
+3. Their titles and outcomes, to distinguish completed work from cancelled or unconfirmed work.
+   Do not infer an unrecorded multi-step procedure from a title alone.
 
-**Recurrence signal:** the same multi-step procedure appears as a Lesson, a `## Completed` item, or memory workflow-pattern in
-**≥ `graduation_min_sessions` distinct archived sessions** (read from `.claude-code-hermit/config.json`
-at `reflection.graduation_min_sessions`; default 1 if absent) and no existing skill covers it (the
-"existing skill" check runs in the main session — do not Glob `.claude/skills/` here; the main session
-handles dedup).
+**Recurrence signal:** a procedure appears in lessons or memory workflow-patterns in at least
+`reflection.graduation_min_sessions` distinct task records (existing configuration key, default 1)
+and no existing skill covers it. The calling main session handles skill deduplication.
+The compatibility `sessions` arrays below carry task IDs from `source_path`, and
+`evidence_source: "archived-session"` remains the existing protocol value for record evidence.
 
 For each recurring procedure found, produce one `procedure_candidates` entry:
 ```json
@@ -215,7 +201,7 @@ For each recurring procedure found, produce one `procedure_candidates` entry:
   "evidence_source": "archived-session",
   "evidence_origin": "own-work",
   "evidence": "<which sessions, what Lessons/patterns showed the recurrence>",
-  "sessions": ["<S-NNN>", "<S-MMM>"],
+  "sessions": ["<T-id>", "<T-other>"],
   "artifact": null }
 ```
 

@@ -110,7 +110,7 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
 
   const execution = readExecution(ctx.dir);
   const invokeNow = execution.state === 'unknown'
-    && (execution.reason?.startsWith('session-start:') || execution.reason === 'precompact');
+    && (execution.reason?.startsWith('resident-start:') || execution.reason === 'precompact');
 
   let reminder =
     `[channel reply reminder] Inbound message arrived on the \`${source || 'unknown'}\` channel` +
@@ -147,7 +147,9 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
     process.stderr.write(`[channel-log] inbound capture failed: ${e?.message || e}\n`);
   }
 
-  if (passive && !addressed && !ctx.conversation) {
+  const admittedConversation = !!ctx.conversation
+    && isAllowedSender(ctx.config(), envelope.source, envelope.userId);
+  if (passive && !addressed && !admittedConversation) {
     return { block: 'passive chat: recorded, not addressed' };
   }
 

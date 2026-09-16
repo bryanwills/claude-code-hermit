@@ -63,6 +63,13 @@ function setupHermit(): Hermit {
     updated_at: '2026-01-01T00:00:00+0000',
   }, null, 2) + '\n');
 
+  fs.writeFileSync(state({ dir } as Hermit, 'execution.json'), JSON.stringify({
+    state: 'idle', cc_session_id: 'resident-boundary', at: new Date(Date.now() - 61000).toISOString(),
+  }));
+  const initialRuntime = JSON.parse(fs.readFileSync(state({ dir } as Hermit, 'runtime.json'), 'utf8'));
+  initialRuntime.cc_session_id = 'resident-boundary';
+  fs.writeFileSync(state({ dir } as Hermit, 'runtime.json'), JSON.stringify(initialRuntime));
+
   // Stub hermit-start: writes a marker so we can detect invocation
   const start = path.join(dir, '.claude-code-hermit', 'bin', 'hermit-start');
   fs.writeFileSync(start, `#!/usr/bin/env bash\necho "$@" > "${dir}/hermit-start-args"\necho "hermit-start called" > "${dir}/hermit-start-called"\n`);
@@ -2308,13 +2315,11 @@ test('idle arc + clean pane + draining queue → still no events', withHermit(as
   } finally { stub.stop(); }
 }));
 
-// The guard 3c's own contract always claimed ("while tmux is alive") but never implemented
-// — it relied on the idle gate that no longer exits here. Without it, a deliberately-stopped
-// hermit whose last transcript record happens to be an enqueue would alert forever.
-test('idle arc + DEAD tmux + stale enqueue tail → no wedge event', withHermit(async (h) => {
+// Guard 3c's contract is "while tmux is alive": a dead session takes the restart path in
+// step 3, so a stale enqueue tail in its transcript never raises a wedge alert.
+test('DEAD tmux + stale enqueue tail → no wedge event', withHermit(async (h) => {
   writeConfig(h);
   configureChannel(h);
-  patchRuntime(h, { session_state: 'idle' });
   writeFakeTmux(h, 1, 'irrelevant');   // 1 = session gone
   writeFakePgrep(h, 1);
   const stub = startHttpStub();
@@ -2326,7 +2331,6 @@ test('idle arc + DEAD tmux + stale enqueue tail → no wedge event', withHermit(
     expect(r.exitCode).toBe(0);
     const events = fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '';
     expect(events).not.toContain('session-wedged');
-    expect(stub.requests.length).toBe(0);
   } finally { stub.stop(); }
 }));
 
@@ -2591,7 +2595,7 @@ for (const execution of ['idle', 'in_flight', 'unknown']) {
     fs.writeFileSync(state(h, '.boot-id'), 'native-boot\n');
     writeState(h, 'heartbeat-monitor.runtime.json', { launch: 'native', boot_id: 'native-boot', started_at: isoAgo(1) });
     writeState(h, 'heartbeat-liveness.json', { pid: 2147483647, last_peek_at: isoAgo(0) });
-    writeState(h, 'execution.json', { state: execution, at: new Date().toISOString() });
+    writeState(h, 'execution.json', { state: execution, cc_session_id: 'resident-boundary', at: new Date(Date.now() - 61000).toISOString() });
     const result = await watchdog(h, 'run');
     expect(result.exitCode).toBe(0);
     if (execution === 'idle') {
@@ -2600,7 +2604,7 @@ for (const execution of ['idle', 'in_flight', 'unknown']) {
       expect(tmuxCalls(h)).toContain('kill-session');
     } else {
       expect(events(h)).toContain('monitor-dead-deferred');
-      expect(events(h)).toContain(execution);
+      expect(events(h)).toContain('execution-not-idle');
       expect(tmuxCalls(h)).not.toContain('kill-session');
     }
   }));
@@ -2613,7 +2617,7 @@ test('monitor-dead from a previous boot does not restart', withHermit(async (h) 
   fs.writeFileSync(state(h, '.boot-id'), 'new-boot\n');
   writeState(h, 'heartbeat-monitor.runtime.json', { launch: 'native', boot_id: 'old-boot', started_at: isoAgo(1) });
   writeState(h, 'heartbeat-liveness.json', { pid: 2147483647, last_peek_at: isoAgo(0) });
-  writeState(h, 'execution.json', { state: 'idle', at: new Date().toISOString() });
+  writeState(h, 'execution.json', { state: 'idle', cc_session_id: 'resident-boundary', at: new Date(Date.now() - 61000).toISOString() });
   await watchdog(h, 'run');
   expect(events(h)).not.toContain('monitor-restart');
   expect(tmuxCalls(h)).not.toContain('kill-session');
@@ -2626,7 +2630,7 @@ test('monitor-rearm still handles stale liveness with a live supervisor', withHe
   fs.writeFileSync(state(h, '.boot-id'), 'native-boot\n');
   writeState(h, 'heartbeat-monitor.runtime.json', { launch: 'native', boot_id: 'native-boot', started_at: isoAgo(9) });
   writeState(h, 'heartbeat-liveness.json', { pid: process.pid, last_peek_at: isoAgo(8) });
-  writeState(h, 'execution.json', { state: 'idle', at: new Date().toISOString() });
+  writeState(h, 'execution.json', { state: 'idle', cc_session_id: 'resident-boundary', at: new Date(Date.now() - 61000).toISOString() });
   await watchdog(h, 'run');
   expect(events(h)).not.toContain('monitor-restart');
   expect(events(h)).toContain('monitor-rearm');
@@ -3727,31 +3731,17 @@ function writePostCloseClearConfig(h: Hermit): void {
   }, null, 2) + '\n');
 }
 
-test('post_close_clear: marker + idle + tmux alive + operator silent → /clear sent, marker deleted',
-  withHermit(async (h) => {
-    writePostCloseClearConfig(h);
-    // runtime: idle (as set by session-archive.ts after auto-close)
-    patchRuntime(h, { session_state: 'idle' });
-    writeClearMarker(h);
-    // operator idle 30 min ago
-    fs.writeFileSync(state(h, 'last-operator-action.json'),
-      JSON.stringify({ at: isoAgo(0.5) }) + '\n');
-    const snapshotPath = path.join(h.dir, 'runtime-at-clear.json');
-    writeFakeTmux(h, 0, 'tmux pane content', snapshotPath); // tmux session alive
-    writeFakePgrep(h, 1);
-    const r = await watchdog(h, 'run');
-    expect(r.exitCode).toBe(0);
-    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/clear');
-    expect(fs.existsSync(state(h, 'clear-requested.json'))).toBe(false);
-    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('post-close-clear');
-    const runtimeAtClear = readJson(snapshotPath);
-    expect(runtimeAtClear.context_cleared).toBe(true);
-    // last_run stamp precedes the maybePostCloseClear process.exit(0) (finding 2)
-    const ws = readWatchdogStateFile(h);
-    expect(typeof ws.last_run).toBe('string');
-    expect(Date.now() - Date.parse(ws.last_run)).toBeLessThan(60_000);
-  }));
+test('retired post-close marker does not dispatch a clear', withHermit(async (h) => {
+  writePostCloseClearConfig(h);
+  patchRuntime(h, { session_state: 'idle' });
+  writeClearMarker(h);
+  writeState(h, 'last-operator-action.json', { at: isoAgo(0.5) });
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  expect((await watchdog(h, 'run')).exitCode).toBe(0);
+  expect(tmuxCalls(h)).not.toContain('/clear');
+  expect(fs.existsSync(state(h, 'clear-requested.json'))).toBe(true);
+}));
 
 test('post_close_clear: operator active < 10 min → no send, marker kept',
   withHermit(async (h) => {
@@ -3838,7 +3828,7 @@ test('post_close_clear: flag false → no send even with marker',
     expect(fs.existsSync(state(h, 'clear-requested.json'))).toBe(true);
   }));
 
-test('post_close_clear: invalidates sessions/.status.json so a stale pre-clear cost entry cannot trigger a spurious compact',
+test('standalone clear: invalidates sessions/.status.json so a stale pre-clear cost entry cannot trigger a spurious compact',
   withHermit(async (h) => {
     fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
       post_close_clear: true,
@@ -3848,7 +3838,8 @@ test('post_close_clear: invalidates sessions/.status.json so a stale pre-clear c
     }, null, 2) + '\n');
     // Mirrors session-archive.ts's post-auto-close state: idle, no open arc —
     // resolveHygieneSessionId falls back to sessions/.status.json.
-    patchRuntime(h, { session_state: 'idle', session_id: null });
+    patchRuntime(h, { session_state: 'idle', session_id: CC_SESSION_ID, cc_session_id: CC_SESSION_ID });
+    writeState(h, 'execution.json', { state: 'idle', cc_session_id: CC_SESSION_ID, at: isoAgo(1) });
     fs.mkdirSync(path.join(h.dir, '.claude-code-hermit', 'sessions'), { recursive: true });
     fs.writeFileSync(
       path.join(h.dir, '.claude-code-hermit', 'sessions', '.status.json'),
@@ -3857,10 +3848,13 @@ test('post_close_clear: invalidates sessions/.status.json so a stale pre-clear c
     // Bloated pre-clear entry — the dead context's final turn.
     writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 200000 }]);
     writeClearMarker(h);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(0.5) }) + '\n');
+    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(2) }) + '\n');
     // Pre-prime the compact tracker's pane hash so quiescence is already satisfied —
     // absent the fix, tick 2 alone would be enough for the compactor to misfire.
     primeCompactHash(h, STATIC_HASH);
+    const primed = readWatchdogStateFile(h);
+    primed.last_pane_hash_standalone = STATIC_HASH;
+    writeState(h, 'watchdog-state.json', primed);
     writeFakeTmux(h, 0, 'static pane content');
     writeFakePgrep(h, 1);
 
@@ -3869,11 +3863,12 @@ test('post_close_clear: invalidates sessions/.status.json so a stale pre-clear c
     expect(r1.exitCode).toBe(0);
     const tmuxLog1 = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
     expect(tmuxLog1).toContain('/clear');
-    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('post-close-clear');
+    expect(readJson(state(h, 'context-clear.json')).last_trigger.reason).toBe('quiet');
     expect(fs.existsSync(path.join(h.dir, '.claude-code-hermit', 'sessions', '.status.json'))).toBe(false);
 
     // Tick 2: runtime.session_id is still null (no real turn has run yet) — the
     // compactor must fail to resolve a session id now that the cache is gone.
+    patchRuntime(h, { session_id: null, cc_session_id: null });
     const r2 = await watchdog(h, 'run');
     expect(r2.exitCode).toBe(0);
     const tmuxLog2 = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
@@ -4545,6 +4540,7 @@ describe('pause enforcement', () => {
   test('nudge suppressed while paused (Escape enforcement supersedes it on the same tick)',
     withHermit(async (h) => {
       writeConfig(h);
+      writeState(h, 'execution.json', { state: 'in_flight', cc_session_id: 'resident-boundary', at: new Date().toISOString() });
       touchAgo(state(h, '.heartbeat'), 6 * 3600);
       writeFakeTmux(h, 0, 'some pane content');
       writeFakePgrep(h, 1);
@@ -4587,8 +4583,9 @@ describe('pause enforcement', () => {
     expect(fs.existsSync(state(h, 'clear-requested.json'))).toBe(true);
   }));
 
-  test('Escape sent once when paused mid-turn (session in_progress, live tmux)', withHermit(async (h) => {
+  test('Escape sent once when paused mid-turn (execution in flight, live tmux)', withHermit(async (h) => {
     writeConfig(h);
+    writeState(h, 'execution.json', { state: 'in_flight', cc_session_id: 'resident-boundary', at: new Date().toISOString() });
     writeFakeTmux(h, 0, 'busy pane');
     writeFakePgrep(h, 1);
     writePauseFlag(h, { ts: '2026-02-02T00:00:00.000Z' });
@@ -4602,6 +4599,7 @@ describe('pause enforcement', () => {
 
   test('Escape still fires exactly once for a ts-less flag (sentinel dedup)', withHermit(async (h) => {
     writeConfig(h);
+    writeState(h, 'execution.json', { state: 'in_flight', cc_session_id: 'resident-boundary', at: new Date().toISOString() });
     writeFakeTmux(h, 0, 'busy pane');
     writeFakePgrep(h, 1);
     // Hand-crafted/partial flag with no `ts` — a bare `=== status.ts` compare
@@ -4618,6 +4616,7 @@ describe('pause enforcement', () => {
 
   test('Escape not repeated on a second tick (same pause episode)', withHermit(async (h) => {
     writeConfig(h);
+    writeState(h, 'execution.json', { state: 'in_flight', cc_session_id: 'resident-boundary', at: new Date().toISOString() });
     writeFakeTmux(h, 0, 'busy pane');
     writeFakePgrep(h, 1);
     writePauseFlag(h, { ts: '2026-02-02T00:00:00.000Z' });
@@ -4630,6 +4629,7 @@ describe('pause enforcement', () => {
 
   test('Escape sent again for a new pause episode (fresh ts) after a resume', withHermit(async (h) => {
     writeConfig(h);
+    writeState(h, 'execution.json', { state: 'in_flight', cc_session_id: 'resident-boundary', at: new Date().toISOString() });
     writeFakeTmux(h, 0, 'busy pane');
     writeFakePgrep(h, 1);
     writePauseFlag(h, { ts: '2026-02-02T00:00:00.000Z' });
@@ -4642,9 +4642,9 @@ describe('pause enforcement', () => {
     expect(escapeCount).toBe(2);
   }));
 
-  test('Escape not sent when session is idle (nothing plausibly in flight)', withHermit(async (h) => {
+  test('Escape not sent when execution is idle (nothing in flight)', withHermit(async (h) => {
     writeConfig(h);
-    patchRuntime(h, { session_state: 'idle' });
+    writeState(h, 'execution.json', { state: 'idle', cc_session_id: CC_SESSION_ID, at: isoAgo(1) });
     writeFakeTmux(h, 0, 'idle pane');
     writeFakePgrep(h, 1);
     writePauseFlag(h);
@@ -5678,7 +5678,7 @@ describe('restart resume', () => {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       config.context_hygiene = { compact: { min_context_tokens: 100000, enabled: scenario !== 'compact-disabled' } };
       fs.writeFileSync(configPath, JSON.stringify(config));
-      if (scenario !== 'no-session-id') patchRuntime(h, { cc_session_id: CC_SESSION_ID });
+      patchRuntime(h, { cc_session_id: scenario === 'no-session-id' ? null : CC_SESSION_ID });
       if (scenario === 'stale-entry') patchRuntime(h, { last_context_reset_at: new Date().toISOString() });
       if (scenario !== 'no-cost-entry') writeCostLog(h, [{
         session_id: SESSION_ID,

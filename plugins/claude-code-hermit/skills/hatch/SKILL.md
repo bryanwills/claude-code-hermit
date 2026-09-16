@@ -325,7 +325,7 @@ Using the scan results, write a concise context document. Follow these rules:
 1. **Never duplicate CLAUDE.md content.** If CLAUDE.md already covers a topic (testing, conventions, build commands), don't repeat it.
 2. **Never duplicate `config.json` fields.** `routines`, `channels` (including Discord/Telegram user IDs and `morning_brief`), `permission_mode`, `agent_name`, `escalation`, `boot_skill`, `shutdown_skill`, and `_hermit_versions` are already loaded structurally — do not restate them as prose. OPERATOR.md is for context the model can't infer from config (project focus, constraints, approval gates, project rationale). Tone and comms style have their own home — `config.json`'s `voice` block, written in Phase 4b.
 3. **Only include high-confidence inferences.** If the scan clearly reveals something (e.g., package.json shows Node.js, README describes the project), include it. If uncertain, leave it for Phase 3 questions.
-4. **Keep it under 50 lines.** OPERATOR.md is loaded every session-start — bloat costs tokens. Write concise prose, not documentation.
+4. **Keep it under 50 lines.** OPERATOR.md is loaded every SessionStart — bloat costs tokens. Write concise prose, not documentation.
 5. **No rigid sections required.** Use headers if they help organize, but don't create empty sections. The goal is a useful context document, not a filled-in form.
 
 Write the draft to `.claude-code-hermit/OPERATOR.md`.
@@ -375,7 +375,7 @@ Write the final version to `.claude-code-hermit/OPERATOR.md`.
 
 #### Phase 4b — Style
 
-No dialog here — this applies the Q4 answer from Phase 3. The hermit's tone lives in a native Claude Code output style, so it reaches the **system prompt** instead of session-start context: it holds for the whole session and survives compaction. `config.json`'s `voice` block is what the operator owns; the style key and the style file are rendered from it, at hatch and again at every boot.
+No dialog here — this applies the Q4 answer from Phase 3. The hermit's tone lives in a native Claude Code output style, so it reaches the **system prompt** instead of SessionStart context: it holds for the whole session and survives compaction. `config.json`'s `voice` block is what the operator owns; the style key and the style file are rendered from it, at hatch and again at every boot.
 
 1. If `.claude/output-styles/hermit-voice.md` already exists, its prose is the operator's — adopt it instead of asking again. Take the text between the closing `-->` of its comment block and the `## Precedence` heading and write it into `voice.prose`, then set `style = custom` (the two commands in step 2's Other branch, in that order). The next render reproduces that prose verbatim. Skip the Q4 answer entirely and go to step 3.
 2. Otherwise write the Q4 answer:
@@ -501,8 +501,6 @@ sealed entries the target lacks, and any entries from retired plugin versions it
 {
   "pluginVersion": "<version>",
   "entries": [
-    { "key": "templates/SHELL.md.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/SHELL.md.template" },
-    { "key": "templates/SESSION-REPORT.md.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/SESSION-REPORT.md.template" },
     { "key": "templates/PROPOSAL.md.template", "file": "${CLAUDE_PLUGIN_ROOT}/state-templates/PROPOSAL.md.template" },
     { "keyPrefix": "bin", "dir": "${CLAUDE_PLUGIN_ROOT}/state-templates/bin" }
   ]

@@ -175,7 +175,6 @@ async function main(): Promise<void> {
     config.always_on = false;
     saveConfig(config, raw);
     updateRuntimeField({
-      session_state: 'idle',
       shutdown_completed_at: localISOStamp(),
       transition: null,
       transition_target: null,
@@ -216,14 +215,13 @@ async function main(): Promise<void> {
     if (orphaned) {
       warnSurvivors(reportedPids);
       updates.last_error = 'orphaned_process';
-      // Leave session_state / shutdown_completed_at unset — a live process
+      // Leave shutdown_completed_at unset — a live process
       // means the hermit is NOT stopped, and shutdown_requested_at stays set so
       // the watchdog won't restart over it.
       updateRuntimeField(updates);
       process.exitCode = 1;
     } else {
       console.log(`[hermit] Process tree verified exited (${tree.pids.length} processes).`);
-      updates.session_state = 'idle';
       updates.shutdown_completed_at = localISOStamp();
       updates.last_error = 'unclean_shutdown';
       updateRuntimeField(updates);
@@ -314,7 +312,6 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   } else {
     console.log(`[hermit] Process tree verified exited (${stopTree.pids.length} processes).`);
-    shutdownUpdates.session_state = 'idle';
     shutdownUpdates.shutdown_completed_at = localISOStamp();
     if (!newReport) shutdownUpdates.last_error = 'unclean_shutdown';
     updateRuntimeField(shutdownUpdates);
