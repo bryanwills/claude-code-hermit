@@ -2,9 +2,11 @@ import { test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { taskFixture } from './helpers/tasks';
-import { contextPolicyHash, maybeStandaloneClear, type World } from '../scripts/hermit-watchdog';
+import { maybeStandaloneClear, type World } from '../scripts/hermit-watchdog';
+import { contextPolicyHash } from '../scripts/lib/context-policy';
 import { costLogPath } from '../scripts/lib/cc-compat';
 import { procStartOf, localPidDomain } from './helpers/registry-fixture';
+import { runScript } from './helpers/run';
 
 function fixture() {
   const f = taskFixture();
@@ -31,6 +33,31 @@ function fixture() {
   };
   return { ...f, runtime, world, sent, now, changePane: () => { pane += '!'; } };
 }
+
+test('a policy edit before the first clear survives an ineligible tick and clears once', async () => {
+  const f = fixture();
+  try {
+    f.put('state/last-operator-action.json', { at: new Date(f.now - 1200000).toISOString() });
+    const started = await runScript('startup-context.ts', {
+      cwd: path.dirname(f.dir),
+      env: { AGENT_DIR: f.dir, HERMIT_RESIDENT: '1', HERMIT_MANAGED: '', CLAUDE_CONFIG_DIR: path.join(f.dir, 'registry') },
+      stdin: JSON.stringify({ source: 'startup', session_id: 'resident' }),
+    });
+    expect(started.exitCode).toBe(0);
+    const baseline = f.world.files.readJson(path.join(f.dir, 'state/context-clear.json'));
+    expect(baseline.policy_hash).toBe(contextPolicyHash(f.dir));
+    expect(baseline.last_trigger).toBeUndefined();
+    expect(maybeStandaloneClear({}, f.world)).toBe('execution-not-idle');
+
+    fs.writeFileSync(path.join(f.dir, 'TASKS.md'), 'Confirm posted results explicitly.');
+    expect(maybeStandaloneClear({}, f.world)).toBe('execution-not-idle');
+    f.put('state/execution.json', { state: 'idle', cc_session_id: 'resident', at: new Date(f.now - 61000).toISOString() });
+    expect(maybeStandaloneClear({}, f.world)).toBe('quiescence-pending');
+    expect(maybeStandaloneClear({}, f.world)).toBe('clear:policy');
+    expect(maybeStandaloneClear({}, f.world)).toBeNull();
+    expect(f.sent).toEqual(['/clear']);
+  } finally { f.cleanup(); }
+});
 
 for (const reason of ['quiet', 'max-age', 'policy']) test(`standalone clear ${reason}, two stable ticks and repeat suppression`, () => {
   const f = fixture();

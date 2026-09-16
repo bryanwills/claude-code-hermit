@@ -17,7 +17,9 @@ For work requested after the current work, open a resident record and state its 
 ## Progress and results
 Pipe one progress line into `note <id>`, pairing it with milestone card edits. Metadata flags include `--due`, `--card`, `--clear-waiting`, `--decision`, and `--approval "<actor>: <what>"`. A changed definition uses `note <id> --done ... --actor <human identity>`: it increments result_rev and clears the old result.
 
-Post an outcome then pipe it into `block <id> --result-stdin`. It increments result_rev and waits on the named approver or requester. A stall without a result requires `--waiting-on`, `--status-line` and `--next`; post the digest's one status/next-step message to its requester in its conversation.
+Post an outcome through the originating channel's reply tool, then pipe that same outcome into `block <id> --result-stdin` before ending the turn. For terminal-origin work, post it in the terminal. Require `listing: "unconfirmed"` and a positive `result_rev` in the digest before claiming the result is recorded. Finished recommendations, drafts and reviews awaiting acceptance use this result form.
+
+A stall in unfinished work requires `--waiting-on`, `--status-line` and `--next`; post the digest's one status/next-step message to its requester in its conversation. Those flags alone do not save an outcome. If a finished outcome produced a stall digest, run `block <id> --result-stdin` to record the result.
 
 ## Closure
 Stored status is only `open` or `closed`; closed_by is only `check`, `confirmed`, `cancelled` or null. `close`, `cancel`, and a passing `task-check.ts` run close records. Never infer closure from harness idleness.
