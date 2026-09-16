@@ -1,15 +1,11 @@
 ---
-title: "Routine: Monday Planning Brief"
-type: routine-prompt
-created: 2026-04-25T00:00:00+00:00
-tags: [routine, training]
+name: monday-planning
+description: Suggest a weekly training structure from recent load and deliver the plan.
 ---
 
-# Routine: Monday Planning Brief
-# Fires: Monday 09:30
-# Purpose: Suggest the week's training structure based on last week's load
+# Monday Planning
 
-## Task
+## Goal
 
 Read last week's training load from `state/strava-weekly-baselines.json` (written by weekly-load-review on Sunday). Generate a concrete weekly training plan suggestion and deliver it via the configured channel.
 
@@ -19,9 +15,10 @@ Read last week's training load from `state/strava-weekly-baselines.json` (writte
 2. Read last week's totals: run km, run sessions, elevation, strength sessions, bike sessions.
 3. Read the 4-week rolling average from the baseline file (or compute from available data).
 4. Apply planning logic (see below) to generate a 5–7 day training structure.
-5. Send a message via the configured channel. If no channel is configured, log the plan to SHELL.md Progress Log instead and skip the notification.
+5. Send a message via the configured channel. If no channel is configured, pipe the plan into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` only inside an open record's turn (otherwise skip the note) instead and skip the notification.
+   Compose in the operator's configured voice, covering the load context, daily structure, and key workout. Example shape:
    ```
-   🗓️ Week plan — [Mon date]
+   🗓️ Week plan: [Mon date]
    Based on last week: [X]km running, [load flag]
 
    Suggested structure:
@@ -38,15 +35,15 @@ Read last week's training load from `state/strava-weekly-baselines.json` (writte
 6. Write the weekly plan to `.claude-code-hermit/compiled/weekly-plan-<YYYY-MM-DD>.md` (today's date) with frontmatter:
    ```yaml
    ---
-   title: "Weekly Plan — <Mon date>"
+   title: "Weekly Plan: <Mon date>"
    type: weekly-plan
    created: <ISO 8601>
-   session: <current session ID from SHELL.md>
+   task: <T-... for the open record in this turn; omit this field otherwise>
    tags: [weekly-plan, training]
    ---
    ```
    Body: the full 7-day schedule from Step 5, plus the load context and key session highlight.
-7. Log one line to SHELL.md Progress Log and close session idle.
+7. Pipe one line into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` only inside an open record's turn (otherwise skip the note) and finish this workflow.
 
 ## Planning Logic
 
@@ -70,4 +67,4 @@ Read last week's training load from `state/strava-weekly-baselines.json` (writte
 - Never plan 3 consecutive hard days
 - Always include at least 1 full rest day
 - If strength sessions have been low (<2/week), suggest adding one
-- Do not make assumptions about race goals or injury history — note explicitly if those would change the plan
+- Do not make assumptions about race goals or injury history: note explicitly if those would change the plan

@@ -66,7 +66,7 @@ Produce a weekly synthesis from the archived brief notes. All data comes from
    the channel and falls back to push when no channel is reachable). `text` is the digest from step 4.
    - For the push-fallback branch, condense to a single line (per § Operator Notification push format): lead with the week's
      dominant theme, then the brief count. Example: `Quiet week on AI infra, 12 briefs — open CC to read`.
-   - On resolve miss or send failure, write the digest to `.claude-code-hermit/compiled/pending-delivery.md` (frontmatter `title`, `type: pending-delivery`, `created`, `brief_path` pointing at the weekly archive path). Do not retry. This queue supersedes the protocol's SHELL.md-logging branch — don't also log the digest to SHELL.md Findings or record a `channel-send-unavailable` issue.
+   - On resolve miss or send failure, write the digest to `.claude-code-hermit/compiled/pending-delivery.md` (frontmatter `title`, `type: pending-delivery`, `created`, `brief_path` pointing at the weekly archive path). Do not retry. This queue supersedes the protocol's logging fallback: don't also add a duplicate task note for the digest or record a `channel-send-unavailable` issue.
 
 6. **Archive** to `.claude-code-hermit/briefs/weekly/YYYY-WNN.md` (create the directory if absent).
    Use the ISO week number (e.g. `2026-W15`). Use actual counts from steps 1–3, not placeholders:

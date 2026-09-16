@@ -216,31 +216,31 @@ The skill name format is `/<plugin-id>:<skill-id>`. Parse the plugin-id as the t
 - If the value starts with `/claude-code-homeassistant-hermit:` → no-op (report "already set").
 - Otherwise (another plugin's namespace) → leave it unchanged and warn: "boot_skill is already set to `<value>` from another plugin — skipping to avoid conflict. Run `/claude-code-hermit:hermit-settings boot-skill` to update it manually."
 
-**HA routine registration**: `config.routines` is an array of objects with `{id, schedule, skill, enabled, run_during_waiting}`. For each HA routine below, check whether an entry with that `id` already exists in the array. If it does, skip. If not, prompt and merge it in.
+**HA routine registration**: `config.routines` is an array of objects with `{id, schedule, skill, enabled}`. For each HA routine below, check whether an entry with that `id` already exists in the array. If it does, skip. If not, prompt and merge it in.
 
 1. **Context refresh** — "Add daily HA context-refresh routine (08:30 every day)? Keeps entity snapshots fresh automatically."
    ```json
-   {"id": "daily-ha-context", "schedule": "30 8 * * *", "skill": "claude-code-homeassistant-hermit:ha-refresh-context", "enabled": true, "run_during_waiting": false}
+   {"id": "daily-ha-context", "schedule": "30 8 * * *", "skill": "claude-code-homeassistant-hermit:ha-refresh-context", "enabled": true}
    ```
 
 2. **Morning brief** — three paths based on the current `config.routines` state:
 
    **Fresh install** (no entry with `id: "morning-brief"` exists): prompt — "Add morning house brief routine? Delivers a unified morning summary combining house state and hermit context."
-   - If yes: follow-up — "Use unified mode (08:30, fires in waiting state, replaces core `morning` routine)? Recommended for always-on setups."
-     - Unified yes: merge `{"id": "morning-brief", "schedule": "30 8 * * *", "skill": "claude-code-homeassistant-hermit:ha-morning-brief", "enabled": true, "run_during_waiting": true}`. If `config.routines` contains an entry with `id: "morning"` and `enabled: true`, set its `enabled` to `false` and emit: "Disabled core `morning` routine — `morning-brief` subsumes it."
-     - Unified no (legacy): merge `{"id": "morning-brief", "schedule": "0 9 * * *", "skill": "claude-code-homeassistant-hermit:ha-morning-brief", "enabled": false, "run_during_waiting": false}`.
+   - If yes: follow-up: "Use unified mode (08:30, replaces core `morning` routine)? Recommended for always-on setups."
+     - Unified yes: merge `{"id": "morning-brief", "schedule": "30 8 * * *", "skill": "claude-code-homeassistant-hermit:ha-morning-brief", "enabled": true}`. If `config.routines` contains an entry with `id: "morning"` and `enabled: true`, set its `enabled` to `false` and emit: "Disabled core `morning` routine: `morning-brief` subsumes it."
+     - Unified no (legacy): merge `{"id": "morning-brief", "schedule": "0 9 * * *", "skill": "claude-code-homeassistant-hermit:ha-morning-brief", "enabled": false}`.
    - If no: skip.
 
-   **Re-hatch upgrade** (entry with `id: "morning-brief"` exists but has `schedule: "0 9 * * *"` OR `run_during_waiting: false`): prompt — "Your `morning-brief` routine uses the old schedule (09:00, not firing during waiting). Upgrade to unified mode (08:30, always-on)?"
-   - If yes: update in-place to `schedule: "30 8 * * *"`, `enabled: true`, `run_during_waiting: true`. Then disable core `morning` if present and enabled (same logic as fresh install unified path).
+   **Re-hatch upgrade** (entry with `id: "morning-brief"` exists but has `schedule: "0 9 * * *"`): prompt: "Your `morning-brief` routine uses the old schedule (09:00). Upgrade to unified mode (08:30, always-on)?"
+   - If yes: update in-place to `schedule: "30 8 * * *"`, `enabled: true`. Then disable core `morning` if present and enabled (same logic as fresh install unified path).
    - If no: leave unchanged.
 
-   **Already current** (entry exists with `schedule: "30 8 * * *"` and `run_during_waiting: true`): skip (no-op, report "config is current — check `enabled` flag if the routine isn't firing").
+   **Already current** (entry exists with `schedule: "30 8 * * *"`): skip (no-op, report "config is current: check `enabled` flag if the routine isn't firing").
 
    **Non-standard config** (entry exists but matches none of the above conditions — e.g. custom schedule): skip (no-op, report "non-standard `morning-brief` config detected — skipping upgrade prompt").
 
 3. **Evening brief** — "Add evening house-check routine (22:30 every day)? Delivers a brief end-of-day security and device confirmation."
-   - If yes: merge `{"id": "evening-brief", "schedule": "30 22 * * *", "skill": "claude-code-homeassistant-hermit:ha-evening-brief", "enabled": true, "run_during_waiting": true}`. If `config.routines` contains an entry with `id: "evening"` and `enabled: true`, set its `enabled` to `false` and emit: "Disabled core `evening` routine — `evening-brief` subsumes it."
+   - If yes: merge `{"id": "evening-brief", "schedule": "30 22 * * *", "skill": "claude-code-homeassistant-hermit:ha-evening-brief", "enabled": true}`. If `config.routines` contains an entry with `id: "evening"` and `enabled: true`, set its `enabled` to `false` and emit: "Disabled core `evening` routine: `evening-brief` subsumes it."
    - If no: skip.
 
 After adding or updating any entries, remind the operator: "Run `/claude-code-hermit:hermit-routines load` to activate routines in the current session."
@@ -250,10 +250,10 @@ After adding or updating any entries, remind the operator: "Run `/claude-code-he
 Merge these entries into `config.routines` by id. Create the array if absent. Append each missing id; skip any existing id, preserving operator edits and all other config fields. No prompt is needed for these read-only analyses.
 
 ```json
-{"id": "ha-patterns", "schedule": "5 9 * * 1", "skill": "claude-code-hermit:reflect --check-id ha-patterns --check claude-code-homeassistant-hermit:ha-analyze-patterns", "run_during_waiting": true, "enabled": true}
-{"id": "ha-safety-audit", "schedule": "5 9 * * 1", "skill": "claude-code-hermit:reflect --check-id ha-safety-audit --check claude-code-homeassistant-hermit:ha-safety-audit", "run_during_waiting": true, "enabled": true}
-{"id": "ha-integration-health", "schedule": "5 9 * * *", "skill": "claude-code-hermit:reflect --check-id ha-integration-health --check claude-code-homeassistant-hermit:ha-integration-health", "run_during_waiting": true, "enabled": true}
-{"id": "ha-update-check", "schedule": "5 9 * * *", "skill": "claude-code-hermit:reflect --check-id ha-update-check --check claude-code-homeassistant-hermit:ha-update-check", "run_during_waiting": true, "enabled": true}
+{"id": "ha-patterns", "schedule": "5 9 * * 1", "skill": "claude-code-hermit:reflect --check-id ha-patterns --check claude-code-homeassistant-hermit:ha-analyze-patterns", "enabled": true}
+{"id": "ha-safety-audit", "schedule": "5 9 * * 1", "skill": "claude-code-hermit:reflect --check-id ha-safety-audit --check claude-code-homeassistant-hermit:ha-safety-audit", "enabled": true}
+{"id": "ha-integration-health", "schedule": "5 9 * * *", "skill": "claude-code-hermit:reflect --check-id ha-integration-health --check claude-code-homeassistant-hermit:ha-integration-health", "enabled": true}
+{"id": "ha-update-check", "schedule": "5 9 * * *", "skill": "claude-code-hermit:reflect --check-id ha-update-check --check claude-code-homeassistant-hermit:ha-update-check", "enabled": true}
 ```
 
 Each routine owns its cadence and passes findings through reflection gates into the proposal pipeline.

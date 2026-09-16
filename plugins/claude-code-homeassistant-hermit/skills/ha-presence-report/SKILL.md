@@ -57,16 +57,12 @@ allowed-tools:
    title: "Presence Report — <YYYY-MM-DD>"
    type: presence-report
    created: <ISO 8601 with UTC offset>
-   session: <S-NNN from .claude-code-hermit/state/runtime.json .session_id, or null if absent>
+   task: <T-... for the open record in this turn; omit this field otherwise>
    tags: [presence, ha]
    ```
    Body: the inline report from step 5.
 
-7. Append a citation to `.claude-code-hermit/sessions/SHELL.md` under `### Artifacts produced this session`:
-   ```
-   - [[compiled/presence-report-<date>.md]]
-   ```
-   Create the section if it doesn't exist; skip the SHELL.md step if the file is absent (no active session).
+7. Inside an open record's turn, pipe `[[compiled/presence-report-<date>.md]]` into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`. Otherwise skip the note.
 
 ## Failure modes
 

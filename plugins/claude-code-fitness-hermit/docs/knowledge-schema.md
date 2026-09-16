@@ -6,13 +6,13 @@ For the canonical four-bucket convention (`raw/`, `compiled/`, `state/`, `propos
 
 ## Frontmatter
 
-All Markdown artifacts must include these fields (in this order):
+Markdown artifacts use these fields in order. Include `task` only when the skill runs inside an open record's turn; omit it otherwise:
 
 ```yaml
 title: <human-readable title>
 type: <see tables below>
 created: <ISO 8601 with offset, e.g. 2026-04-25T09:00:00+00:00>
-session: <S-NNN from SHELL.md, or null when no active session>
+task: <T-... for the open record in this turn; omit this field otherwise>
 tags: [<comma-separated list>]
 ```
 

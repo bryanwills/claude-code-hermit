@@ -67,7 +67,7 @@ async function main() {
 
   if (isUnder(target, worktreeRoot)) process.exit(0);
   // Carve-out: shared hermit state resolves up to the main checkout's gitignored
-  // .claude-code-hermit/ (SHELL.md, sessions/, state/) — those writes are legitimate.
+  // .claude-code-hermit/ (tasks/, state/): those writes are legitimate.
   if (isUnder(target, path.join(mainRoot, '.claude-code-hermit'))) process.exit(0);
   // Block: escapes into the main checkout (or a sibling worktree nested under it).
   if (isUnder(target, mainRoot)) {

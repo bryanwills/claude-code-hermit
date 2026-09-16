@@ -88,7 +88,7 @@ try {
   // CLAUDE-APPEND: it is only actionable at the moment this block fires.
   assertIncludes('block reason carries background-session retry coaching',
     blockReason(path.join(mainRepo, 'plugins', 'x.js'), wt), 're-attempt the edit');
-  assert('write to main .claude-code-hermit/ is allowed (carve-out)', runEdit(path.join(mainRepo, '.claude-code-hermit', 'sessions', 'SHELL.md'), wt), 0);
+  assert('write to main .claude-code-hermit/ is allowed (carve-out)', runEdit(path.join(mainRepo, '.claude-code-hermit', 'state', 'execution.json'), wt), 0);
   assert('edit to an unrelated path outside the repo is allowed', runEdit(path.join(tmp, 'elsewhere', 'note.txt'), wt), 0);
   assert('WORKTREE_GUARD=off disables the guard', runEdit(path.join(mainRepo, 'plugins', 'x.js'), wt, { WORKTREE_GUARD: 'off' }), 0);
 
