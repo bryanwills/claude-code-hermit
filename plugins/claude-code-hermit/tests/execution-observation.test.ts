@@ -8,7 +8,7 @@ import { markGuest } from '../scripts/lib/guest-marker';
 for (const prompt of ['Hello', 'ROUTINE_DUE test', 'HEARTBEAT_EVALUATE', '[peer] progress', '<channel source="discord" chat_id="c1" user="u1">Please work</channel>']) it(`admitted ${prompt} writes in_flight`, async () => {
   const f = taskFixture(); try {
     f.put('config.json', { channels: { discord: { enabled: true, dm_channel_id: 'c1', allowed_users: ['u1'] } } });
-    f.put('state/runtime.json', { session_state: 'in_progress', hermit_pid: process.pid });
+    f.put('state/runtime.json', { hermit_pid: process.pid });
     const r = await runScript('user-prompt-pipeline.ts', { cwd: f.dir, env: { AGENT_DIR: f.dir }, stdin: JSON.stringify({ prompt, session_id: 'resident', hook_event_name: 'UserPromptSubmit' }) });
     expect(r.exitCode).toBe(0);
     expect(fs.existsSync(path.join(f.dir, 'state/execution.json'))).toBe(true);

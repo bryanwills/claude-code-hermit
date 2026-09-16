@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Graceful shutdown for hermit autonomous sessions.
+ * Graceful shutdown for the resident.
  *
- * Sends /session-close --shutdown to the running Claude instance before
- * killing the tmux session, ensuring a clean session report is generated.
+ * Runs the configured shutdown skill and waits for execution to settle before
+ * stopping the tmux session.
  *
  * Usage:
  *     bun scripts/hermit-stop.ts              # graceful shutdown
@@ -25,8 +25,6 @@ import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 type Json = any;
 
 const CONFIG_PATH = '.claude-code-hermit/config.json';
-const SESSIONS_DIR = '.claude-code-hermit/sessions';
-const SHELL_PATH = path.join(SESSIONS_DIR, 'SHELL.md');
 const DEFAULT_TIMEOUT = 60; // seconds to wait for graceful close
 
 const sleep = (s: number) => new Promise((r) => setTimeout(r, s * 1000));
@@ -45,51 +43,17 @@ function loadConfig(): { config: Json; raw: Json } {
   return { config: settleConfig(raw ?? undefined), raw };
 }
 
-function findLatestReport(): string | null {
+export function shutdownReady(execution: Json, sentAt: number | null): boolean {
+  return typeof execution?.state === 'string' && execution.state !== 'in_flight'
+    && (sentAt === null || Date.parse(execution.at) > sentAt);
+}
+
+function readExecution(): Json {
   try {
-    const reports = fs
-      .readdirSync(SESSIONS_DIR)
-      .filter((f) => /^S-.*-REPORT\.md$/.test(f))
-      .sort();
-    return reports.length ? path.join(SESSIONS_DIR, reports[reports.length - 1]) : null;
+    return JSON.parse(fs.readFileSync(path.join(STATE_DIR, 'execution.json'), 'utf-8'));
   } catch {
     return null;
   }
-}
-
-function listReports(): Set<string> {
-  try {
-    return new Set(fs.readdirSync(SESSIONS_DIR).filter((f) => /^S-.*-REPORT\.md$/.test(f)));
-  } catch {
-    return new Set();
-  }
-}
-
-function readActiveSession(): Json | null {
-  const stats: Json = {};
-
-  // Status and started come from runtime.json — the documented single source of truth.
-  // SHELL.md has no **Status:** field (removed; see scripts/session-archive.ts).
-  const runtime = readRuntimeJson();
-  if (runtime) {
-    stats.status = runtime.session_state ?? 'unknown';
-    stats.started = runtime.created_at ?? 'unknown';
-  }
-
-  // Prefer SHELL.md's **Started:** over runtime.json's only when it has been substituted
-  // (i.e. does not still contain the template placeholder YYYY-MM-DD HH:MM).
-  if (fs.existsSync(SHELL_PATH)) {
-    for (const line of fs.readFileSync(SHELL_PATH, 'utf-8').split('\n')) {
-      if (line.includes('**Tasks Completed:**')) {
-        stats.tasks_completed = line.split('**Tasks Completed:**')[1].trim();
-      } else if (line.includes('**Started:**')) {
-        const value = line.split('**Started:**')[1].trim();
-        if (!value.includes('YYYY')) stats.started = value;
-      }
-    }
-  }
-
-  return Object.keys(stats).length ? stats : null;
 }
 
 // `always_on` is the only field the stop flow mutates, so it is patched onto the
@@ -180,20 +144,8 @@ async function main(): Promise<void> {
       transition_target: null,
       transition_started_at: null,
     });
-    const report = findLatestReport();
-    if (report) console.log(`[hermit] Last report: ${report}`);
     releaseLifecycleLock();
     process.exit(0);
-  }
-
-  // Show session stats
-  const stats = readActiveSession();
-  let tasks = '0';
-  if (stats) {
-    tasks = stats.tasks_completed ?? '0';
-    const started = stats.started ?? 'unknown';
-    const status = stats.status ?? 'unknown';
-    console.log(`[hermit] Session started: ${started} | Status: ${status} | Tasks: ${tasks}`);
   }
 
   if (force) {
@@ -225,19 +177,10 @@ async function main(): Promise<void> {
       updates.shutdown_completed_at = localISOStamp();
       updates.last_error = 'unclean_shutdown';
       updateRuntimeField(updates);
-      const report = findLatestReport();
-      if (report) console.log(`[hermit] Last report: ${report}`);
-      console.log('[hermit] Warning: session was not closed gracefully. SHELL.md may be stale.');
+      console.log('[hermit] Warning: resident was force-stopped.');
     }
     releaseLifecycleLock();
     return;
-  }
-
-  // Stop heartbeat first (only if enabled in config)
-  if (config.heartbeat?.enabled && tmuxSessionAlive(sessionName)) {
-    console.log('[hermit] Stopping heartbeat...');
-    tmux(['send-keys', '-t', sessionName, '/claude-code-hermit:heartbeat stop', 'Enter']);
-    await sleep(2);
   }
 
   // Mark shutdown requested in runtime.json
@@ -247,40 +190,28 @@ async function main(): Promise<void> {
   // survivor check at the end can tell "closed cleanly" from "orphaned".
   const stopTree = collectTree(paneRootPids(sessionName));
 
-  // Release the lifecycle lock before delegating to /session-close.
-  // The close/archive path inside Claude needs to acquire this lock
-  // for its own runtime.json writes. Holding it here would cause the
-  // agent to see it as contention and skip the close.
   releaseLifecycleLock();
 
-  // Graceful shutdown: send /session-close --shutdown for full close
-  console.log(`[hermit] Sending /claude-code-hermit:session-close --shutdown to ${sessionName}...`);
-  tmux(['send-keys', '-t', sessionName, '/claude-code-hermit:session-close --shutdown', 'Enter']);
-
-  // Wait for the session to close (check for new report file)
-  const reportsBefore = listReports();
-  console.log(`[hermit] Waiting up to ${DEFAULT_TIMEOUT}s for session close...`);
-
-  let newReport: string | null = null;
-  let closedEarly = false;
+  console.log(`[hermit] Waiting up to ${DEFAULT_TIMEOUT}s for execution to settle...`);
+  let sentAt: number | null = null;
+  let settled = false;
   for (let i = 0; i < DEFAULT_TIMEOUT; i++) {
+    if (shutdownReady(readExecution(), sentAt)) {
+      if (!config.shutdown_skill || sentAt !== null) {
+        settled = true;
+        break;
+      }
+      // Typed only once no turn is running: typed mid-turn, that turn's own end
+      // would satisfy this wait before the skill ran.
+      console.log(`[hermit] Sending shutdown skill to ${sessionName}...`);
+      sentAt = Date.now();
+      tmux(['send-keys', '-t', sessionName, config.shutdown_skill]);
+      await sleep(0.5);
+      tmux(['send-keys', '-t', sessionName, 'Enter']);
+    }
     await sleep(1);
-    if (!tmuxSessionAlive(sessionName)) {
-      console.log('[hermit] Session exited without generating a report.');
-      closedEarly = true;
-      break;
-    }
-    const fresh = [...listReports()].filter((r) => !reportsBefore.has(r));
-    if (fresh.length) {
-      newReport = path.join(SESSIONS_DIR, fresh[0]);
-      console.log(`[hermit] Session closed. Report: ${newReport}`);
-      closedEarly = true;
-      break;
-    }
   }
-  if (!closedEarly) {
-    console.log(`[hermit] Timeout after ${DEFAULT_TIMEOUT}s. Killing session.`);
-  }
+  if (!settled) console.log(`[hermit] Timeout after ${DEFAULT_TIMEOUT}s. Killing session.`);
 
   // Re-acquire lock for final state writes and cleanup
   acquireLifecycleLock();
@@ -313,15 +244,8 @@ async function main(): Promise<void> {
   } else {
     console.log(`[hermit] Process tree verified exited (${stopTree.pids.length} processes).`);
     shutdownUpdates.shutdown_completed_at = localISOStamp();
-    if (!newReport) shutdownUpdates.last_error = 'unclean_shutdown';
+    shutdownUpdates.last_error = settled ? null : 'unclean_shutdown';
     updateRuntimeField(shutdownUpdates);
-
-    // Show summary
-    if (!newReport) {
-      const report = findLatestReport();
-      if (report) console.log(`[hermit] Latest report: ${report}`);
-    }
-    if (stats) console.log(`[hermit] Total tasks this session: ${tasks}`);
   }
 
   releaseLifecycleLock();

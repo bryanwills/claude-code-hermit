@@ -185,13 +185,13 @@ describe('docker-bun-pin.ts', () => {
     const dir = project(TEMPLATE.replace('ARG BUN_VERSION=1.4.0', 'ARG BUN_VERSION=1.3.11'), {
       version: 1,
       files: {
-        'templates/SHELL.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.40' },
+        'templates/PROPOSAL.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.40' },
         'docker/Dockerfile.hermit.template': { sha256: 'b'.repeat(64), plugin_version: '1.2.40' },
       },
     });
     await pin(dir);
     const m = manifest(dir);
-    expect(m.files['templates/SHELL.md.template'].plugin_version).toBe('1.2.40');
+    expect(m.files['templates/PROPOSAL.md.template'].plugin_version).toBe('1.2.40');
     const entry = m.files['docker/Dockerfile.hermit.template'];
     expect(entry.plugin_version).toBe('1.2.46');
     expect(entry.sha256).toMatch(/^[0-9a-f]{64}$/);

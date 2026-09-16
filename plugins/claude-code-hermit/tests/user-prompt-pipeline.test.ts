@@ -60,7 +60,7 @@ function setupChannelWorkdir(channelExtra: Record<string, unknown> = {}): Workdi
 function writeRuntime(wd: Workdir, patch: Record<string, unknown>): void {
   const p = hermit(wd.dir, 'state', 'runtime.json');
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify({ version: 1, session_state: 'in_progress', ...patch }));
+  fs.writeFileSync(p, JSON.stringify({ version: 1, ...patch }));
 }
 
 // A shutdown in flight, plus the pane facts a harness command needs — so the

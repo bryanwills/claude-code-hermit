@@ -34,7 +34,7 @@ Capture stdout. If the output starts with "No cost data" or "No spend recorded y
 
 **Terminal:** the script output is already formatted and capped at 1500 characters. Relay it verbatim. Don't summarize, reformat, or add commentary — the output is the report.
 
-**Channel (`--plain` output):** reply through that channel's reply tool. The script output is already plain language and jargon-free — no `cache_read`/`cache_write`/token-type labels, no session IDs, no `PROP-`/`S-NNN`, no slash commands. Relay it **translated into the operator's language** if the inbound message wasn't in English. Translation only — add no commentary and don't reintroduce token-category detail.
+**Channel (`--plain` output):** reply through that channel's reply tool. The script output is already plain language and jargon-free; no `cache_read`/`cache_write`/token-type labels, no session IDs, no `PROP-`/`T-...`, no slash commands. Relay it **translated into the operator's language** if the inbound message wasn't in English. Translation only; add no commentary and don't reintroduce token-category detail.
 
 ## Step 3 — Channel delivery
 
@@ -45,7 +45,7 @@ maintainer-tier by definition, so send it as the `maintainer` leg only (no `clie
 ```
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-send.ts .claude-code-hermit --notice
 ```
-with `{"maintainer": "<report>"}` on stdin. On a technical install with no maintainer chat configured, `sendOperatorNotice`'s default `fallback: "client"` puts it in the primary chat. On a `non-technical` install with no maintainer chat, the report goes to `SHELL.md` Findings and no chat sees it (fail-closed on spend disclosure). If nothing was delivered, follow § Operator Notification's fallback (push if enabled, log to Findings).
+with `{"maintainer": "<report>"}` on stdin. On a technical install with no maintainer chat configured, `sendOperatorNotice`'s default `fallback: "client"` puts it in the primary chat. On a `non-technical` install with no maintainer chat, the report goes to `state/watchdog-events.jsonl` and no chat sees it (fail-closed on spend disclosure). If nothing was delivered, follow § Operator Notification's fallback (push if enabled, log to Findings).
 
 To set a preferred channel, add `"primary": "<channel-name>"` inside `channels` in `config.json`.
 

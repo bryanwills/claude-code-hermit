@@ -74,7 +74,6 @@ export interface StatusMessages {
   pausedUntilResume(label: string): string;
   pausedUntilDate(label: string, boundary: string): string;
   workingOn(task: string): string;
-  idleNothing(): string;
   redactedWorking(): string;
   redactedIdle(): string;
   oneApproval(id: string): string;
@@ -88,7 +87,6 @@ export const STATUS: Localized<StatusMessages> = {
     pausedUntilResume: (label) => `Paused (${label}) until you resume it.`,
     pausedUntilDate: (label, boundary) => `Paused (${label}) until ${boundary}.`,
     workingOn: (task) => `Working on ${task}.`,
-    idleNothing: () => 'Idle — nothing in progress.',
     redactedWorking: () => 'Working.',
     redactedIdle: () => 'Idle.',
     oneApproval: (id) => `1 approval waiting (reply "${id} yes/no").`,
@@ -100,7 +98,6 @@ export const STATUS: Localized<StatusMessages> = {
     pausedUntilResume: (label) => `Em pausa (${label}) até que a retome.`,
     pausedUntilDate: (label, boundary) => `Em pausa (${label}) até ${boundary}.`,
     workingOn: (task) => `A trabalhar em ${task}.`,
-    idleNothing: () => 'Parado — nada em curso.',
     redactedWorking: () => 'A trabalhar.',
     redactedIdle: () => 'Parado.',
     oneApproval: (id) => `1 aprovação pendente (responda "${id} yes/no").`,
@@ -189,7 +186,7 @@ export const HEARTBEAT: Localized<HeartbeatMessages> = {
 
 // ---------- auto-mode denial (permission-denied-notify.ts) ----------
 // `maintainer*` provides the technical frame for the operator who owns the
-// maintainer channel / SHELL.md Findings. `maintainerSuppressed` reports the
+// maintainer channel / state/watchdog-events.jsonl. `maintainerSuppressed` reports the
 // burst size the previous dedup window absorbed — one blocked call reads very
 // differently from twelve, and the count is the only carrier of that.
 

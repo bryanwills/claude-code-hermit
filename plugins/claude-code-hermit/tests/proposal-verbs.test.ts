@@ -78,12 +78,12 @@ describe('verbCreate grammar', () => {
     expect(fs.readdirSync(path.join(base, 'proposals'))).toEqual([]);
   })());
 
-  test('a bare `Session:` header falls through to runtime.json, not an empty string', withDir(async (dir) => {
+  test('a bare `Session:` header yields null without a runtime session ID', withDir(async (dir) => {
     const base = seed(dir);
-    fs.writeFileSync(path.join(base, 'state', 'runtime.json'), JSON.stringify({ session_id: 'S-042' }));
+    fs.writeFileSync(path.join(base, 'state', 'runtime.json'), JSON.stringify({}));
 
     const id = verbCreate(base, heredoc({ Title: 'x', Session: '' }));
-    expect(fs.readFileSync(path.join(base, 'proposals', `${id}.md`), 'utf-8')).toContain('session: S-042');
+    expect(fs.readFileSync(path.join(base, 'proposals', `${id}.md`), 'utf-8')).toContain('session: null');
   }));
 
   test('an absent Operator Decision section is appended so patch has somewhere to write', withDir(async (dir) => {

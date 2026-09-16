@@ -153,7 +153,7 @@ function _processLine(index: Json, line: string, timezone: string): void {
     const entry = JSON.parse(line);
     const cost = entry.estimated_cost_usd || 0;
     const tokens = entry.total_tokens || 0;
-    const sid = entry.session_id || null;
+    const sid = entry.cc_session_id || null;
     const source = entry.source || 'other';
     const ts = entry.timestamp ? new Date(entry.timestamp) : null;
     const validTs = ts && !isNaN(ts.getTime()) ? ts : null;
@@ -397,11 +397,6 @@ function scanRoutineLedger(costLogFile: string): Map<string, { cost: number; run
 type MainCostObservation = {
   taskAttribution?: TaskAttribution;
   timestamp?: string;
-  sessionId: string;
-  /** The Claude Code session that produced this turn — always the hook payload's own id,
-   *  never runtime.json's S-NNN work-arc label. `sessionId` above is that label (shared by
-   *  every session in the folder while an arc is open), so it cannot say which harness
-   *  session a row describes; the hygiene tiers read this field instead. */
   ccSessionId: string;
   /** Only stamped when the writing session is marked a guest, never as `false`. */
   guest?: boolean;
@@ -429,7 +424,6 @@ type MainCostObservation = {
 type SubagentCostObservation = {
   taskAttribution?: TaskAttribution;
   timestamp?: string;
-  sessionId: string;
   source: string;
   model: string;
   inputTokens: number;
@@ -452,7 +446,6 @@ function buildMainCostRow(o: MainCostObservation): Json {
     attribution: o.taskAttribution?.attribution ?? 'source',
     ...(o.taskAttribution?.task_ids ? { task_ids: o.taskAttribution.task_ids } : {}),
     timestamp: o.timestamp ?? new Date().toISOString(),
-    session_id: o.sessionId,
     cc_session_id: o.ccSessionId,
     ...(o.guest ? { guest: true } : {}),
     source: o.source,
@@ -482,7 +475,6 @@ function buildSubagentCostRow(o: SubagentCostObservation): Json {
     attribution: o.taskAttribution?.attribution ?? 'source',
     ...(o.taskAttribution?.task_ids ? { task_ids: o.taskAttribution.task_ids } : {}),
     timestamp: o.timestamp ?? new Date().toISOString(),
-    session_id: o.sessionId,
     source: o.source,
     model: o.model,
     input_tokens: o.inputTokens,

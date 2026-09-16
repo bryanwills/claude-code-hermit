@@ -61,7 +61,7 @@ function withCase(fn: (c: Case) => Promise<void>) {
       const runtimeJson = path.join(stateDir, 'runtime.json');
       fs.mkdirSync(stateDir, { recursive: true });
       fs.writeFileSync(runtimeJson,
-        JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+        JSON.stringify({ cc_session_id: 'test-session' }));
       const readRuntime = () => JSON.parse(fs.readFileSync(runtimeJson, 'utf-8'));
 
       await fn({
@@ -181,15 +181,12 @@ describe('cost-tracker: duplicate-turn guard', () => {
     expect(rows[1].observed_at).toBe('2026-08-02T19:45:00.000Z');
   }));
 
-  // Issue #916: `session_id` is the S-NNN arc label every session in the folder shares,
-  // so keying the guard on it let a guest's newer row swallow the resident's own turn —
-  // unbilled spend, and no fresh row for the hygiene tiers to size the resident with.
+  // Harness identity keeps a guest's newer row from swallowing the resident's turn.
   test('another session\'s newer row does not suppress this session\'s turn', withCase(async c => {
     c.seedCostLog([{
       timestamp: '2026-08-02T20:00:00.000Z',
       observed_at: '2026-08-02T20:00:00.000Z',
-      session_id: 'test-session', // same arc label…
-      cc_session_id: 'cc-guest-xyz', // …different harness session
+      cc_session_id: 'cc-guest-xyz',
       guest: true,
       source: 'other', model: 'sonnet',
       input_tokens: 12, cache_write_tokens: 0, cache_read_tokens: 250_000,
@@ -223,7 +220,6 @@ describe('cost-tracker: duplicate-turn guard', () => {
     c.appendCostLog([{
       timestamp: '2026-08-02T20:00:00.000Z',
       observed_at: '2026-08-02T20:00:00.000Z',
-      session_id: 'test-session',
       cc_session_id: 'cc-guest-xyz',
       guest: true,
       source: 'other', model: 'sonnet',
@@ -241,7 +237,6 @@ describe('cost-tracker: duplicate-turn guard', () => {
     // Shaped like the row that caused the live incident: a re-billed pre-compaction turn.
     c.seedCostLog([{
       timestamp: '2026-08-02T19:30:31.923Z',
-      session_id: 'test-session',
       source: 'other',
       model: 'sonnet',
       input_tokens: 12,

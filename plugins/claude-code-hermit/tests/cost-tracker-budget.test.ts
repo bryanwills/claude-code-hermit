@@ -25,7 +25,7 @@ function setup(config: object): Setup {
   const logPath = path.join(dir, '.claude', 'cost-log.jsonl');
   const cchDir = path.join(dir, '.claude-code-hermit');
   fs.mkdirSync(path.join(cchDir, 'state'), { recursive: true });
-  fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+  fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
   writeConfig(dir, config);
   return { dir, logPath, cchDir };
 }

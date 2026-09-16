@@ -61,7 +61,7 @@ try {
     telemetry_export: { enabled: false }, backup: { enabled: false },
   }));
   const writeRuntime = () => fs.writeFileSync(path.join(state, 'runtime.json'), JSON.stringify({
-    version: 1, session_state: 'in_progress', runtime_mode: 'tmux', tmux_session: session,
+    version: 1, runtime_mode: 'tmux', tmux_session: session,
     shutdown_requested_at: null, shutdown_completed_at: null, last_error: null,
     updated_at: '2020-01-01T00:00:00Z', config_dir: path.join(fixture, 'claude-config'),
   }));

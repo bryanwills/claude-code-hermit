@@ -39,7 +39,7 @@ SWEEP_EVERY=10
 sweep_tick=0
 # Emission grammar (this line's "$out" and the ROUTINE_MONITOR_ERROR line below) is
 # load-bearing: record-operator-action.ts isRoutinePrompt() drops these lines;
-# tests/auto-close.test.ts drift guard syncs them.
+# tests/heartbeat-monitor-emissions.test.ts drift guard syncs them.
 while true; do
   # Under the supervisor, a fallback recorded after this poller started (a spawn
   # slower than arm commit's wait) hands routines to CronCreate: exit so both

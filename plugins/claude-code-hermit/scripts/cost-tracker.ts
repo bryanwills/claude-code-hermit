@@ -1,9 +1,7 @@
 import { resolveTaskAttribution, consumeTaskBinding } from './lib/tasks';
 // Adapted from Everything Claude Code (https://github.com/affaan-m/everything-claude-code)
 // Original: scripts/hooks/cost-tracker.js — MIT License
-// Changes: Added SHELL.md cost injection for session tracking,
-//          simplified pricing model, removed ECC-specific metric paths,
-//          added cumulative cost tracking.
+// Tracks usage and cost with Hermit attribution.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,9 +9,8 @@ import path from 'node:path';
 import { calculateCost, resolvePricing, type CostByType } from './lib/pricing';
 import { kStr } from './lib/format';
 import { sessionId as ccSessionId, transcriptPath as ccTranscriptPath, readTailLines, entryText, isToolResult, extractUsage, foldUsageByRequest, isCompactBoundary, turnPromptText, toolUseNames, costLogPath, hermitDir } from './lib/cc-compat';
-import { costIndexPath, updateCostIndex, readCostIndex, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
+import { costIndexPath, updateCostIndex, buildMainCostRow, buildSubagentCostRow, appendCostRows } from './lib/cost-log';
 import { todayYMD, thisWeekKey, thisMonthYYYYMM, friendlyBoundary } from './lib/time';
-import { extractSection, isResolvedBlockerLine, stripPlaceholders } from './lib/md-write';
 import { mutateOwnedAlerts, budgetAlertsPath } from './lib/alert-state';
 import { readSettledConfig } from './lib/config-read';
 import { setPause, isPaused } from './lib/pause';
@@ -33,9 +30,6 @@ const MAX_STDIN = 1024 * 1024; // 1MB safety limit
 const HERMIT_DIR = hermitDir();
 const COST_LOG = costLogPath(HERMIT_DIR);
 const COST_INDEX = costIndexPath(HERMIT_DIR);
-const SHELL_SESSION = path.join(HERMIT_DIR, 'sessions', 'SHELL.md');
-const STATUS_JSON = path.join(HERMIT_DIR, 'sessions', '.status.json');
-const STATUS_JSON_TMP = path.join(HERMIT_DIR, 'sessions', '.status.json.tmp');
 const RUNTIME_JSON = path.join(HERMIT_DIR, 'state', 'runtime.json');
 const RUNTIME_JSON_TMP = runtimeTmpPath(path.join(HERMIT_DIR, 'state'));
 const HEARTBEAT_FILE = path.join(HERMIT_DIR, 'state', '.heartbeat');
@@ -50,10 +44,6 @@ function readRuntimeJsonCached(): Json {
     _runtimeCache = {};
   }
   return _runtimeCache;
-}
-
-function readRuntimeSessionId(): string {
-  return readRuntimeJsonCached().session_id || '';
 }
 
 function touchHeartbeat(): void {
@@ -471,46 +461,10 @@ function parseLogEntries(): Json[] {
   }
 }
 
-function getCumulativeCost(newCost: number, newTokens: number, currentSessionId: string, index: Json): { cost: number; tokens: number } {
-  // O(1) path: read running totals from .status.json
-  try {
-    const status = JSON.parse(fs.readFileSync(STATUS_JSON, 'utf-8'));
-    // Reset when the hermit session changes — prevents cumulative carryover across sessions.
-    if (currentSessionId && status.session_id && status.session_id !== currentSessionId) {
-      return { cost: newCost, tokens: newTokens };
-    }
-    return {
-      cost: (status.cost_usd || 0) + newCost,
-      tokens: (status.tokens || 0) + newTokens,
-    };
-  } catch {
-    // First run or missing .status.json — fall back to index (O(1); index already updated)
-  }
-
-  if (index) {
-    return {
-      cost: index.total_cost_usd,
-      tokens: index.total_tokens,
-    };
-  }
-
-  const idx = readCostIndex(COST_INDEX);
-  if (idx) {
-    return { cost: idx.total_cost_usd, tokens: idx.total_tokens };
-  }
-  return { cost: newCost, tokens: newTokens };
-}
-
-const MAX_SUMMARY_LEN = 120;
-
-function readRuntimeSessionState(): string {
-  return readRuntimeJsonCached().session_state || 'unknown';
-}
-
 // Fresh-reads runtime.json (bypassing the per-run cache, to avoid clobbering a
 // field written by another process since the cache was populated), applies a set
 // of field updates, and writes back atomically. Skips silently if runtime.json
-// can't be read — never fabricates a partial file missing session_state/session_id.
+// can't be read; never fabricates a partial runtime file.
 function writeRuntimeFields(fields: Record<string, Json>): void {
   let runtime: Json;
   try {
@@ -521,89 +475,6 @@ function writeRuntimeFields(fields: Record<string, Json>): void {
   Object.assign(runtime, fields);
   fs.writeFileSync(RUNTIME_JSON_TMP, JSON.stringify(runtime, null, 2) + '\n', 'utf-8');
   fs.renameSync(RUNTIME_JSON_TMP, RUNTIME_JSON);
-}
-
-// Maintains the [opened_at, closed_at] window that lib/cost-report/session.ts sums cost-log
-// rows over — the logical-session boundary, since cost-log rows carry the shared
-// transcript UUID (never the logical S-NNN) and one transcript holds many logical
-// sessions (see lib/cost-report/session.ts). Three runtime.json fields define an arc:
-//   opened_at        — arc start (first in_progress turn)
-//   closed_at        — arc end, stamped on the idle transition; null while live
-//   opened_transcript— the CC transcript/process id that owns the current arc
-// A new arc is started (opened_at re-stamped, closed_at cleared) when there is no
-// live arc, the previous one has already closed, OR the transcript changed — the
-// last case resets a *stale* opened_at left by a process that died before its idle
-// clear (a crash/restart mints a new transcript id), so the next session's window
-// never bleeds in the dead arc's rows. `closed_at` is stamped rather than nulling
-// `opened_at` so a close that runs after the idle transition can still recover the
-// window instead of falling back to the always-zero exact-id match. 'waiting' is
-// left untouched so a waiting<->in_progress bounce stays one arc. Best-effort —
-// a lost write under concurrent access just re-applies next turn.
-function maintainOpenedAt(nowIso: string, transcriptId: string): void {
-  try {
-    const cached = readRuntimeJsonCached();
-    const state = cached.session_state || 'unknown';
-    if (state === 'in_progress') {
-      const newArc = !cached.opened_at || cached.closed_at != null || cached.opened_transcript !== transcriptId;
-      if (newArc) {
-        writeRuntimeFields({ opened_at: nowIso, closed_at: null, opened_transcript: transcriptId });
-      }
-    } else if (state === 'idle' && cached.opened_at && cached.closed_at == null) {
-      writeRuntimeFields({ closed_at: nowIso });
-    }
-  } catch {
-    // Non-fatal — never block cost tracking on runtime.json write failure.
-  }
-}
-
-function writeStatusJson(shellContent: string, cumulative: { cost: number; tokens: number }, sessionId: string): void {
-  const { cost: cumulativeCost, tokens: cumulativeTokens } = cumulative;
-  const taskSection = extractSection(shellContent, 'Task');
-  const blockersSection = extractSection(shellContent, 'Blockers');
-  const tasksMatch = shellContent.match(/\*\*Tasks Completed:\*\*\s*(\d+)/);
-
-  const task = stripPlaceholders(taskSection ?? '');
-
-  // Resolved (`~` / `[resolved]`) entries are dropped, matching the other blocker
-  // surfaces: bin/hermit-status prints this field verbatim as "BLOCKED: …".
-  // The dash filter drops the bare "-" a comment-only bullet leaves behind once
-  // stripPlaceholders runs (startup-context's dropBulletResidue, same shape).
-  const blockersText = stripPlaceholders(blockersSection ?? '')
-    .split('\n')
-    .filter(l => !isResolvedBlockerLine(l) && !/^\s*-+\s*$/.test(l))
-    .join('\n')
-    .trim();
-  const hasBlockers = blockersText.length > 0 && !/^none$/i.test(blockersText);
-
-  const statusData = {
-    updated: new Date().toISOString(),
-    session_id: sessionId,
-    status: readRuntimeSessionState(),
-    task: task.split('\n')[0].substring(0, MAX_SUMMARY_LEN),
-    tasks_completed: tasksMatch ? parseInt(tasksMatch[1], 10) : 0,
-    cost_usd: Math.round(cumulativeCost * 10000) / 10000,
-    tokens: cumulativeTokens,
-    blockers: hasBlockers ? blockersText.split('\n')[0].substring(0, MAX_SUMMARY_LEN) : null,
-  };
-
-  // Atomic write: write to tmp, then rename
-  fs.writeFileSync(STATUS_JSON_TMP, JSON.stringify(statusData, null, 2) + '\n', 'utf-8');
-  fs.renameSync(STATUS_JSON_TMP, STATUS_JSON);
-}
-
-function updateShellSession(content: string, costStr: string, tokenStr: string): string {
-  const costSection = `## Cost\n${costStr} (${tokenStr})`;
-
-  if (content.includes('## Cost')) {
-    content = content.replace(
-      /## Cost[\s\S]*?(?=\n## |$)/,
-      costSection + '\n'
-    );
-  } else {
-    content = content.trimEnd() + '\n\n' + costSection + '\n';
-  }
-
-  return content;
 }
 
 // Bound on the budget push, kept well under the Stop pipeline's 15s hook budget
@@ -802,9 +673,6 @@ async function run(data: Json): Promise<string | null> {
     const priced = priceUsage(model, { inputTokens, cacheWriteTokens, cacheWrite1hTokens, cacheReadTokens, outputTokens, fast });
     const roundedCost = priced.total;
 
-    // Read session_id from runtime.json once per turn (used for log entry + writeStatusJson)
-    const runtimeSessionId = readRuntimeSessionId();
-
     // Duplicate guard: a turn whose newest call is no newer than the last logged row's
     // already went through here. The scan guards above catch the flush race that produced
     // the measured incident; this catches every other way the same transcript entry can be
@@ -813,19 +681,12 @@ async function run(data: Json): Promise<string | null> {
     // session legitimately starts from older transcript entries — and legacy rows without
     // observed_at never block, so the first post-upgrade turn always bills.
     //
-    // "Same session" is cc_session_id, not session_id: the latter is the S-NNN arc label
-    // every session in the folder shares while an arc is open, so a guest's newer row
-    // would suppress the resident's own turn entirely — unbilled spend, and no fresh row
-    // for the hygiene tiers to read (issue #916). lastLoggedMainRow does the matching, so
-    // an interleaved row from another session can neither suppress this turn nor hide the
-    // row that should dedupe it.
     const lastRow = lastLoggedMainRow(sessionId);
     if (observedAt && lastRow
         && typeof lastRow.observed_at === 'string' && observedAt <= lastRow.observed_at) {
       return null;
     }
 
-    maintainOpenedAt(new Date().toISOString(), sessionId);
 
     const guest = isGuest(path.join(HERMIT_DIR, 'state'), sessionId);
     // Keep runtime.cc_session_id pointing at the resident's own harness session. The
@@ -871,11 +732,6 @@ async function run(data: Json): Promise<string | null> {
     const taskAttribution = resolveTaskAttribution(HERMIT_DIR, sessionId, source, lastRow?.observed_at ?? null);
     const logEntry = buildMainCostRow({
       taskAttribution,
-      sessionId: runtimeSessionId || sessionId,
-      // The harness id of the session that actually ran this turn — never the runtime
-      // override above, which is the shared S-NNN arc label. Paired with `guest`, this is
-      // what lets a reader tell the resident's rows from every other session's in the
-      // same project folder (issue #916).
       ccSessionId: sessionId,
       guest,
       source,
@@ -900,7 +756,6 @@ async function run(data: Json): Promise<string | null> {
     // Subagent assistant entries live in separate transcript files; only the Agent tool_result
     // (type:'user' with toolUseResult.usage) appears here. collectSubagentUsage captured them;
     // attribute them to the same source so cost-reflect folds them into the dispatching row.
-    let subTokens = 0, subCost = 0;
     const subagentRows: any[] = [];
     for (const sa of (subagents || [])) {
       const saTotal = sa.inputTokens + sa.cacheWriteTokens + sa.cacheReadTokens + sa.outputTokens;
@@ -910,7 +765,6 @@ async function run(data: Json): Promise<string | null> {
       const saCost = saPriced.total;
       subagentRows.push(buildSubagentCostRow({
         taskAttribution,
-        sessionId: runtimeSessionId || sessionId,
         source,
         model: saModel,
         inputTokens: sa.inputTokens,
@@ -923,35 +777,19 @@ async function run(data: Json): Promise<string | null> {
         estimatedCostUsd: saCost,
         costByType: saPriced.costByType,
       }));
-      subTokens += saTotal;
-      subCost += saCost;
     }
 
     appendCostRows(COST_LOG, [logEntry, ...subagentRows]);
     consumeTaskBinding(HERMIT_DIR, taskAttribution);
 
     // Update incremental index — O(1) in the common case; O(n) only on first run or log truncation.
-    // Must happen before getCumulativeCost so the index fallback sees this turn's lines.
     const costIdx = updateCostIndex(COST_LOG, COST_INDEX, timezone);
 
     // PROP-016: compare the freshly-updated index against config.budget's caps.
     await applyBudgetCheck(costIdx, timezone, config.budget, resolveLocale(config.language));
 
-    // Running total from .status.json (O(1)), falls back to index (O(1)) on first run.
-    // Include subagent spend so .status.json stays consistent with the index.
-    const cumulative = getCumulativeCost(roundedCost + subCost, totalTokens + subTokens, runtimeSessionId || sessionId, costIdx);
-    const costStr = `$${cumulative.cost.toFixed(4)}`;
-
-    // Read SHELL.md for task/blockers — do NOT write back (avoids race condition with Claude's edits)
-    try {
-      const shellContent = fs.readFileSync(SHELL_SESSION, 'utf-8');
-      writeStatusJson(shellContent, cumulative, runtimeSessionId || sessionId);
-    } catch {
-      // Non-fatal — session file may not exist yet
-    }
-
     // Return brief summary (pipeline writes this to stderr)
-    return `[cost-tracker] ${model}: ${kStr(totalTokens)} tokens (${kStr(cacheReadTokens)} cached), $${roundedCost.toFixed(4)} (cumulative: ${costStr})`;
+    return `[cost-tracker] ${model}: ${kStr(totalTokens)} tokens (${kStr(cacheReadTokens)} cached), $${roundedCost.toFixed(4)}`;
   } catch (err: any) {
     // Non-fatal — never block on cost tracking failure
     console.error(`[cost-tracker] Error: ${err.message}`);
@@ -959,7 +797,7 @@ async function run(data: Json): Promise<string | null> {
   }
 }
 
-export { run, getCumulativeCost, classifySource, resolveTurnSource, scanTurnInTail, sumTurnUsage, collectSubagentUsage, composeBudgetMessage, maintainOpenedAt };
+export { run, classifySource, resolveTurnSource, scanTurnInTail, sumTurnUsage, collectSubagentUsage, composeBudgetMessage };
 
 if (import.meta.main) {
   // Mark-only entrypoint (synchronous, no stdin): the heartbeat SKILL calls this

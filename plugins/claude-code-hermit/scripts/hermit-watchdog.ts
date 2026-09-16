@@ -35,7 +35,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
 import { readExecution, passesExecutionBoundary } from './lib/tasks';
 import { sha256 } from './lib/hash';
-import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, parseSimpleCronTime, friendlyBoundary, parseDuration as parseDurationMs, resolveHermitNowMs } from './lib/time';
+import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, friendlyBoundary, parseDuration as parseDurationMs } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
 import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
@@ -44,18 +44,16 @@ import { postToSession } from './lib/peer-post';
 import { findResident, type SessionEntry } from './lib/session-registry';
 import { costLogPath, transcriptDirFor } from './lib/cc-compat';
 import { readSettledConfig, readConfigRaw } from './lib/config-read';
-import { wallMinutes } from './lib/cron-shift';
 import { evaluateBackupDue } from './lib/backup';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { claudeStateFile, credentialsFilePath, defaultConfigDir, envAuthPresent, inspectStoredLogin, msUntilExpiry, msUntilLoginExpiry, resolveAuthMode, storedLoginUsable } from './lib/setup-token';
 import { isContainer } from './lib/container';
 import { writeFileAtomic } from './lib/md-write';
-import { AUTO_CLOSE_LULL_MS, autoIdleDue, runAutoIdle } from './lib/auto-close';
 import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS, isOwnTurn } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
-import { applyContextReset, stampContextReset, clearStatusCache as clearStatusCacheAt } from './lib/context-reset';
+import { applyContextReset } from './lib/context-reset';
 import { ensureLedgerFile } from './lib/append-jsonl';
 import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
@@ -65,7 +63,6 @@ type Json = any;
 
 const CONFIG_PATH = '.claude-code-hermit/config.json';
 const HEARTBEAT_FILE = path.join(STATE_DIR, '.heartbeat');
-const CLEAR_REQUESTED_JSON = path.join(STATE_DIR, 'clear-requested.json');
 // Paths the decision cascade reaches through World.paths (watchdog-state.json,
 // watchdog-events.jsonl, last-operator-action.json, compact-requested.json) are
 // joined at their use sites off world.paths.stateDir, not pinned here.
@@ -301,39 +298,13 @@ export function composeEnvAuthFailureMessage(
   return WATCHDOG[locale].envAuthFailure(nowHHMM(timezone));
 }
 
-export type CompactFlavor = 'boundary' | 'mid-arc';
-
-/**
- * Which steering flavor a compact fires with. Sole owner of the predicate — the fire
- * site logs this same value to the event log, so message and forensics label can never
- * disagree.
- *
- * Both conditions are required, because neither alone bounds the claim the boundary
- * message makes ("the previous work arc is complete and archived"):
- *   - `session_state === 'idle'` is unbounded in time. Only `/resident-start` writes
- *     `in_progress` (session-archive.ts verbOpen) — routines, heartbeats, and channel
- *     replies never flip it — so an always-on hermit sits at 'idle' for hours while
- *     still doing real, unarchived work.
- *   - A fresh `compact-requested.json` marks a genuine work-done boundary, but only
- *     bounds it to COMPACT_MARKER_TTL_SECS; on its own it can't tell that a new
- *     session opened inside that window.
- * Together they confine the boundary flavor to the ≤1h window after a work-done
- * archive with no session open — the only window where the claim is true. Everything
- * else falls to 'mid-arc', the conservative keep-everything flavor.
- */
-function compactFlavor(sessionState: unknown, markerFresh: boolean): CompactFlavor {
-  return sessionState === 'idle' && markerFresh ? 'boundary' : 'mid-arc';
-}
-
 /**
  * Steering text for the watchdog-fired `/compact`. Never operator-facing (it's typed
  * into the pane for Claude, not shown in a channel), so no locale — unlike the
  * compose*Message functions above.
  */
-export function composeCompactSteeringMessage(flavor: CompactFlavor): string {
-  return flavor === 'boundary'
-    ? '/compact the previous work arc is complete and archived, summarize it in one or two lines, keep pending operator items, open questions, and standing commitments, drop completed-work detail'
-    : '/compact focus on unfinished work, pending operator items, and in-flight decisions';
+export function composeCompactSteeringMessage(): string {
+  return '/compact focus on unfinished work, pending operator items, and in-flight decisions';
 }
 
 /** Operator-language message for a forced pause enforcement (any reason). */
@@ -585,11 +556,8 @@ export function classifyStopFailureStamp(stamp: Json): ApiFailureVerdict | null 
   return null;
 }
 
-/** Tail of the active session's transcript, or null when it can't be located/read.
- *  Takes the CC transcript UUID (runtime.json's `opened_transcript`, maintained by
- *  cost-tracker.ts:maintainOpenedAt) — NOT `session_id`, which is the logical S-NNN
- *  arc id and never names a transcript file. It is passed in from the runtime.json
- *  main() already read this tick, so this doesn't re-read the same file every tick. */
+/** Tail of the active harness transcript, or null when it cannot be located/read.
+ *  Takes the transcript UUID recorded in runtime.json, already read by main(). */
 function readTranscriptTail(transcriptId: string | null, world: World = REAL_WORLD): string | null {
   if (!transcriptId) return null; // no transcript recorded yet — nothing to judge
   // hermitRoot is repo-relative ('.claude-code-hermit'), and CC keys transcript dirs by
@@ -692,33 +660,6 @@ function ereEscape(literal: string): string {
 function heartbeatMonitorDead(): boolean {
   const root = ereEscape(path.resolve(HERMIT_ROOT));
   return !checkProcessRunning(`heartbeat-monitor\\.sh .*${root}`);
-}
-
-/**
- * True if the `daily-auto-close` routine's next fire is within `windowSecs` of now.
- * The post-close /clear (maybePostCloseClear) already resets context for free right
- * after that routine archives the session — a routine-hygiene compact just before it
- * would spend a summarization call on a context about to be wiped anyway.
- * Pass `ref` to override the reference instant (tests only — mirrors inActiveHours).
- */
-export function isNearDailyAutoClose(config: Json, windowSecs: number, ref?: Date): boolean {
-  try {
-    const routines = Array.isArray(config.routines) ? config.routines : [];
-    const routine = routines.find((r: Json) => r && r.id === 'daily-auto-close' && r.enabled !== false);
-    if (!routine || typeof routine.schedule !== 'string') return false;
-    const fireTime = parseSimpleCronTime(routine.schedule);
-    if (!fireTime) return false;
-
-    const nowMinutes = wallMinutes(config.timezone ?? 'UTC', ref ?? new Date());
-    if (nowMinutes === null) return false;
-    const fireMinutes = fireTime.hour * 60 + fireTime.minute;
-
-    let deltaMinutes = fireMinutes - nowMinutes;
-    if (deltaMinutes < 0) deltaMinutes += 24 * 60; // wraps to tomorrow
-    return deltaMinutes * 60 <= windowSecs;
-  } catch {
-    return false; // fail-open — never let a parse error suppress hygiene compaction
-  }
 }
 
 function readWatchdogState(world: World = REAL_WORLD): Json {
@@ -1167,10 +1108,10 @@ function maybeSpawnBackup(config: Json): void {
  *  Exactly the token heartbeat-monitor.sh emits, and nothing else. Two reasons it
  *  cannot drift: record-operator-action.ts's isRoutinePrompt drops this string so
  *  the wake is not miscounted as operator activity (a false positive there
- *  silences AUTO_CLOSE), and the CLAUDE-APPEND routing rule the model follows is
+ *  defers routine work), and the CLAUDE-APPEND routing rule the model follows is
  *  written against this literal. Any wording around it — "please", "the operator
  *  asked" — is both unnecessary and, per the peer-framing probes, the thing that
- *  flips a model to refusing. tests/auto-close.test.ts pins both ends. */
+ *  flips a model to refusing. The heartbeat emission test pins the literal. */
 const WEDGE_WAKE_TOKEN = 'HEARTBEAT_EVALUATE';
 
 /** Send a heartbeat run nudge to a potentially wedged session.
@@ -1513,88 +1454,17 @@ export function maybeStandaloneClear(config: Json, world: World = REAL_WORLD): s
   return `clear:${reason}`;
 }
 
-// --- Post-close context reset ---
-
-/**
- * Runs before the watchdog.enabled gate — independent of watchdog restart behavior;
- * fires on any hermit with post_close_clear: true and a running scheduler.
- * /clear preserves CronCreate routines and Monitor tasks (process-scoped, not
- * conversation-scoped), so no re-arm is needed after clearing.
- * Takes the lifecycle lock around the send so it can't race a concurrent tick or restart.
- */
-function maybePostCloseClear(config: Json): void {
-  if (config.post_close_clear !== true) return;
-  if (!fs.existsSync(CLEAR_REQUESTED_JSON)) return;
-  if (isPaused(HERMIT_ROOT).paused) return; // PROP-015 — never clear while paused
-
-  const runtime = readRuntimeJson();
-  if (!runtime) return;
-  if (runtime.session_state !== 'idle') return;
-  if (runtime.shutdown_requested_at || runtime.shutdown_completed_at) return; // never clear a stopping hermit
-
-  const sessionName = runtime.tmux_session ?? '';
-  if (!sessionName) return;
-  if (!tmuxSessionAlive(sessionName)) return;
-
-  const opAge = getOperatorLastActionAgeSecs();
-  if (opAge !== null && opAge < AUTO_CLOSE_LULL_MS / 1000) return; // operator active within the lull — back off
-
-  if (!tryAcquireLifecycleLock()) return; // another lifecycle action in flight, retry next tick
-  try {
-    // Deliberately NOT applyContextReset: this path has never written a SHELL.md
-    // breadcrumb (the close itself already left an archived report), and adding one
-    // here would change shipped behaviour. Only the stamp + cache clear are shared.
-    runtime.context_cleared = true;
-    writeRuntimeJson(runtime);
-    // Same machine-readable reset stamp every other reset path writes: PreCompact never
-    // fires for /clear, so without it the pre-clear cost entry stays the newest one for
-    // this session and poisonedEntrySkip cannot tell it apart from a live reading.
-    stampContextReset(HERMIT_ROOT);
-    sendKeys(sessionName, '/clear');
-    clearStatusCacheAt(HERMIT_ROOT);
-    try { fs.rmSync(CLEAR_REQUESTED_JSON); } catch {}
-    appendEvent('post-close-clear', 'daily-auto-close context reset');
-  } finally {
-    releaseLock(LIFECYCLE_LOCK);
-  }
-  process.exit(0);
-}
-
-function maybeAutoIdle(config: Json): void {
-  const runtime = readRuntimeJson();
-  if (!runtime) return;
-  const guard = passesLifecycleGuards(runtime);
-  if (!guard.ok) return;
-  const nowMs = resolveHermitNowMs();
-  const staleMs = parseDurationMs(config.heartbeat?.stale_threshold, 2 * 3600_000);
-  if (!autoIdleDue(HERMIT_ROOT, nowMs, staleMs).due) return;
-  // Quiescence guard: a turn still in flight (a long tool call with no Progress Log
-  // entry) redraws the pane, so require it unchanged across two consecutive ticks.
-  const watchdogState = readWatchdogState();
-  const currentHash = getPaneHash(guard.sessionName);
-  if (currentHash === null || currentHash !== (watchdogState.last_pane_hash_idle ?? null)) {
-    watchdogState.last_pane_hash_idle = currentHash;
-    writeWatchdogState(watchdogState);
-    return;
-  }
-  watchdogState.last_pane_hash_idle = null;
-  writeWatchdogState(watchdogState);
-  if (runAutoIdle(HERMIT_ROOT, nowMs, config) === 'archived') {
-    appendEvent('auto-idle', 'quiet in_progress archived');
-  }
-}
-
 // --- Shared lifecycle/token guards (maybeContextClear + maybeContextCompact) ---
 
 /** Discriminated result for passesLifecycleGuards — the reason string feeds
  *  last_hygiene_eval so a starved hygiene tier is diagnosable from state alone. */
-export type GuardReason = 'paused' | 'interactive' | 'transition' | 'suspect-process' | 'shutdown-stamp' | 'no-tmux' | 'operator-recent';
+export type GuardReason = 'paused' | 'interactive' | 'transition' | 'shutdown-stamp' | 'no-tmux' | 'operator-recent';
 export type GuardResult = { ok: true; sessionName: string } | { ok: false; reason: GuardReason };
 
 /**
  * Common lifecycle gates for the two auto-compaction mechanisms: not paused
- * (PROP-015), always-on only, no in-flight transition, no watchdog-internal
- * suspect state, no shutdown in progress, a live tmux session, and operator
+ * (PROP-015), always-on only, no in-flight transition, no shutdown in progress,
+ * a live tmux session, and operator
  * silence ≥10 min. Returns the live session name when every gate passes, or
  * a reason string when the caller should bail.
  */
@@ -1602,8 +1472,6 @@ export function passesLifecycleGuards(runtime: Json, world: World = REAL_WORLD):
   if (isPaused(world.paths.hermitRoot).paused) return { ok: false, reason: 'paused' }; // PROP-015 — never auto-clear/compact while paused
   if (runtime.runtime_mode === 'interactive') return { ok: false, reason: 'interactive' }; // interactive sessions must never be auto-managed
   if (runtime.transition) return { ok: false, reason: 'transition' }; // archiving/cleaning recovery is mid-flight — never interfere
-  const sessionState: string = runtime.session_state ?? '';
-  if (sessionState === 'suspect_process') return { ok: false, reason: 'suspect-process' }; // exclusion model: only bail on watchdog-internal state
 
   if (runtime.shutdown_requested_at || runtime.shutdown_completed_at) return { ok: false, reason: 'shutdown-stamp' };
 
@@ -1669,13 +1537,8 @@ function poisonedEntrySkip(entry: Json, runtime: Json): PoisonReason | null {
 /** The resident's own Claude Code session id, stamped by startup-context.ts under
  *  HERMIT_MANAGED. This is the ONLY acceptable identity for a hygiene decision.
  *
- *  Neither of the two ids this used to consult identifies a harness session:
- *  `runtime.session_id` is the S-NNN work-arc label, which cost-tracker stamps onto
- *  every session's rows while an arc is open, and `sessions/.status.json` is rewritten
- *  by whichever session's Stop hook fired last — a worktree guest, a hand-launched
- *  maintenance session, anyone in the folder. Measured live (issue #916): 13 of 14
- *  watchdog compactions read another session's context, citing 177k-272k while the
- *  resident sat at 67k-117k, and typed /compact into the resident's pane anyway.
+ *  Cost rows from other sessions in the folder must never drive a reset of the
+ *  resident's context. Harness identity and guest provenance keep those separate.
  *
  *  Absent resolves to '' and both tiers skip. Skipping is the safe failure — acting on a
  *  frozen row from a session that is not this one is what #916 was. Two writers keep it
@@ -1711,7 +1574,6 @@ export type HygieneOutcome =
   | 'skip:under-threshold'
   | 'skip:below-floor'
   | 'skip:interval-cooldown'
-  | 'skip:midnight-adjacent'
   | 'skip:already-processed'
   | 'skip:quiescence-pending'
   | 'skip:lock-held';
@@ -1876,7 +1738,7 @@ const COMPACT_MARKER_TTL_SECS = 3600;
 
 /**
  * Routine-hygiene compaction — separate mechanism from maybeContextClear (destructive
- * /clear, 700k emergency backstop) and maybePostCloseClear (archived boundary /clear).
+ * /clear, 700k emergency backstop) and the standalone clear rule.
  * Fires arc-preserving /compact at a low threshold (default 100k of estimated
  * compactible conversation — total prompt minus the recorded fixed-surface upper
  * bound, or minus the 50k cold-start assumption) so cold-cache wakes
@@ -1924,19 +1786,6 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
     } else {
       world.files.rm(markerPath); // stale — never let it linger
     }
-  }
-
-  // Midnight-adjacency suppression: the post-close /clear wipes context for free
-  // right after daily-auto-close archives — a compact just before it is wasted spend.
-  // Scoped to hermits that actually run that clear — with post_close_clear off no free
-  // reset is coming at all, so there is nothing to wait for — and to a 10-minute window:
-  // a wider one blanks the compact tier across the whole evening operator slot. The size
-  // is borrowed from AUTO_CLOSE_LULL_MS, but this measures something else than the lull
-  // does there (time until the close, not operator silence after it), so the edge is
-  // pinned by its own callsite test at 11 minutes out, not by the lull constant.
-  if (config.post_close_clear === true
-      && isNearDailyAutoClose(config, AUTO_CLOSE_LULL_MS / 1000, new Date(world.clock.nowMs()))) {
-    return stamped(world, 'compact', 'skip:midnight-adjacent');
   }
 
   // Token check: find the last cost-log entry for this hermit session
@@ -2008,12 +1857,7 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
     return stampedState(world, watchdogState, 'compact', 'skip:lock-held', prompt, compactible);
   }
   try {
-    // session_state is read at fire time; boundaryWaive was resolved at the top of this
-    // same tick and the marker is still on disk, so both halves describe this instant.
-    // A marker that went stale between the two quiescence ticks was consumed on the
-    // second read, which correctly demotes the flavor to mid-arc.
-    const flavor = compactFlavor(runtime.session_state, boundaryWaive);
-    world.tmux.send(sessionName, composeCompactSteeringMessage(flavor));
+    world.tmux.send(sessionName, composeCompactSteeringMessage());
     watchdogState.last_compacted_cost_ts = lastEntry.timestamp;
     watchdogState.last_compacted_at = worldStamp(world);
     watchdogState.last_pane_hash_compact = null; // reset so next bloat cycle re-arms
@@ -2022,7 +1866,7 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
     world.files.rm(markerPath); // consume the boundary waiver now that it fired
     // Both token counts travel in the event so the next cost-log entry gives a
     // before/after for free — feeds /hermit-evolution and threshold calibration.
-    appendEvent('context-compact', `prompt tokens ${prompt} (compactible ~${compactible}) over threshold ${threshold}, flavor ${flavor}, cc_session_id ${sessionId}`, world);
+    appendEvent('context-compact', `prompt tokens ${prompt} (compactible ~${compactible}) over threshold ${threshold}, cc_session_id ${sessionId}`, world);
   } finally {
     releaseLock(lifecycleLockPath(world));
   }
@@ -2102,9 +1946,8 @@ async function main(): Promise<void> {
   OPERATOR_LOCALE = resolveLocale(config.language); // pins the locale for every compose call below
   maybeEscapePausedSession(timezone);
 
-  // 0a. Post-close clear — independent of watchdog.enabled; runs on any hermit with a scheduler
+  // 0a. Standalone clear, independent of watchdog.enabled.
   maybeStandaloneClear(config);
-  maybeAutoIdle(config);
 
   // 0b. Context-size clear — independent of watchdog.enabled; runs on any always-on hermit.
   // A fired clear ends the tick: the context it was measuring no longer exists, so every
@@ -2167,19 +2010,6 @@ async function main(): Promise<void> {
   // under it) and shared by 3b and step 4.
   const resident = resolveResident(runtime);
 
-  // 2. Shutdown-intent gate — never resurrect a deliberately-stopped hermit.
-  //
-  // `session_state: 'idle'` used to exit here outright. It cannot: 'in_progress' is written
-  // only by the model-driven /resident-start open path (session-archive.ts), and session-close
-  // returns it to 'idle', so a healthy hermit rests at 'idle' between arcs. Exiting on it
-  // disabled the alert tiers (3b/3c) on every hermit, permanently — and self-sealingly, since
-  // leaving 'idle' requires the model to take a turn, which is exactly what a blocking dialog
-  // prevents. A session blocked that way stayed blocked indefinitely, in silence.
-  //
-  // So 'idle' now demotes the tick to supervision-only: the alert-only tiers still run and
-  // still notify, while every tier that sends keystrokes or restarts stays suppressed. The
-  // explicit stop markers below remain hard exits — those DO carry operator intent.
-  const supervisionOnly = runtime.session_state === 'idle';
   if (runtime.shutdown_requested_at || runtime.shutdown_completed_at) process.exit(0);
   if (runtime.runtime_mode === 'interactive') process.exit(0);
 
@@ -2381,9 +2211,8 @@ async function main(): Promise<void> {
   // capturePane returns null on a dead session and the `paneContent !== null` check catches it.
   // Reuses step 3's has-session verdict.
   if (sessionAlive) {
-    // `opened_transcript` — the CC transcript UUID that names the .jsonl file.
-    // `session_id` is the logical S-NNN arc id and resolves to a path that never exists.
-    const transcriptId = typeof runtime.opened_transcript === 'string' ? runtime.opened_transcript : null;
+    // `cc_session_id` — the CC transcript UUID that names the .jsonl file.
+    const transcriptId = typeof runtime.cc_session_id === 'string' ? runtime.cc_session_id : null;
     const tail = readTranscriptTail(transcriptId);
     const verdict = tail === null ? 'unknown' : classifyQueueTail(tail, Date.now());
     const watchdogState = readWatchdogState();
@@ -2439,7 +2268,7 @@ async function main(): Promise<void> {
     } else if (tail !== null && watchdogState.api_failure_notified_at) {
       // Re-arm once a newer, healthy assistant record supersedes the failure, so a later
       // episode can notify again. Unlike the session-wedged re-arm above, an unreadable
-      // tail must NOT re-arm: a restart mid-episode leaves `opened_transcript` pointing at
+      // tail must NOT re-arm: a restart mid-episode leaves `cc_session_id` pointing at
       // a file that doesn't exist yet, and clearing the stamp there would push a second
       // notice for the same still-active outage on the very next tick.
       delete watchdogState.api_failure_notified_at;
@@ -2456,31 +2285,9 @@ async function main(): Promise<void> {
   // auto-answering a decision that is always the operator's to make.
   if (pendingQuestion) process.exit(0);
 
-  // Supervision-only scope. An idle session arc suppresses step 4 — the wedge nudge and the
-  // pane-frozen restart, the two tiers that act on a pane whose intent the watchdog cannot
-  // read. It does NOT suppress the re-arm injections in step 5: a hermit rests at
-  // 'idle' between arcs, so that is exactly where a dead heartbeat/routine Monitor has to be
-  // recovered from, and until this it was not — the only recovery was the daily
-  // heartbeat-restart anchor, a CronCreate that dies with the process it was registered in,
-  // i.e. in the same event that kills the monitors. That step carries its own guards
-  // (pause, dead tmux, operator-recency, a per-monitor damper) and injects only slash commands
-  // whose skills are stop-then-start idempotent, so a re-arm cannot stack duplicate Monitors.
-  //
-  // "Never resurrect a deliberately-stopped hermit" still holds: hermit-stop stamps
-  // shutdown_completed_at, which step 2 hard-exits on — a stopped hermit is never merely
-  // 'idle'. Step 3's dead-session restart needs no guard either: its state whitelist
-  // (in_progress / waiting / suspect_process) already excludes 'idle'.
-  //
-  // Step 3a can also reach a restart from an idle arc: the re-auth relay's `finish` verb
-  // calls requestRestart() once the operator has completed the browser sign-in. That is
-  // deliberate — an expired setup-token strands a RESTING hermit just as hard as a working
-  // one, and the restart only follows the operator acting on the relay's message.
-
-  // 4. Wedge detection (only when heartbeat is enabled + within active hours, and never on an
-  //    idle arc — see the supervision-only scope note above)
   const heartbeatCfg = config?.heartbeat ?? {};
   const heartbeatIsObj = heartbeatCfg && typeof heartbeatCfg === 'object' && !Array.isArray(heartbeatCfg);
-  if (!supervisionOnly && heartbeatIsObj && ('enabled' in heartbeatCfg ? heartbeatCfg.enabled : true)) {
+  if (heartbeatIsObj && ('enabled' in heartbeatCfg ? heartbeatCfg.enabled : true)) {
     const activeHours = heartbeatCfg.active_hours;
     const activeHoursIsObj = activeHours && typeof activeHours === 'object' && !Array.isArray(activeHours);
     if (!activeHoursIsObj || inActiveHours(activeHours, config.timezone ?? 'UTC')) {

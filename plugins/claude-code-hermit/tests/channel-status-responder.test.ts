@@ -32,6 +32,17 @@ function payload(body: string, user = 'u1'): string {
   return JSON.stringify({ prompt: envelope(body, user) });
 }
 
+// A runnable resident record is the current work the status reply reports.
+async function openTask(wd: Workdir, title: string) {
+  const dir = hermit(wd.dir);
+  const r = await runScript('task.ts', {
+    cwd: wd.dir,
+    env: { AGENT_DIR: dir },
+    args: ['open', dir, '--owner', 'resident', '--title', title, '--requester', 'telegram:u1', '--done', 'Result verified'],
+  });
+  expect(r.exitCode).toBe(0);
+}
+
 function setupChannelWorkdir(configExtra: object = {}): Workdir {
   const wd = setupWorkdir();
   const stateDir = path.join(wd.dir, '.claude.local', 'channels', 'telegram');
@@ -58,7 +69,7 @@ describe('channel-status-responder', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'writing the plan' }));
+      await openTask(wd, 'writing the plan');
       const r = await run(wd, '!status', stub.url);
       expect(r.exitCode).toBe(0);
       expect(JSON.parse(r.stdout.trim())).toMatchObject({ decision: 'block' });
@@ -213,11 +224,11 @@ describe('channel-status-responder', () => {
     expect(r.exitCode).toBe(0);
   });
 
-  test('reply never leaks internal vocabulary (PROP/S-NNN)', async () => {
+  test('reply never leaks internal vocabulary (internal IDs)', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'PROP-020 implementation' }));
+      await openTask(wd, 'PROP-020 implementation');
       await run(wd, '!status', stub.url);
       const sent = stub.requests[0].body.text as string;
       expect(sent).not.toMatch(/S-\d{3}/);
@@ -227,7 +238,7 @@ describe('channel-status-responder', () => {
     }
   });
 
-  test('paused session -> reply mentions the pause without reading .status.json', async () => {
+  test('paused session -> reply mentions the pause', async () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
@@ -292,9 +303,8 @@ describe('channel-status-responder', () => {
       budget: { daily_usd: 5, weekly_usd: null, monthly_usd: null, action: 'alert' },
     });
     try {
-      fs.mkdirSync(hermit(wd.dir, 'sessions'), { recursive: true });
       fs.mkdirSync(hermit(wd.dir, 'state'), { recursive: true });
-      write(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ task: 'secret-migration', status: 'in_progress' }));
+      await openTask(wd, 'secret-migration');
       write(hermit(wd.dir, 'state', 'micro-proposals.json'), JSON.stringify({ pending: [{ id: 'MP-20260705-0', status: 'pending', tier: 1, question: 'ok?' }] }));
 
       const stranger = JSON.stringify({ prompt: '<channel source="telegram" chat_id="999" user="stranger">!status</channel>' });
@@ -319,7 +329,7 @@ describe('channel-status-responder', () => {
       const stub = startHttpStub();
       const wd = setupChannelWorkdir({ language: 'português' });
       try {
-        fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'o plano' }));
+        await openTask(wd, 'o plano');
         await run(wd, '!status', stub.url);
         expect(stub.requests[0].body.text).toContain('A trabalhar em o plano.');
       } finally {
@@ -363,7 +373,7 @@ describe('channel-status-responder', () => {
         channels: { telegram: { enabled: true, dm_channel_id: '12345', state_dir: '.claude.local/channels/telegram' } },
       });
       try {
-        fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'segredo' }));
+        await openTask(wd, 'segredo');
         const stranger = JSON.stringify({ prompt: '<channel source="telegram" chat_id="999" user="stranger">!status</channel>' });
         const r = await runScript('user-prompt-pipeline.ts', { stdin: stranger, cwd: wd.dir, env: { HERMIT_TELEGRAM_API_URL: stub.url } });
         expect(r.exitCode).toBe(0);
@@ -385,7 +395,7 @@ describe('channel-status-responder', () => {
     const stub = startHttpStub();
     const wd = setupChannelWorkdir();
     try {
-      fs.writeFileSync(hermit(wd.dir, 'sessions', '.status.json'), JSON.stringify({ status: 'in_progress', task: 'writing the plan' }));
+      await openTask(wd, 'writing the plan');
       const qualified = JSON.stringify({ prompt: '<channel source="plugin:telegram:telegram" chat_id="12345" user="u1">!status</channel>' });
       const r = await runScript('user-prompt-pipeline.ts', { stdin: qualified, cwd: wd.dir, env: { HERMIT_TELEGRAM_API_URL: stub.url } });
       expect(r.exitCode).toBe(0);

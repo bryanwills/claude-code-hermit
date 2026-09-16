@@ -907,8 +907,7 @@ describe('update-alert-state', () => {
     return {
       state: fs.existsSync(stateFile) ? readJson(stateFile) : null,
       stdout: r.stdout.trim() ? JSON.parse(r.stdout.trim()) : null,
-      // The script appends these itself now, so the assertions read the file it
-      // wrote rather than a list it handed back for the model to apply.
+      // Retired journal writes remain absent.
       monitoring: monitoringLines(shellPath).slice(before.length),
     };
   }
@@ -1242,7 +1241,7 @@ describe('update-alert-state', () => {
     write(hermit(dir, 'state', 'alert-state.json'), JSON.stringify({
       alerts: {}, self_eval: {}, total_ticks: 3, last_digest_date: today,
     }));
-    write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
+    write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[]}');
     fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
 
@@ -1587,24 +1586,27 @@ describe('observations.ts observe', () => {
     expect(JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim()).pattern).toBe(label);
   }));
 
-  test('observations (ts is stamped, session_id resolved from runtime.json)', withDir(async (dir) => {
-    fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'S-042' }));
+  test('observations stamps the configured local date in session_id', withDir(async (dir) => {
+    write(hermit(dir, 'config.json'), JSON.stringify({ timezone: 'Pacific/Honolulu' }));
     await observe(hermit(dir), 'quick-deferral', 'a label');
     const line = JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim());
-    expect(line.session_id).toBe('S-042');
+    expect(line.session_id).toBe(new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Pacific/Honolulu', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(line.ts)));
     expect(line.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   }));
 
-  test('observations (missing runtime.json → session_id "unknown")', withDir(async (dir) => {
+  test('observations defaults to UTC without runtime or config', withDir(async (dir) => {
     await observe(hermit(dir), 'quick-deferral', 'a label');
-    expect(JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim()).session_id).toBe('unknown');
+    const line = JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim());
+    expect(line.session_id).toBe(line.ts.slice(0, 10));
   }));
 
-  test('observations (null session_id + S-010-REPORT.md → session_id S-010)', withDir(async (dir) => {
-    fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_id: null }));
-    fs.writeFileSync(hermit(dir, 'sessions', 'S-010-REPORT.md'), '# S-010\n');
+  test('observations ignores retained report identity', withDir(async (dir) => {
+    write(hermit(dir, 'sessions', 'S-010-REPORT.md'), '# S-010\n');
     await observe(hermit(dir), 'quick-deferral', 'a label');
-    expect(JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim()).session_id).toBe('S-010');
+    const line = JSON.parse(fs.readFileSync(ledgerOf(dir), 'utf-8').trim());
+    expect(line.session_id).toBe(line.ts.slice(0, 10));
   }));
 
   test('observations (deterministic sources are not invocable from the CLI)', withDir(async (dir) => {
@@ -1820,7 +1822,7 @@ describe('proposal gate', () => {
   }));
 
   test('gate (judge DOWNGRADE -> PROCEED with tier)', withDir(async (dir) => {
-    const out = await gate(dir, { gate: 'judge' }, 'Bar', 'DOWNGRADE:2: Bar — auto-closed-evidence');
+    const out = await gate(dir, { gate: 'judge' }, 'Bar', 'DOWNGRADE:2: Bar — weak-recurrence');
     expect(out).toBe('PROCEED|DOWNGRADE:2');
   }));
 
@@ -2275,7 +2277,7 @@ function seedHeartbeat(dir: string, opts: {
     `{"timezone":"UTC","heartbeat":{"active_hours":{"start":"00:00","end":"${opts.end ?? '23:59'}"}}}`);
   write(hermit(dir, 'state', 'alert-state.json'),
     opts.alertState ?? '{"alerts":{},"last_digest_date":null,"self_eval":{},"total_ticks":0}');
-  write(hermit(dir, 'state', 'runtime.json'), opts.runtime ?? '{"session_state":"idle"}');
+  write(hermit(dir, 'state', 'runtime.json'), opts.runtime ?? '{}');
   write(hermit(dir, 'state', 'micro-proposals.json'), opts.micro ?? '{"pending":[]}');
   if (opts.checklist != null) write(hermit(dir, 'HEARTBEAT.md'), opts.checklist);
 }
@@ -2327,7 +2329,7 @@ describe('heartbeat-precheck', () => {
 
   // 17. EVALUATE — session in_progress
   test('heartbeat-precheck (EVALUATE: session in_progress)', withDir(async (dir) => {
-    seedHeartbeat(dir, { runtime: '{"session_state":"in_progress"}', checklist: DEFAULT_CHECKLIST });
+    seedHeartbeat(dir, { runtime: '{}', checklist: DEFAULT_CHECKLIST });
     expect(await precheckOut(dir)).toBe('EVALUATE');
   }));
 
@@ -2433,19 +2435,6 @@ describe('heartbeat-precheck (PROP-015 pause gate)', () => {
     expect(await precheckOut(dir)).toBe('SKIP|paused');
   }));
 
-  // Precedence over pending-close: even a queued AUTO_CLOSE must not fire while paused.
-  test('heartbeat-precheck (SKIP: paused takes precedence over pending AUTO_CLOSE)', withDir(async (dir) => {
-    seedHeartbeat(dir, {
-      checklist: DEFAULT_CHECKLIST,
-      runtime: '{"session_state":"in_progress"}',
-    });
-    write(hermit(dir, 'state', 'pause.json'),
-      '{"paused":true,"paused_until":null,"reason":"operator","by":"test","ts":"2026-01-01T00:00:00.000Z"}');
-    write(hermit(dir, 'state', 'pending-close.json'), '{"queued_at":"2026-01-01T00:00:00.000Z"}');
-    write(hermit(dir, 'state', 'last-operator-action.json'), '{"at":"2020-01-01T00:00:00.000Z"}');
-    expect(await precheckOut(dir)).toBe('SKIP|paused');
-  }));
-
   test('heartbeat-precheck (SKIP: paused, --peek mode identical)', withDir(async (dir) => {
     seedHeartbeat(dir, { checklist: DEFAULT_CHECKLIST });
     write(hermit(dir, 'state', 'pause.json'),
@@ -2490,7 +2479,7 @@ function seedDamper(dir: string, opts: {
       ? {}
       : { last_clean_eval_at: new Date(now - opts.cleanAgoMs).toISOString() }),
   }));
-  write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
+  write(hermit(dir, 'state', 'runtime.json'), '{}');
   write(hermit(dir, 'state', 'micro-proposals.json'), '{"pending":[]}');
   write(hermit(dir, 'HEARTBEAT.md'), DEFAULT_CHECKLIST);
 }
@@ -2789,7 +2778,7 @@ console.log('EVALUATE');
     expect(r.stdout).toBe('');
   });
 
-  // 20d. AUTO_CLOSE → HEARTBEAT_EVALUATE
+  // Retired verdicts must not trigger evaluation.
   test('heartbeat-monitor (retired AUTO_CLOSE is an unknown verdict)', async () => {
     const r = await monitorOnce('process.stdout.write("AUTO_CLOSE\\n");\n');
     r.cleanup();
@@ -3022,7 +3011,7 @@ async function seedComputeActivity(dir: string) {
 
 function seedReflect(dir: string, stateJson: object) {
   write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
-  write(hermit(dir, 'state', 'runtime.json'), '{"session_state":"idle"}');
+  write(hermit(dir, 'state', 'runtime.json'), '{}');
   fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
   // Default a recent behavior-digest cursor so the weekly `behavior` phase stays
   // quiet unless a test opts in (callers override by including the key).
@@ -3040,7 +3029,7 @@ describe('reflect-precheck', () => {
       last_reflection: today, last_resolution_check: null, last_digest_at: today,
       counters: { total_runs: 5, empty_runs: 2, runs_with_candidates: 3, last_run_at: today, since: since30() },
     });
-    // No cost log, no session reports newer than last_run_at
+    // No cost log or task results newer than last_run_at
     const r = await runReflectPrecheck(dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trimEnd()).toBe('EMPTY');
@@ -3053,9 +3042,10 @@ describe('reflect-precheck', () => {
       last_reflection: today,
       counters: { total_runs: 1, empty_runs: 0, last_run_at: today, since: since30() },
     });
+    const frozen = '# Frozen journal\n';
+    write(hermit(dir, 'sessions', 'SHELL.md'), frozen);
     await runReflectPrecheck(dir);
-    const shell = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
-    expect(shell).not.toContain('reflect');
+    expect(fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8')).toBe(frozen);
   }));
 
   // 23. EMPTY path: empty_runs incremented in reflection-state.json
@@ -3096,7 +3086,7 @@ describe('reflect-precheck', () => {
     expect(r.stdout).toContain('resolution_check');
   }));
 
-  // 25. RUN — compute activity (session report newer than last_run_at)
+  // 25. RUN: compute activity from a new task result
   test('reflect-precheck (RUN: compute activity detected)', withDir(async (dir) => {
     seedReflect(dir, {
       counters: { total_runs: 2, empty_runs: 1, last_run_at: '2026-01-01T00:00:00Z', since: since30() },
@@ -3106,125 +3096,21 @@ describe('reflect-precheck', () => {
     expect(r.stdout).toContain('compute');
   }));
 
-  // Local helper for #26-#29 — workdir with config/runtime/state/proposals scaffolding.
-  function seedArchivePrecheck(dir: string, sessionState: string, inflate: boolean) {
-    write(hermit(dir, 'config.json'), '{"timezone":"UTC"}');
-    write(hermit(dir, 'state', 'runtime.json'),
-      `{"session_state":"${sessionState}","last_shell_snapshot_at":null}`);
-    fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
-    write(hermit(dir, 'state', 'reflection-state.json'), JSON.stringify({
-      last_behavior_digest_at: isoSec(new Date()),
-      counters: { total_runs: 5, empty_runs: 2, last_run_at: isoSec(new Date()), since: since30() },
-    }));
-    if (inflate) {
-      let fixture = fs.readFileSync(path.join(fixturesDir, 'shell-session.md'), 'utf-8');
-      if (!fixture.endsWith('\n')) fixture += '\n';
-      const bulk = Array.from({ length: 450 }, (_, k) =>
-        `- [10:${String((k + 1) % 60).padStart(2, '0')}] Bulk entry ${k + 1} — done`).join('\n');
-      write(hermit(dir, 'sessions', 'SHELL.md'), fixture + bulk + '\n');
-    }
-  }
-
-  const snapshotCount = (dir: string) => {
-    try { return fs.readdirSync(hermit(dir, 'sessions', 'snapshots')).length; } catch { return 0; }
-  };
-
-  // 26. ARCHIVE-only path: SHELL.md > 400 lines, last_shell_snapshot_at null,
-  //     no other phases due → precheck runs archive-shell.ts synchronously and
-  //     emits EMPTY (no LLM reflect path).
-  describe('ARCHIVE-only', () => {
-    let wd: Workdir;
-    let out = '';
-
-    beforeAll(async () => {
-      wd = setupWorkdir();
-      seedArchivePrecheck(wd.dir, 'idle', true);
-      const r = await runReflectPrecheck(wd.dir);
-      out = r.stdout.trimEnd();
+  test('reflect-precheck ignores a large frozen journal and omits archive_due', withDir(async (dir) => {
+    seedReflect(dir, {
+      counters: { total_runs: 2, empty_runs: 1, last_run_at: '2026-01-01T00:00:00Z', since: since30() },
     });
-    afterAll(() => wd.cleanup());
-
-    test('reflect-precheck (ARCHIVE-only: emits EMPTY)', () => {
-      expect(out).toBe('EMPTY');
-    });
-    test('reflect-precheck (ARCHIVE-only: snapshot file created)', () => {
-      expect(snapshotCount(wd.dir)).toBeGreaterThanOrEqual(1);
-    });
-    test('reflect-precheck (ARCHIVE-only: last_shell_snapshot_at populated)', () => {
-      expect(readJson(hermit(wd.dir, 'state', 'runtime.json')).last_shell_snapshot_at).not.toBeNull();
-    });
-    test('reflect-precheck (ARCHIVE-only: SHELL.md compacted, sections preserved)', () => {
-      const shell = fs.readFileSync(hermit(wd.dir, 'sessions', 'SHELL.md'), 'utf-8');
-      expect(shell).toMatch(/^## Task/m);
-    });
-  });
-
-  // 27. ARCHIVE skipped when SHELL.md is small (no archive_due fires)
-  test('reflect-precheck (small SHELL.md: no snapshot taken)', withDir(async (dir) => {
-    seedArchivePrecheck(dir, 'idle', false);
-    await runReflectPrecheck(dir);
-    expect(snapshotCount(dir)).toBe(0);
+    const frozen = '# Frozen journal\n' + 'Historical work\n'.repeat(450);
+    write(hermit(dir, 'sessions', 'SHELL.md'), frozen);
+    await seedComputeActivity(dir);
+    const result = await runReflectPrecheck(dir);
+    expect(result.stdout).toMatch(/^RUN\|/m);
+    expect(result.stdout).toContain('"compute":true');
+    expect(result.stdout).not.toContain('archive_due');
+    expect(fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8')).toBe(frozen);
+    expect(fs.existsSync(hermit(dir, 'sessions', 'snapshots'))).toBe(false);
   }));
 
-  // 28. ARCHIVE + other phases due → RUN with archive_due in phases JSON
-  //     (a task result forces compute=true; large SHELL forces archive_due)
-  describe('ARCHIVE + other phases', () => {
-    let wd: Workdir;
-    let out = '';
-
-    beforeAll(async () => {
-      wd = setupWorkdir();
-      seedArchivePrecheck(wd.dir, 'in_progress', true);
-      await seedComputeActivity(wd.dir);
-      const r = await runReflectPrecheck(wd.dir);
-      out = r.stdout;
-    });
-    afterAll(() => wd.cleanup());
-
-    test('reflect-precheck (ARCHIVE+other: emits RUN)', () => {
-      expect(out).toMatch(/^RUN\|/m);
-    });
-    test('reflect-precheck (ARCHIVE+other: phases include compute)', () => {
-      expect(out).toContain('"compute":true');
-    });
-    test('reflect-precheck (ARCHIVE+other: phases include archive_due)', () => {
-      expect(out).toContain('"archive_due":true');
-    });
-    test('reflect-precheck (ARCHIVE+other: snapshot still taken)', () => {
-      expect(snapshotCount(wd.dir)).toBe(1);
-    });
-  });
-
-  // 29. ARCHIVE due but subprocess fails (snapshot already exists, EEXIST/concurrent)
-  //     + other phases → archive_due omitted from phases JSON (gated on archiveTaken)
-  describe('ARCHIVE failed', () => {
-    let wd: Workdir;
-    let out = '';
-
-    beforeAll(async () => {
-      wd = setupWorkdir();
-      seedArchivePrecheck(wd.dir, 'in_progress', true);
-      await seedComputeActivity(wd.dir);
-      fs.mkdirSync(hermit(wd.dir, 'sessions', 'snapshots'), { recursive: true });
-      // Pre-create the file linkSync would target (HERMIT_NOW pinned) → EEXIST.
-      write(hermit(wd.dir, 'sessions', 'snapshots', 'SHELL-20260506-2200.md'), '');
-      const r = await runReflectPrecheck(wd.dir, {
-        cwd: wd.dir, env: { HERMIT_NOW: '2026-05-06T22:00:00Z' },
-      });
-      out = r.stdout;
-    });
-    afterAll(() => wd.cleanup());
-
-    test('reflect-precheck (ARCHIVE failed: emits RUN)', () => {
-      expect(out).toMatch(/^RUN\|/m);
-    });
-    test('reflect-precheck (ARCHIVE failed: compute still in phases)', () => {
-      expect(out).toContain('"compute":true');
-    });
-    test('reflect-precheck (ARCHIVE failed: archive_due omitted)', () => {
-      expect(out).not.toContain('archive_due');
-    });
-  });
 });
 
 // -------------------------------------------------------
@@ -3563,9 +3449,9 @@ describe('cost-log', () => {
     costIndexFile = hermit(wd.dir, 'state', 'cost-index.json');
     costLogFile = path.join(wd.dir, '.claude', 'cost-log.jsonl');
     write(costLogFile, [
-      `{"timestamp":"${D2}T10:00:00.000Z","session_id":"s1","source":"heartbeat","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":100000,"output_tokens":0,"total_tokens":100000,"estimated_cost_usd":0.03}`,
-      `{"timestamp":"${D2}T10:01:00.000Z","session_id":"s1","source":"other","model":"sonnet","input_tokens":0,"cache_write_tokens":50000,"cache_read_tokens":0,"output_tokens":500,"total_tokens":50500,"estimated_cost_usd":0.195}`,
-      `{"timestamp":"${D1}T10:00:00.000Z","session_id":"s2","source":"other","model":"haiku","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":200000,"output_tokens":2000,"total_tokens":202000,"estimated_cost_usd":0.024}`,
+      `{"timestamp":"${D2}T10:00:00.000Z","cc_session_id":"s1","source":"heartbeat","model":"sonnet","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":100000,"output_tokens":0,"total_tokens":100000,"estimated_cost_usd":0.03}`,
+      `{"timestamp":"${D2}T10:01:00.000Z","cc_session_id":"s1","source":"other","model":"sonnet","input_tokens":0,"cache_write_tokens":50000,"cache_read_tokens":0,"output_tokens":500,"total_tokens":50500,"estimated_cost_usd":0.195}`,
+      `{"timestamp":"${D1}T10:00:00.000Z","cc_session_id":"s2","source":"other","model":"haiku","input_tokens":0,"cache_write_tokens":0,"cache_read_tokens":200000,"output_tokens":2000,"total_tokens":202000,"estimated_cost_usd":0.024}`,
       '',
     ].join('\n'));
   });
@@ -3605,8 +3491,8 @@ describe('cost-log', () => {
     const pruneLog = path.join(wd.dir, '.claude', 'cost-log-prune.jsonl');
     const pruneIndex = hermit(wd.dir, 'state', 'cost-index-prune.json');
     write(pruneLog, [
-      '{"timestamp":"2020-01-01T10:00:00.000Z","session_id":"old","source":"other","total_tokens":1000,"estimated_cost_usd":0.01}',
-      `{"timestamp":"${D1}T10:00:00.000Z","session_id":"new","source":"other","total_tokens":2000,"estimated_cost_usd":0.02}`,
+      '{"timestamp":"2020-01-01T10:00:00.000Z","cc_session_id":"old","source":"other","total_tokens":1000,"estimated_cost_usd":0.01}',
+      `{"timestamp":"${D1}T10:00:00.000Z","cc_session_id":"new","source":"other","total_tokens":2000,"estimated_cost_usd":0.02}`,
       '',
     ].join('\n'));
     const idx = updateCostIndex(pruneLog, pruneIndex);
@@ -3630,8 +3516,8 @@ describe('cost-log', () => {
     const baselineLog = path.join(dir, '.claude', 'cost-log-baseline.jsonl');
     const baselineIndex = hermit(dir, 'state', 'cost-index-baseline.json');
     write(baselineLog, [
-      '{"timestamp":"2026-01-01T10:00:00.000Z","session_id":"s1","source":"other","total_tokens":1000,"estimated_cost_usd":0.10}',
-      '{"timestamp":"2026-01-01T10:01:00.000Z","session_id":"s1","source":"other","total_tokens":2000,"estimated_cost_usd":0.20}',
+      '{"timestamp":"2026-01-01T10:00:00.000Z","cc_session_id":"s1","source":"other","total_tokens":1000,"estimated_cost_usd":0.10}',
+      '{"timestamp":"2026-01-01T10:01:00.000Z","cc_session_id":"s1","source":"other","total_tokens":2000,"estimated_cost_usd":0.20}',
       '',
     ].join('\n'));
     const baseline = updateCostIndex(baselineLog, baselineIndex);
@@ -3639,8 +3525,8 @@ describe('cost-log', () => {
     const taggedLog = path.join(dir, '.claude', 'cost-log-tagged.jsonl');
     const taggedIndex = hermit(dir, 'state', 'cost-index-tagged.json');
     write(taggedLog, [
-      '{"timestamp":"2026-01-01T10:00:00.000Z","session_id":"s1","source":"channel:discord","total_tokens":1000,"estimated_cost_usd":0.10}',
-      '{"timestamp":"2026-01-01T10:01:00.000Z","session_id":"s1","source":"other","total_tokens":2000,"estimated_cost_usd":0.20}',
+      '{"timestamp":"2026-01-01T10:00:00.000Z","cc_session_id":"s1","source":"channel:discord","total_tokens":1000,"estimated_cost_usd":0.10}',
+      '{"timestamp":"2026-01-01T10:01:00.000Z","cc_session_id":"s1","source":"other","total_tokens":2000,"estimated_cost_usd":0.20}',
       '',
     ].join('\n'));
     const tagged = updateCostIndex(taggedLog, taggedIndex);
@@ -3667,9 +3553,9 @@ describe('cost-log', () => {
     const corruptLog = path.join(wd.dir, '.claude', 'cost-log-corrupt.jsonl');
     const corruptIndex = hermit(wd.dir, 'state', 'cost-index-corrupt.json');
     write(corruptLog, [
-      '{"timestamp":"2026-01-01T10:00:00.000Z","session_id":"x","model":"sonnet","total_tokens":1000,"estimated_cost_usd":0.01}',
+      '{"timestamp":"2026-01-01T10:00:00.000Z","cc_session_id":"x","model":"sonnet","total_tokens":1000,"estimated_cost_usd":0.01}',
       'NOT VALID JSON AT ALL',
-      '{"timestamp":"2026-01-01T10:01:00.000Z","session_id":"x","model":"sonnet","total_tokens":2000,"estimated_cost_usd":0.02}',
+      '{"timestamp":"2026-01-01T10:01:00.000Z","cc_session_id":"x","model":"sonnet","total_tokens":2000,"estimated_cost_usd":0.02}',
       '',
     ].join('\n'));
     const idx = updateCostIndex(corruptLog, corruptIndex);
@@ -3709,7 +3595,7 @@ describe('cost-log', () => {
       write(logFile, [
         // counted: automated + opus + in window
         `{"timestamp":"${inWindow}T10:00:00.000Z","source":"heartbeat","model":"opus","total_tokens":100,"estimated_cost_usd":5.00}`,
-        `{"timestamp":"${inWindow}T11:00:00.000Z","source":"routine:daily-auto-close","model":"opus","total_tokens":50,"estimated_cost_usd":2.50}`,
+        `{"timestamp":"${inWindow}T11:00:00.000Z","source":"routine:daily-review","model":"opus","total_tokens":50,"estimated_cost_usd":2.50}`,
         // excluded: not automated
         `{"timestamp":"${inWindow}T12:00:00.000Z","source":"other","model":"opus","total_tokens":50,"estimated_cost_usd":0.50}`,
         // excluded: wrong model
@@ -4171,15 +4057,15 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
   // tool-use/task id back to the dispatching turn's prompt.
   test('cost-tracker: subagent-completion turn inherits the dispatching routine', () => {
     const lines = [
-      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily-auto-close] Invoke /session-close.' } }),
+      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily-review] Invoke /weekly-review.' } }),
       JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_abc', name: 'Agent', input: {} }] } }),
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 'toolu_abc', type: 'tool_result', content: 'dispatched' }] } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } }),
-      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> <summary>Agent "daily-auto-close routine" came to rest</summary> </task-notification>' } }),
+      JSON.stringify({ type: 'user', message: { content: '<task-notification> <task-id>a22f60f</task-id> <tool-use-id>toolu_abc</tool-use-id> <status>completed</status> <summary>Agent "daily-review routine" came to rest</summary> </task-notification>' } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
     const resolved = resolveTurnSource(lines, 5);
-    expect(resolved.source).toBe('routine:daily-auto-close');
+    expect(resolved.source).toBe('routine:daily-review');
     // Flagged as borrowed from the dispatch, not this turn's own prompt — the cost row
     // carries source_inherited so $/run doesn't count this second turn as a second fire.
     expect(resolved.inherited).toBe(true);
@@ -4190,7 +4076,7 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
   // notification is itself a real user entry, so turnPromptText stops there and yields 'other'.
   test('cost-tracker: a repeat completion notification does not shadow the dispatch', () => {
     const lines = [
-      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily-auto-close] Invoke /session-close.' } }),
+      JSON.stringify({ type: 'user', message: { content: '[hermit-routine:daily-review] Invoke /weekly-review.' } }),
       JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_abc', name: 'Agent', input: {} }] } }),
       JSON.stringify({ type: 'user', message: { content: [{ tool_use_id: 'toolu_abc', type: 'tool_result', content: 'dispatched' }] } }),
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } }),
@@ -4200,7 +4086,7 @@ describe('cost-tracker classifySource / resolveTurnSource', () => {
       JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 50 } } }),
     ];
     const resolved = resolveTurnSource(lines, 7);
-    expect(resolved.source).toBe('routine:daily-auto-close');
+    expect(resolved.source).toBe('routine:daily-review');
     expect(resolved.inherited).toBe(true);
   });
 

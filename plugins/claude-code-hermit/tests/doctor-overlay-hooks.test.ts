@@ -37,7 +37,7 @@ function scenario({ missingOverlay, corruptOverlay, booted, missingScript, trust
   else if (!missingOverlay) fs.writeFileSync(overlayFile, JSON.stringify(overlay));
   // runtime.json is the "a boot happened here" marker the check reads; the stamped-trust
   // branch below writes its own, so only seed one when that branch will not.
-  if (booted && trust !== 'stamped') fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({ session_state: 'idle' }));
+  if (booted && trust !== 'stamped') fs.writeFileSync(path.join(stateDir, 'runtime.json'), JSON.stringify({}));
   if (trust !== 'none') {
     const trustDir = trust === 'stamped' ? path.join(dir, 'stamped') : configDir;
     fs.mkdirSync(trustDir, { recursive: true });

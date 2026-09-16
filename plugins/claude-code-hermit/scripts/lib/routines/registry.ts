@@ -104,7 +104,6 @@ function promptHash(r: Json, shiftedSchedule: string, pluginRoot: string): strin
   return sha256(JSON.stringify({
     id: r.id,
     skill: r.skill,
-    run_during_waiting: !!r.run_during_waiting,
     model: r.model ?? null,
     reflect_after: !!r.reflect_after,
     expect_artifact: r.expect_artifact ?? null,

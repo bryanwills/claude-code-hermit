@@ -16,7 +16,6 @@ import { runScript, PLUGIN_ROOT } from './helpers/run';
 
 const read = (...p: string[]) => fs.readFileSync(path.join(PLUGIN_ROOT, ...p), 'utf-8');
 
-const sessionClose = read('skills', 'session-close', 'SKILL.md');
 // reflect's candidate-processing detail lives in branches.md (the
 // rare-branch procedures file); assert against the combined surface.
 const reflect = read('skills', 'reflect', 'SKILL.md') + '\n' + read('skills', 'reflect', 'branches.md');
@@ -27,26 +26,6 @@ const hatch = read('skills', 'hatch', 'SKILL.md');
 const proposalCreate = read('skills', 'proposal-create', 'SKILL.md');
 
 const todayYmd = () => new Date().toISOString().slice(0, 10);
-
-// ── item 1: session-close tooling debrief ───────────────────────────────────
-
-describe('session-close tooling debrief', () => {
-  test('session-close: tooling debrief question present', () => {
-    expect(sessionClose).toContain('What did I build ad-hoc this session');
-  });
-
-  test('session-close: re-derivation debrief question present', () => {
-    expect(sessionClose).toContain('re-derive or re-discover');
-  });
-
-  test('session-close: debrief asks for quantified cost', () => {
-    expect(sessionClose).toContain('quantified cost');
-  });
-
-  test('session-close: debrief feeds procedure-capture Lessons', () => {
-    expect(sessionClose).toContain('procedure-capture recurs on');
-  });
-});
 
 // ── item 2: weekly-review reflect vital-signs ───────────────────────────────
 
@@ -313,7 +292,7 @@ describe('artifact-cited evidence path', () => {
   });
 
   test('reflect: integrity rule keeps prose self-certification barred', () => {
-    expect(reflect).toContain('must never write the pattern into SHELL.md');
+    expect(reflect).toContain('must never write the pattern into the open task record');
   });
 
   test('reflect: integrity rule gains artifact-cited path', () => {

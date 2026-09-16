@@ -29,7 +29,6 @@ import { siblingPluginDirs, versionedCacheCoreDir, readHermitMeta } from './lib/
 import { doctorAlertsPath, readAlertState, mutateOwnedAlerts, DOCTOR_PREFIX } from './lib/alert-state';
 import { readDenials } from './lib/denial-log';
 import { readRoutineHistory } from './lib/routines/history';
-import { isCloseableSessionState } from './lib/auto-close';
 import { promptTokensOf, compactibleTokens, isOwnTurn } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { expandSessionName } from './lib/tmux';
@@ -239,16 +238,6 @@ function checkStateFiles(p: DoctorPaths = PATHS) {
     } catch {
       // file existence was already checked above; any error here is unexpected
       return { id: 'state', status: 'fail', detail: 'template-manifest.json: unreadable' };
-    }
-    // A SHELL.md at the hermit root is a wrong-path write: the session file lives in
-    // sessions/, so a stray copy quietly collects appends the real one never gets and
-    // is never archived with the session.
-    if (fs.existsSync(path.join(hermitDir, 'SHELL.md'))) {
-      return {
-        id: 'state',
-        status: 'warn',
-        detail: 'stray SHELL.md at the hermit root: the session file is sessions/SHELL.md — move anything worth keeping across, then delete the stray copy',
-      };
     }
     return { id: 'state', status: 'ok', detail: `${stateFiles.length} state file(s) parse cleanly` };
   } catch (e: any) {
@@ -812,105 +801,8 @@ function daysSince(iso: any): any {
   return (Date.now() - t) / MS_PER_DAY;
 }
 
-function checkArchival(p: DoctorPaths = PATHS) {
-  const { stateDir } = p;
-  try {
-    const runtimePath = path.join(stateDir, 'runtime.json');
-    if (!fs.existsSync(runtimePath)) {
-      return { id: 'archive', status: 'ok', detail: 'no runtime state' };
-    }
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
-    const state = rt.session_state;
-    const sid = rt.session_id;
-    const age = daysSince(rt.updated_at);
-    const ageStr = age == null ? null : `${age.toFixed(1)}d`;
-    const ageDetail = ageStr == null ? 'no timestamp' : `last update ${ageStr} ago`;
-
-    if ((state === 'in_progress' || state === 'waiting') && age > 2) {
-      return {
-        id: 'archive',
-        status: 'warn',
-        detail: `stale active session: state=${state}, ${ageDetail} (daily-auto-close may have stopped archiving)`,
-      };
-    }
-    if (state === 'idle' && sid && age > 2) {
-      return {
-        id: 'archive',
-        status: 'warn',
-        detail: `orphaned session: id=${sid}, idle but never archived (${ageStr} ago)`,
-      };
-    }
-    return { id: 'archive', status: 'ok', detail: `session_state=${state || 'unset'}, ${ageDetail}` };
-  } catch (e: any) {
-    return { id: 'archive', status: 'fail', detail: `check failed: ${e.message}` };
-  }
-}
-
-// Queue health for the midnight auto-close, kept separate from `archive` on purpose:
-// a check returns exactly one {id,status,detail}, and the alert ledger keys on id, so
-// folding this into checkArchival would force a priority call between two independent
-// failures (and silently drop one). Cause-agnostic by design — it fires whenever a
-// queued close stops draining, whether the cause is a dead monitor, a hermit with no
-// in-session poller at all (heartbeat off AND CronCreate fallback), or a close that
-// keeps failing. Corrupt JSON is already checkStateFiles' job; this is semantic only.
-function checkAutoClose(p: DoctorPaths = PATHS) {
-  const { stateDir } = p;
-  try {
-    const pendingPath = path.join(stateDir, 'pending-close.json');
-    if (!fs.existsSync(pendingPath)) {
-      return { id: 'auto-close', status: 'ok', detail: 'no queued close' };
-    }
-    const pending = readJson(pendingPath);
-    if (!pending || typeof pending !== 'object') {
-      // File integrity is checkStateFiles' finding; don't double-report the same
-      // root cause under a second ledger id. A non-object payload carries no
-      // queued_at either way, and the drain's readJSON treats it as no flag.
-      return { id: 'auto-close', status: 'ok', detail: 'pending-close.json unreadable or malformed (file integrity is the state check)' };
-    }
-
-    const runtimePath = path.join(stateDir, 'runtime.json');
-    if (!fs.existsSync(runtimePath)) {
-      // auto-close-decision treats a missing runtime exactly like a non-closeable
-      // session_state: the next fire reaps the flag. The absent file itself is
-      // already the state check's finding.
-      return { id: 'auto-close', status: 'ok', detail: 'queued close, runtime.json absent (stale flag is reaped at next fire)' };
-    }
-    let state: any;
-    try {
-      state = JSON.parse(fs.readFileSync(runtimePath, 'utf8')).session_state;
-    } catch {
-      return {
-        id: 'auto-close',
-        status: 'warn',
-        detail: 'close queued but runtime.json is unreadable — nothing can drain it',
-      };
-    }
-    if (!isCloseableSessionState(state)) {
-      // Not closeable; the next auto-close-decision reaps the flag itself.
-      return { id: 'auto-close', status: 'ok', detail: `queued close, session_state=${state || 'unset'} (stale flag is reaped at next fire)` };
-    }
-
-    const age = daysSince(pending.queued_at);
-    if (age == null) {
-      // Malformed queued_at: the drain's own fail-open path declines to trust it,
-      // so don't escalate on it either — checkStateFiles owns malformed state.
-      return { id: 'auto-close', status: 'ok', detail: 'queued close, no readable queued_at' };
-    }
-    if (age > 1) {
-      return {
-        id: 'auto-close',
-        status: 'warn',
-        detail: `queued close not drained for ${age.toFixed(1)}d — check heartbeat.enabled and the routine monitor`,
-      };
-    }
-    return { id: 'auto-close', status: 'ok', detail: `queued close pending ${(age * 24).toFixed(1)}h` };
-  } catch (e: any) {
-    return { id: 'auto-close', status: 'fail', detail: `check failed: ${e.message}` };
-  }
-}
-
 // Informational only — never warns. A high empty rate is a legitimate steady state, and the
-// counters are caller-blind (routine, session finalization, session-close, manual /reflect all
+// counters are caller-blind (routine and manual /reflect both
 // increment total_runs identically), so no warn could name a knob to turn.
 function checkReflectLoop(p: DoctorPaths = PATHS) {
   const { stateDir } = p;
@@ -1126,11 +1018,11 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
       return { id: 'watchdog', status: 'ok', detail: 'watchdog: scheduler opted out' };
     }
 
-    // Steps 0a-0c (post-close clear, emergency clear, routine-hygiene compact) run
+    // Steps 0a-0c (standalone clear, emergency clear, routine-hygiene compact) run
     // independent of watchdog.enabled — a hermit can have the restart tier off and
     // still depend on the scheduler tick for hygiene. Only report the "disabled
     // (opt-in)" all-clear when nothing at all needs that tick.
-    const hygieneActive = config.post_close_clear === true
+    const hygieneActive = config.context_hygiene?.clear?.enabled === true
       || (typeof wCfg.context_clear_tokens === 'number' && wCfg.context_clear_tokens > 0)
       || config.context_hygiene?.compact?.enabled === true;
 
@@ -1185,28 +1077,6 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
       }
       const staleLabel = wCfg.enabled ? 'enabled but not firing' : "scheduler isn't firing";
       return { id: 'watchdog', status: 'warn', detail: `watchdog: ${staleLabel} (${ageNote}) — ${remedy}` };
-    }
-
-    // Pathology: a shutdown stamp on a still-alive session silently bricks context
-    // hygiene AND watchdog restart recovery — passesLifecycleGuards treats any non-null
-    // shutdown_requested_at/shutdown_completed_at as "the hermit is stopping". hermit-start
-    // clears both stamps on boot, so a surviving stamp means a non-hermit-stop close
-    // planted it (a nightly auto-close reusing /session-close's "Full Shutdown" framing)
-    // and the hermit hasn't restarted since. Checked AFTER liveness: a dead scheduler is
-    // the higher-severity signal and its remedy differs, so it must win when both hold.
-    // Gated on stamp age: a real in-flight hermit-stop stamps shutdown_requested_at
-    // seconds before /session-close flips session_state to idle, so a fresh stamp on an
-    // in_progress/waiting session is that transient window, not the pathology.
-    if (runtime && ['in_progress', 'waiting'].includes(runtime.session_state)) {
-      const stamp = runtime.shutdown_requested_at || runtime.shutdown_completed_at;
-      const stampMs = stamp ? Date.parse(stamp) : NaN;
-      if (stamp && (!Number.isFinite(stampMs) || Date.now() - stampMs > STALE_MS)) {
-        return {
-          id: 'watchdog',
-          status: 'warn',
-          detail: `watchdog: session alive (${runtime.session_state}) but runtime.json carries a stale shutdown stamp (${stamp}) — blocks context hygiene and watchdog restart until the next hermit-start clears it`,
-        };
-      }
     }
 
     if (unitName) {
@@ -1338,7 +1208,7 @@ function checkContextAge(p: DoctorPaths = PATHS) {
     const runtimePath = path.join(stateDir, 'runtime.json');
     let runtime: Json = null;
     try { runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf-8')); } catch {}
-    if (!runtime || !['in_progress', 'waiting'].includes(runtime.session_state)) {
+    if (!runtime) {
       return { id: 'context-age', status: 'ok', detail: 'no active session' };
     }
 
@@ -1437,12 +1307,6 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     if (!fs.existsSync(runtimePath)) {
       return { id: 'heartbeat', status: 'ok', detail: 'heartbeat: enabled, no runtime state' };
     }
-    const rt = JSON.parse(fs.readFileSync(runtimePath, 'utf-8'));
-    const sessionState = rt.session_state;
-    if (sessionState !== 'in_progress' && sessionState !== 'waiting') {
-      return { id: 'heartbeat', status: 'ok', detail: `heartbeat: enabled, no active session (state=${sessionState ?? 'unknown'})` };
-    }
-
     const threshold = 3 * parseDuration(hbCfg.every, 30 * 60000);
     // A healthy monitor writes liveness on its first loop iteration (before any
     // sleep), so a real tick lands within seconds of spawn. The absent-liveness
@@ -1566,14 +1430,12 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
     if (!monRt) {
       return { id: 'routine-monitor', status: 'ok', detail: 'routine-monitor: not yet loaded (run /claude-code-hermit:hermit-routines load)' };
     }
-    // Read the session state before the mode branch so the boot gate can cover
+    // Read runtime presence before the mode branch so the boot gate can cover
     // croncreate-fallback too; the ok-verdict order below is unchanged.
     const runtimePath = path.join(stateDir, 'runtime.json');
     const runtimeExists = fs.existsSync(runtimePath);
-    const sessionState = runtimeExists ? JSON.parse(fs.readFileSync(runtimePath, 'utf-8')).session_state : null;
-    const sessionActive = sessionState === 'in_progress' || sessionState === 'waiting';
 
-    if (sessionActive && bootMismatch(monRt.boot_id, readBootId(hermitDir))) {
+    if (runtimeExists && bootMismatch(monRt.boot_id, readBootId(hermitDir))) {
       return {
         id: 'routine-monitor',
         status: 'fail',
@@ -1587,10 +1449,6 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
     if (!runtimeExists) {
       return { id: 'routine-monitor', status: 'ok', detail: 'routine-monitor: enabled, no runtime state' };
     }
-    if (!sessionActive) {
-      return { id: 'routine-monitor', status: 'ok', detail: `routine-monitor: enabled, no active session (state=${sessionState ?? 'unknown'})` };
-    }
-
     const interval = typeof monRt.interval === 'number' && monRt.interval > 0 ? monRt.interval : 60;
     const threshold = Math.max(10 * interval * 1000, 10 * 60 * 1000);
     const STARTUP_GRACE_MS = 2 * 60 * 1000;
@@ -2000,7 +1858,7 @@ function checkMemorySize(p: DoctorPaths = PATHS) {
 
 // ----------------- Context scan -----------------
 // Reads the record startup-context.ts writes on every SessionStart: which
-// injected entries (compiled/ bodies, catalog summaries, OPERATOR/SHELL
+// injected entries (compiled/ bodies, catalog summaries, OPERATOR/task records
 // excerpts, last report) tripped the injection-marker scan and were blocked.
 // The scan itself never mutates files — this check just surfaces its verdict.
 
@@ -2540,8 +2398,6 @@ async function runAllChecks(p: DoctorPaths = PATHS) {
     checkPermissions(p),
     checkPermissionRules(p),
     checkDockerSecurity(p),
-    checkArchival(p),
-    checkAutoClose(p),
     checkReflectLoop(p),
     checkScheduler(p),
     checkWatchdog(p),
@@ -2756,7 +2612,7 @@ export {
   checkPermissionRules,
   checkRuntime, checkConfig, checkHooks, checkStateFiles,
   checkCost, checkProposals, checkDependencies, checkVersionCurrency, checkPermissions,
-  checkDockerSecurity, checkArchival, checkAutoClose, checkReflectLoop, checkScheduler,
+  checkDockerSecurity, checkReflectLoop, checkScheduler,
   checkWatchdog, checkContextAge, checkOpusWake, checkRoutineCost, checkHeartbeat, checkRoutineMonitor,
   checkRoutinePrecheck, checkRawSize,
   checkCredentialExpiry, checkModelPricingKnown, checkMemorySize, checkContextScan, checkVoiceCarrier, checkOverlayHooks, checkClassifierDenials, checkChannelLiveness, checkPeerInbox, checkBackup,

@@ -335,7 +335,6 @@ describe('list_hermits + get_status', () => {
     writeConfig(wd.dir, { agent_name: 'FixtureBot' });
     writeJson(hermit(wd.dir, 'state', 'runtime.json'), {
       runtime_mode: 'tmux',
-      session_state: 'in_progress',
       shutdown_completed_at: null,
     });
     const status = {
@@ -350,6 +349,7 @@ describe('list_hermits + get_status', () => {
       blockers: null,
     };
     writeAged(hermit(wd.dir, 'sessions', '.status.json'), 15, JSON.stringify(status));
+    writeAged(hermit(wd.dir, 'state', '.heartbeat'), 15, '');
 
     const s = McpSession.start(['--roots', wd.dir]);
     try {
@@ -441,7 +441,7 @@ describe('list_hermits + get_status', () => {
     const { ident } = writeResident(wd.dir, {
       status: 'idle',
       statusUpdatedAt: 1_700_000_000_000,
-    }, { session_state: 'in_progress' });
+    }, {});
     const s = McpSession.start(['--roots', wd.dir]);
     try {
       await handshake(s);

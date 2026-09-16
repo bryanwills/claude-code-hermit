@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runScript } from './helpers/run';
-import { withDir, setupGitWorkdir } from './helpers/workdir';
+import { withDir } from './helpers/workdir';
 import { clearGuest, markGuest } from '../scripts/lib/guest-marker';
 
 const id = 'guest-state-test';
@@ -41,17 +41,4 @@ describe('guest prompt ownership', () => {
     await runScript('user-prompt-pipeline.ts', { cwd: dir, stdin: input });
     expect(fs.existsSync(state(dir, 'operator-pause.json'))).toBe(true);
   }));
-});
-
-test('guest direct session-diff preserves the resident sidecar', async () => {
-  const wd = setupGitWorkdir();
-  try {
-    markGuest(state(wd.dir, ''), id);
-    fs.writeFileSync(state(wd.dir, 'session-diff.json'), '{"resident":"untouched"}');
-    const result = await runScript('session-diff.ts', {
-      cwd: wd.dir, stdin: JSON.stringify({ sessionId: id }), env: { AGENT_HOOK_PROFILE: 'standard' },
-    });
-    expect(result.exitCode).toBe(0);
-    expect(fs.readFileSync(state(wd.dir, 'session-diff.json'), 'utf-8')).toBe('{"resident":"untouched"}');
-  } finally { wd.cleanup(); }
 });

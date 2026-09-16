@@ -30,7 +30,7 @@ The index rows are the parsed metadata — use them directly. A file whose front
 
 ### 3. Calculate age
 
-Determine the current session number from the highest S-NNN-REPORT.md in `sessions/`. Calculate age as the difference between current session number and the session number in the proposal's `Session` field. Display as "N sessions ago".
+Calculate age in days since the proposal's `created` timestamp. Display as "N days ago".
 
 ### 4. Display as table (terminal path)
 

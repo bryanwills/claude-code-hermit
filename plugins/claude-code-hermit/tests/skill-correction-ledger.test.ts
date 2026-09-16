@@ -1,6 +1,6 @@
 // Regression: skill-correction inner-loop — prose-pin + ledger behavioral tests.
 //
-// Guards the capture contract (session-close debrief question 3 + append row),
+// Guards observation capture and
 // the graduation routing (reflect step 3b `skill-correction:*` branch),
 // the proposal-act anchor parse (## Skill Improvement source_artifact),
 // and the graceful-degrade path (no brief → moderate proposal, no REJECT).
@@ -13,10 +13,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, runPinnedScript, PLUGIN_ROOT } from './helpers/run';
+import { todayYMD } from '../scripts/lib/time';
 
 const read = (...p: string[]) => fs.readFileSync(path.join(PLUGIN_ROOT, ...p), 'utf-8');
 
-const sessionClose = read('skills', 'session-close', 'SKILL.md');
 // reflect's skill-correction routing detail lives in branches.md (the
 // rare-branch procedures file); assert against the combined surface.
 const reflect        = read('skills', 'reflect', 'SKILL.md') + '\n' + read('skills', 'reflect', 'branches.md');
@@ -26,60 +26,6 @@ const noBriefRouting = reflect.slice(
   reflect.indexOf('**No brief found (human/plugin or brief fully gone, moderate signal):**'),
   reflect.indexOf('## `skill-preference:*` routing'),
 );
-
-// ── 1. session-close: capture contract prose pins ───────────────────────────
-
-describe('session-close: skill-correction capture', () => {
-  test('session-close: third debrief question asks about defective skill output', () => {
-    expect(sessionClose).toContain('Did a skill produce output this session that was wrong');
-  });
-
-  test('session-close: defect-only criterion excludes preference/scope changes', () => {
-    expect(sessionClose).toContain('Exclude preference, scope, or context changes');
-  });
-
-  test('session-close: appends through observations.ts with the skill-correction source', () => {
-    expect(sessionClose).toContain('observations.ts observe .claude-code-hermit skill-correction');
-  });
-
-  test('session-close: label is skill-correction:<canonical-name> on its own heredoc line', () => {
-    expect(sessionClose).toMatch(/^\s*skill-correction:<canonical-name>$/m);
-  });
-
-  test('session-close: append carries the own-work origin flag', () => {
-    expect(sessionClose).toContain('--origin=own-work');
-  });
-
-  test('session-close: canonical name reads name: frontmatter, strips plugin prefix', () => {
-    expect(sessionClose).toContain('strip any `claude-code-hermit:`/`<plugin>:` prefix');
-  });
-
-  test('session-close: what/why goes on a ## Lessons line (not a ledger field)', () => {
-    expect(sessionClose).toContain('Lessons line carries the reason content');
-  });
-
-  test('session-close: auto-close skips correction rows (gated to operator-close)', () => {
-    expect(sessionClose).toContain('`--auto` skips step 1 and writes no correction rows');
-  });
-});
-
-describe('session-close: procedure-noticed capture', () => {
-  test('session-close: question 1 asks about repeated manual procedures', () => {
-    expect(sessionClose).toContain('repeated manual procedures');
-  });
-
-  test('session-close: appends through observations.ts with the procedure-noticed source', () => {
-    expect(sessionClose).toContain('observe .claude-code-hermit procedure-noticed');
-  });
-
-  test('session-close: label is procedure-noticed:<slug> on its own heredoc line', () => {
-    expect(sessionClose).toMatch(/^\s*procedure-noticed:<slug>$/m);
-  });
-
-  test('session-close: procedure-noticed append carries the own-work origin flag', () => {
-    expect(sessionClose).toContain('procedure-noticed --origin=own-work');
-  });
-});
 
 // ── 2. observations ledger: observations.ts behavioral test ─────────────────
 
@@ -91,10 +37,10 @@ describe('observations.ts: skill-correction row round-trip', () => {
   let stateDir: string;
   let ledger: string;
 
-  // session_id is resolved by the script from runtime.json, not passed in — so a
-  // second "session" is simulated by rewriting that file between appends.
-  const setSession = (id: string) =>
-    fs.writeFileSync(path.join(stateDir, 'state', 'runtime.json'), JSON.stringify({ session_id: id }));
+  // Rows group by local date, with the existing session_id key retained.
+  const zones = ['Etc/GMT+12', 'Pacific/Kiritimati'];
+  const setDateZone = (timezone: string) =>
+    fs.writeFileSync(path.join(stateDir, 'config.json'), JSON.stringify({ timezone }));
 
   // observations.ts pins its state-dir argv to hermitDir(); an absolute
   // AGENT_DIR is the sanctioned override that points it at this fixture.
@@ -115,7 +61,7 @@ describe('observations.ts: skill-correction row round-trip', () => {
   });
 
   test.serial('observations.ts: skill-correction row appended and parseable', async () => {
-    setSession('S-001');
+    setDateZone(zones[0]);
     const r = await observe();
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('OK');
@@ -126,33 +72,33 @@ describe('observations.ts: skill-correction row round-trip', () => {
     expect(parsed.pattern).toBe('skill-correction:my-skill');
     expect(parsed.source).toBe('skill-correction');
     expect(parsed.origin).toBe('own-work');
-    expect(parsed.session_id).toBe('S-001');
+    expect(parsed.session_id).toBe(todayYMD(zones[0]));
   });
 
-  test.serial('observations.ts: two distinct-session rows group by pattern in prune', async () => {
-    // append a second row for the same pattern under a different session
-    setSession('S-002');
+  test.serial('observations.ts: two distinct-date rows group by pattern in prune', async () => {
+    // append a second row for the same pattern under a different local date
+    setDateZone(zones[1]);
     await observe();
 
     const lines = fs.readFileSync(ledger, 'utf-8').trim().split('\n');
     expect(lines).toHaveLength(2);
 
-    // Both rows have the same pattern — grouping by pattern gives distinct session_ids [S-001, S-002]
+    // Both rows have the same pattern — grouping by pattern gives distinct local dates in session_id
     const parsed = lines.map((l) => JSON.parse(l));
     const sessions = new Set(parsed.filter((r) => r.pattern === 'skill-correction:my-skill').map((r) => r.session_id));
     expect(sessions.size).toBe(2);
   });
 
   // Depends on both prior append tests having run (shared workdir ledger has 2 rows).
-  test.serial('prune-observations: skill-correction rows survive (both sessions fresh)', async () => {
+  test.serial('prune-observations: skill-correction rows survive (both dates fresh)', async () => {
     const r = await runScript('prune-observations.ts', { args: [stateDir] });
     expect(r.exitCode).toBe(0);
     // both rows are fresh — neither should be pruned
     expect(r.stdout).toContain('pruned 0, kept 2');
     const after = fs.readFileSync(ledger, 'utf-8');
     expect(after).toContain('skill-correction:my-skill');
-    expect(after).toContain('S-001');
-    expect(after).toContain('S-002');
+    expect(after).toContain(todayYMD(zones[0]));
+    expect(after).toContain(todayYMD(zones[1]));
   });
 });
 

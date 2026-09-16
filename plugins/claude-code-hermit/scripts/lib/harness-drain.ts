@@ -62,7 +62,7 @@ function deliverPermissionMode(hermitRoot: string, sessionName: string, pending:
  * Guards, in order: marker present and within TTL; runtime readable; not interactive
  * (those sessions have no tmux_session); no lifecycle transition or shutdown in flight
  * (the same runtime stamps passesLifecycleGuards checks in hermit-watchdog.ts — a /clear
- * landing mid-archive would destroy the context session-close is still writing from);
+ * landing mid-turn would destroy the context the resident is still using);
  * tmux session alive. The marker is deleted ONLY on a confirmed send — sendKeys returning
  * false means tmux never accepted the keys, so leaving the marker lets the next turn retry
  * rather than silently dropping the request.

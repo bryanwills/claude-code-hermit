@@ -27,7 +27,6 @@ import { probeDeclaredCredentials, shadowingCredentialNote } from '../credential
 import { readMicroProposals } from '../micro-proposals-io';
 import { scanForInjection } from '../injection-scan';
 import { sha256 } from '../hash';
-import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown, PENDING_CLOSE_DRAIN_COOLDOWN_MINUTES } from '../auto-close';
 
 type Json = any;
 

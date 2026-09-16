@@ -1,25 +1,10 @@
 import { observeExecution } from './lib/tasks';
 process.stdout.on('error', () => {});
 
-// PreCompact hook — stamps SHELL.md's Progress Log with a breadcrumb before Claude Code
-// compacts context (manual /compact, or native auto-compaction), so the next session can
-// see a mid-arc compaction happened. This is a trace only — it does not rescue observations
-// that lived only in context (not deterministically extractable) and it never blocks
-// compaction (side-effect only, always exit 0, no stdout).
-//
-// PreCompact does NOT fire on /clear — the watchdog's own emergency /clear (700k tokens)
-// flushes the same breadcrumb directly in hermit-watchdog.ts's maybeContextClear.
-//
-// Only writes when the payload is a genuine PreCompact event with a recognized trigger
-// (hook_event_name === "PreCompact", trigger ∈ {"auto","manual"}). Malformed/unexpected
-// stdin is a no-op — never guess a breadcrumb from an absent/garbage trigger.
-
+// PreCompact marks the resident execution unknown and stamps its context reset.
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
-import { flushResetBreadcrumb } from './lib/progress-log';
 import { stampContextReset } from './lib/context-reset';
-import { currentHHMMOrUTC } from './lib/time';
-import { readSettledConfig } from './lib/config-read';
 import { isGuest } from './lib/guest-marker';
 
 type Json = any;
@@ -35,10 +20,7 @@ function main(raw: string): void {
   if (trigger !== 'auto' && trigger !== 'manual') return;
 
   const agentDir = hermitDir();
-  const shellPath = path.join(agentDir, 'sessions', 'SHELL.md');
-  const hhmm = currentHHMMOrUTC(readSettledConfig(agentDir).timezone ?? 'UTC');
   const guest = isGuest(path.join(agentDir, 'state'), payload.session_id);
-  flushResetBreadcrumb(shellPath, { kind: 'compacted', trigger, hhmm, guest });
   // The watchdog's own stamps only cover compactions it initiated; this is the only
   // signal for an operator-typed /compact or a native auto-compaction, both of which
   // leave the last cost-log entry describing a context that no longer exists.

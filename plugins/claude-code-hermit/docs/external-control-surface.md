@@ -130,11 +130,7 @@ not read `watchdog-events.jsonl`.
 
 ### `get_brief`
 
-Argument: `root`. Current `.status.json` facts, then:
-
-1. `state/last-brief.json` (`kind`, `text`, `generated_at`) when present
-2. else the latest `sessions/S-NNN-REPORT.md` (numeric `S-NNN` order: S-9 <
-   S-10, not lexicographic), frontmatter plus body summary
+Argument: `root`. Returns `state/last-brief.json` when present, otherwise a task-record digest through `task-report.ts`.
 
 The text/summary is capped at **16 KiB** with UTF-8-safe truncation and a
 `truncated` flag. Never reads `state-summary.md`.

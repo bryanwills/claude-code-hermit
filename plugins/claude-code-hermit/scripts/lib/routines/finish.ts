@@ -2,10 +2,8 @@
 // owner of a routine fire's terminal ledger row. Called unconditionally after the
 // skill is invoked, replacing the old `log-event <id> fired`.
 //
-// With --outcome-stdin, stdin carries the fire's one-line outcome, appended under
-// SHELL.md's `## Progress Log` as `[HH:MM] <line>`. Without the flag stdin is not
-// read. An empty outcome writes nothing, and neither does a replayed fire: one
-// row per real fire, contract or not.
+// With --outcome-stdin the dispatcher drains supplied outcome text.
+// Finish records only the terminal ledger verdict, without a journal write.
 //
 // Why a finalizer instead of a verify-then-branch: the old contract asked the
 // model to decide which event to log, so a fire's success was recorded from the
@@ -32,10 +30,7 @@
 import path from 'node:path';
 import { hermitDir } from '../cc-compat';
 import { readConfigRaw } from '../config-read';
-import { appendToProgressLog } from '../progress-log';
-import { currentHHMMOrUTC } from '../time';
 import { logRoutineEvent } from './event';
-import { lastRoutineEvent } from './history';
 import { readRunRecord, markOutcome, statIdentity, identityChanged } from './run-record';
 
 type Json = any;
@@ -59,23 +54,6 @@ function declaresContract(hermit: string, id: string): boolean | null {
   if (!config || !Array.isArray(config.routines)) return null;
   const entry = config.routines.find((r: Json) => r && r.id === id);
   return !!(entry && typeof entry.expect_artifact === 'string' && entry.expect_artifact.trim());
-}
-
-/**
- * The one-line outcome the skill composed, landed under `## Progress Log` as part
- * of the same call that closes the fire — the write the model used to make by hand,
- * now serialized against the log's other autonomous writers. Best-effort in both
- * directions: an empty payload writes nothing, and appendToProgressLog swallows its
- * own I/O errors, so SHELL.md can never change the routine's verdict.
- */
-function appendOutcome(hermit: string, outcome: string): void {
-  const line = outcome.split('\n').map(l => l.trim()).find(Boolean);
-  if (!line) return;
-  const timezone = readConfigRaw(hermit)?.timezone ?? 'UTC';
-  // `- [HH:MM] …` is the shape every other Progress Log writer uses; without the
-  // bullet the entry merges into the preceding one when SHELL.md is rendered.
-  const body = line.replace(/^-\s*/, '');
-  appendToProgressLog(path.join(hermit, 'sessions', 'SHELL.md'), `- [${currentHHMMOrUTC(timezone)}] ${body}`);
 }
 
 export function run(args: string[], outcome = ''): void {
@@ -126,17 +104,6 @@ export function run(args: string[], outcome = ''): void {
       record.outcome === 'fired' ? 'fired' : `failed|${record.outcome}|${record.resolved_path}`,
     );
   }
-
-  // The record gate above only covers routines that declared a contract — a routine
-  // without `expect_artifact` never gets a run record (precheck.ts writes one only for
-  // a valid contract), so a replayed `finish` reaches this line with `record` null and
-  // would append a second identical row. The ledger is the record-independent witness:
-  // a real fire always has precheck's `started` as its latest event, so a terminal
-  // latest event can only be a replay of the fire that wrote it. Terminal by prefix,
-  // not `=== 'fired'`, because the declared-but-recordless path below is terminal too.
-  const lastEvent = lastRoutineEvent(path.join(hermit, 'state', 'routine-metrics.jsonl'), id);
-  const replayed = lastEvent === 'fired' || (lastEvent?.startsWith('failed-') ?? false);
-  if (!replayed) appendOutcome(hermit, outcome);
 
   if (!record) {
     // No run record. If config is readable and this routine declared a contract,

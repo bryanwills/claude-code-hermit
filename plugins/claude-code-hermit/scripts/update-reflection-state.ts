@@ -56,7 +56,7 @@ const arg3 = process.argv[3];
 // Bounded to `<hermit>/state`, not the hermit root: every branch below reads
 // with a parse-failure fallback to `{}` and then rewrites the file whole, so a
 // root-wide bound would still let a pre-approved call replace OPERATOR.md,
-// sessions/SHELL.md or bin/hermit-run with a counters blob. The only argument
+// sessions/task records or bin/hermit-run with a counters blob. The only argument
 // production ever passes is `state/reflection-state.json`.
 const stateFile = stateFileArg
   ? pinUnderStateDirOrExit(stateFileArg, 'update-reflection-state', 'state file', 'state')

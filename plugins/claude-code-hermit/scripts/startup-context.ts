@@ -6,23 +6,20 @@ process.stdout.on('error', () => {});
 // startup-context.ts — SessionStart hook
 // Classifies residency, seeds resident activity when absent, and loads session context.
 // Replaces the inline bash blob with a capped, priority-ordered context injection.
-// Emits only startup-relevant SHELL.md sections with per-section budgets.
+// Emits startup policy and task records with per-section budgets.
 // Hard cap: 9000 chars total (~2250 tokens). Source-gated: `compact` emits only
-// a delta capsule (≤ COMPACT_CAP); `resume` skips the Last Report section when
-// SHELL.md is active; `startup`/`clear`/unknown get the full capsule.
+// a delta capsule (≤ COMPACT_CAP); other sources get the full capsule.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { readFrontmatter, readFileWithFrontmatter, globDir } from './lib/frontmatter';
+import { readFileWithFrontmatter, globDir } from './lib/frontmatter';
 import { hermitDir } from './lib/cc-compat';
 import { findStorageDrift, findSchemaDrift } from './lib/drift';
 import { safe, safeForLLMMultiline, scanInjected } from './lib/sanitize';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
 import { readSettledConfig } from './lib/config-read';
-import { extractSection, firstContentLine, isResolvedBlockerLine, stripPlaceholders } from './lib/md-write';
-import { isResetBreadcrumb } from './lib/progress-log';
 import { readMicroProposals } from './lib/micro-proposals-io';
 import { tmuxSessionAlive } from './lib/tmux';
 import { readRuntimeJson, writeRuntimeJson } from './lib/runtime';
@@ -44,7 +41,6 @@ const COMPACT_CAP = 1200; // total stdout when source === "compact" (delta capsu
 const BUDGETS = {
   operator:      2000,
   taskPolicy:    1500,
-  session:       3000,
   knowledge:     2500, // compiled/ artifacts — read from config, 2500 default
   schemaDrift:    400, // only emitted when compiled/ types are undeclared in knowledge-schema.md
   storageDrift:   500, // only emitted when misplaced files are found
@@ -99,29 +95,6 @@ function emitArtifacts(artifacts: Json[], budget: number, headerFn: (a: Json) =>
   }
 }
 
-// Drops the bare "-" a comment-only bullet ("- <!-- resolved ... -->") leaves
-// behind once stripPlaceholders removes the comment. A dash-only line is never
-// a real entry, and injecting it reads as an unnamed blocker or finding.
-function dropBulletResidue(text: string): string {
-  return text.split('\n').filter(l => !/^\s*-+\s*$/.test(l)).join('\n').trim();
-}
-
-// Drops blockers the session already cleared (see isResolvedBlockerLine for the two
-// spellings). Injecting one makes a resumed or compacted session re-attempt work that is
-// already unblocked — the exact failure the blockers line exists to prevent.
-function dropResolvedBlockers(text: string): string {
-  return text.split('\n')
-    .filter(l => !isResolvedBlockerLine(l))
-    .join('\n')
-    .trim();
-}
-
-// Return last N non-empty lines from a string.
-function lastLines(text: string, n: number): string {
-  const lines = text.split('\n').filter(l => l.trim());
-  return lines.slice(-n).join('\n');
-}
-
 // Operator-language fact for injected context. The structural whitelist is the
 // first gate — it rejects anything tag-, newline-, or control-byte-shaped, and
 // accepts locale codes (`pt`, `pt-BR`, `pt_BR`) plus human language names.
@@ -151,31 +124,6 @@ function buildCompactionPointers(agentDir: string): string {
 
   parts.push('Task policy: read TASKS.md before intake or confirmation.');
 
-  // Read once, process per field: the two SHELL.md-derived pointers are emitted at
-  // opposite ends of the capsule (see the ordering note below), but a second read of the
-  // same path in the same synchronous pass buys no extra fail-open — it fails
-  // identically. Each field keeps its own try/catch so a malformed section still can't
-  // blank the other.
-  let shellContent: string | null = null;
-  try { shellContent = fs.readFileSync(path.resolve(agentDir, 'sessions', 'SHELL.md'), 'utf-8'); } catch {}
-
-  try {
-    if (shellContent === null) throw new Error('no shell');
-    const firstLine = firstContentLine(extractSection(shellContent, 'Task') ?? '', 300);
-    if (firstLine) parts.push(`task: ${guarded('sessions/SHELL.md', firstLine)}`);
-    const progress = extractSection(shellContent, 'Progress Log');
-    // Skip the reset breadcrumbs: the PreCompact hook appends "context compacted (…)"
-    // immediately before this capsule is built, so the newest entry is always that
-    // stamp — 200 characters of a budget this tight, saying only that the thing that
-    // just happened happened. The last real entry is what "last progress" means.
-    const lastEntry = progress
-      ? progress.split('\n').map(l => l.trim())
-          .filter(l => l && !l.startsWith('<!--') && !isResetBreadcrumb(l))
-          .pop()
-      : null;
-    if (lastEntry) parts.push(`last progress: ${guarded('sessions/SHELL.md', lastEntry.slice(0, 200))}`);
-  } catch {}
-
   try {
     const read = readMicroProposals(path.resolve(agentDir, 'state', 'micro-proposals.json'));
     // Omitting the line on a corrupt file implies an empty queue (#764) — say so instead.
@@ -193,26 +141,6 @@ function buildCompactionPointers(agentDir: string): string {
     const config = readSettledConfig(agentDir);
     const route = resolveOutboundChannel(config.channels);
     if (route) parts.push(`outbound channel: ${safe(route.id)} (chat_id: ${safe(route.chat_id)})`);
-  } catch {}
-
-  // Ordered after the channel route deliberately. Both are re-seed facts, but a hermit
-  // that loses its route stops being reachable at all, while one that loses the blockers
-  // line re-reads SHELL.md. The capsule is hard-capped, so whichever sits last is what a
-  // long task line plus a full micro-proposal queue push out first.
-  try {
-    if (shellContent === null) throw new Error('no shell');
-    // dropBulletResidue first: stripPlaceholders trims the whole section, so a
-    // comment-only bullet ("- <!-- resolved ... -->") would otherwise reach here
-    // as a bare "-" and surface as "blockers: -".
-    const blockerLines = dropResolvedBlockers(dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '')))
-      .split('\n').map(l => l.trim().replace(/^-\s+/, '').trim()).filter(Boolean);
-    if (blockerLines.length) {
-      // Cap each entry, not the joined string: one verbose blocker would
-      // otherwise eat the whole budget and truncate away the newest one, which
-      // is the entry `slice(-2)` exists to preserve.
-      const blockers = blockerLines.slice(-2).map(l => l.slice(0, 118)).join(' | ');
-      parts.push(`blockers: ${guarded('sessions/SHELL.md', blockers.slice(0, 240))}`);
-    }
   } catch {}
 
   try {
@@ -234,7 +162,7 @@ function buildCompactionPointers(agentDir: string): string {
 
   if (parts.length === 0) return '';
 
-  parts.push('Full state: SHELL.md + runtime.json. Plan: SHELL.md Progress Log. Don\'t re-read large files to reconstruct context.');
+  parts.push('Full state: tasks/ + runtime.json. Don\'t re-read large files to reconstruct context.');
   return parts.join('\n');
 }
 
@@ -333,10 +261,7 @@ function stampSessionEnv(stateDir: string, sessionId: string | null): void {
     // so ppid is the claude process.
     const inboxSocket = process.env.CLAUDE_CODE_MESSAGING_SOCKET || null;
     const sessionPid = process.ppid;
-    // The resident's own Claude Code session id. `session_id` holds the S-NNN work-arc
-    // label (session-archive.ts) and is null between arcs, so it can't identify which
-    // harness session the resident is — and the hygiene tiers were falling back to
-    // sessions/.status.json, which every session in the folder overwrites on Stop.
+    // The resident's own Claude Code session id identifies its context for hygiene.
     // Under HERMIT_MANAGED this hook IS the resident, so the payload id is exact.
     const ccSessionId = sessionId || null;
     // All five describe the launch, so every later SessionStart (resume, compact)
@@ -461,65 +386,6 @@ function emitFullContext(source: string | null) {
     const policy = fs.readFileSync(path.resolve(AGENT_DIR, 'TASKS.md'), 'utf8');
     if (policy.trim()) emit('Task policy (TASKS.md)', guarded('TASKS.md', policy.slice(0, BUDGETS.taskPolicy)));
   } catch { /* no task policy yet */ }
-
-  // -------------------------------------------------------
-  // 2. Remove stale eval hash (was done inline in the bash hook)
-  // -------------------------------------------------------
-  try { fs.unlinkSync(path.resolve(AGENT_DIR, 'sessions', '.eval-hash')); } catch {}
-
-  // -------------------------------------------------------
-  // 3. Active session (priority 2, budget 3000)
-  // -------------------------------------------------------
-  const shellPath = path.resolve(AGENT_DIR, 'sessions', 'SHELL.md');
-  let shellContent: string | null = null;
-  try {
-    shellContent = fs.readFileSync(shellPath, 'utf-8');
-  } catch {}
-
-  let hasActiveSession = false;
-  if (shellContent === null) {
-    emit('Active Session', 'No active session');
-  } else {
-    const parts: string[] = [];
-
-    // stripPlaceholders, not startsWith('<!--') — see its doc comment in md-write.ts.
-    const task = stripPlaceholders(extractSection(shellContent, 'Task') ?? '');
-    if (task) {
-      parts.push(`## Task\n${task}`);
-    }
-
-    const progressRaw = stripPlaceholders(extractSection(shellContent, 'Progress Log') ?? '');
-    if (progressRaw) {
-      const recent = lastLines(progressRaw, 10);
-      parts.push(`## Progress Log (last 10)\n${recent}`);
-    }
-
-    const blockers = dropResolvedBlockers(dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Blockers') ?? '')));
-    if (blockers) {
-      parts.push(`## Blockers\n${blockers}`);
-    }
-
-    const monitoringRaw = stripPlaceholders(extractSection(shellContent, 'Monitoring') ?? '');
-    if (monitoringRaw) {
-      const monLines = monitoringRaw.split('\n').filter(l => l.trim() && (l.startsWith('- ') || l.startsWith('[')));
-      if (monLines.length > 0) {
-        parts.push(`## Monitoring (last 5)\n${monLines.slice(-5).join('\n')}`);
-      }
-    }
-
-    const findingsRaw = dropBulletResidue(stripPlaceholders(extractSection(shellContent, 'Findings') ?? ''));
-    if (findingsRaw) {
-      parts.push(`## Findings (last 5)\n${lastLines(findingsRaw, 5).slice(0, 600)}`);
-    }
-
-    const sessionOutput = parts.join('\n\n');
-    if (sessionOutput.trim()) {
-      hasActiveSession = true;
-      emit('Active Session', guarded('sessions/SHELL.md', sessionOutput.slice(0, BUDGETS.session)));
-    } else {
-      emit('Active Session', 'Session file exists but has no actionable content');
-    }
-  }
 
   try { emit('Open tasks', guarded('tasks/', startupTasks(AGENT_DIR).join('\n'))); } catch { /* malformed task record */ }
 
@@ -652,10 +518,9 @@ function emitFullContext(source: string | null) {
   }
 
   // -------------------------------------------------------
-  // 6. Last report (priority 4, budget 1500) — skipped on resume with an
-  //    active SHELL.md: the resumed transcript already contains the report.
+  // 6. Latest task record (priority 4, budget 1500).
   // -------------------------------------------------------
-  if (totalChars < HARD_CAP && !(source === 'resume' && hasActiveSession)) {
+  if (totalChars < HARD_CAP) {
     try {
       const reports = readTaskReports(AGENT_DIR);
       const latest = reports.at(-1);

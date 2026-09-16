@@ -140,7 +140,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `knowledge.working_set_warn` | warn above N compiled docs: **`20`** |
 | `auto_session` | auto-start session on boot: **`true`** |
 | `boot_skill` / `shutdown_skill` | custom boot / teardown skill |
-| `post_close_clear` | clear context after midnight close: **`true`** |
+| `context_hygiene.clear` | safe-boundary context clear: enabled, quiet **`1h`**, max age **`24h`**, minimum **20,000** tokens |
 | `context_hygiene.compact` | compact long-running active context: **enabled**, `100000` compactible tokens / `4h` cooldown |
 | `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | auto-compact at % of context: **`65`** |
 | `MAX_THINKING_TOKENS` | thinking-token cap per turn: **`10000`** |

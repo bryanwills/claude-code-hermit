@@ -242,7 +242,7 @@ describe('proposal-act: ## Skill Draft install branch', () => {
     expect(proposalAct).toContain('until the next user turn');
   });
 
-  test('proposal-act: NEXT-TASK bullet for ## Skill Draft present', () => {
+  test('proposal-act: queued record note for ## Skill Draft present', () => {
     expect(proposalAct).toContain('Skill Draft');
   });
 });

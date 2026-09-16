@@ -84,8 +84,8 @@ describe('hatch-config.ts', () => {
       _hermit_versions: { 'claude-code-hermit': CORE_VERSION },
       routines: [
         ...template.routines,
-        { id: 'morning', schedule: '30 8 * * *', skill: 'claude-code-hermit:brief --morning', enabled: true, run_during_waiting: true },
-        { id: 'evening', schedule: '30 22 * * *', skill: 'claude-code-hermit:brief --evening', enabled: true, run_during_waiting: true },
+        { id: 'morning', schedule: '30 8 * * *', skill: 'claude-code-hermit:brief --morning', enabled: true },
+        { id: 'evening', schedule: '30 22 * * *', skill: 'claude-code-hermit:brief --evening', enabled: true },
       ],
       channels: {
         discord: { enabled: true, dm_channel_id: null, default_chat_id: null, state_dir: '.claude.local/channels/discord', allowed_users: ['12345'], morning_brief: { enabled: true, time: '07:00' } },
@@ -123,7 +123,7 @@ describe('hatch-config.ts', () => {
       push_notifications: false,
       _hermit_versions: { 'claude-code-hermit': '1.0.0' },
       routines: [
-        { id: 'heartbeat-restart', schedule: '0 4 * * *', skill: 'claude-code-hermit:heartbeat start', run_during_waiting: true, enabled: true },
+        { id: 'heartbeat-restart', schedule: '0 4 * * *', skill: 'claude-code-hermit:heartbeat start', enabled: true },
         { id: 'reflect', schedule: '0 9 * * *', skill: 'claude-code-hermit:reflect', enabled: true },
         { id: 'custom-routine', schedule: '0 5 * * *', skill: 'foo', enabled: true },
       ],
@@ -186,9 +186,9 @@ describe('hatch-config.ts', () => {
     const seed = {
       ...JSON.parse(fs.readFileSync(TEMPLATE_PATH, 'utf8')),
       routines: [
-        { id: 'heartbeat-restart', schedule: '0 4 * * *', skill: 'claude-code-hermit:heartbeat start', run_during_waiting: true, enabled: true },
-        { id: 'morning', schedule: '30 8 * * *', skill: 'claude-code-hermit:brief --morning', enabled: true, run_during_waiting: true },
-        { id: 'evening', schedule: '30 22 * * *', skill: 'claude-code-hermit:brief --evening', enabled: true, run_during_waiting: true },
+        { id: 'heartbeat-restart', schedule: '0 4 * * *', skill: 'claude-code-hermit:heartbeat start', enabled: true },
+        { id: 'morning', schedule: '30 8 * * *', skill: 'claude-code-hermit:brief --morning', enabled: true },
+        { id: 'evening', schedule: '30 22 * * *', skill: 'claude-code-hermit:brief --evening', enabled: true },
       ],
     };
     seedConfig(dir, seed);

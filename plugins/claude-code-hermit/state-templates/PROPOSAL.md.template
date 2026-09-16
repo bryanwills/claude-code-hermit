@@ -3,7 +3,7 @@ id: PROP-NNN-slug-HHMMSS
 title: "" # must match the H1 heading title
 status: proposed
 source: manual
-session: S-NNN
+session: T-...
 created: YYYY-MM-DDTHH:MM:SS±HH:MM
 accepted_date: null
 resolved_date: null
@@ -35,7 +35,7 @@ success_signal: null
 
 ## References
 <!-- Sources that informed this proposal. Cite code as file_path:line_number;
-     link docs/URLs; reference session reports (S-NNN), proposals (PROP-NNN), or
+     link docs/URLs; reference task records (T-...), proposals (PROP-NNN), or
      memory by name. If the proposal is purely operator-requested or qualitative,
      record "n/a — <reason>" rather than leaving this blank. -->
 

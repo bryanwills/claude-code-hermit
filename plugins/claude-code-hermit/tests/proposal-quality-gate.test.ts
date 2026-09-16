@@ -4,7 +4,7 @@
 // The regression this file exists for is the first test below: before the verb,
 // the rubric lived as prose in two places and the dispatched-subagent copy had
 // no bookkeeping-path filter, so an implementation whose only diff was
-// `sessions/SHELL.md` ran /simplify on one path and skipped on the other.
+// `state/runtime.json` ran /simplify on one path and skipped on the other.
 
 import { describe, test, expect, afterAll } from 'bun:test';
 import fs from 'node:fs';
@@ -44,9 +44,9 @@ function git(cwd: string, ...args: string[]): void {
 
 // ---------------------------------------------------------------- the bug
 
-test('balanced: a diff of only session bookkeeping does NOT run cleanup', () => {
+test('balanced: a diff of only state bookkeeping does NOT run cleanup', () => {
   const { root, stateDir } = projectAt('balanced');
-  const v = decide(stateDir, undefined, ['.claude-code-hermit/sessions/SHELL.md'], root);
+  const v = decide(stateDir, undefined, ['.claude-code-hermit/state/runtime.json'], root);
   expect(v.action).toBe('SKIP');
   expect(v.reason).toContain('session bookkeeping');
   expect(v.focus_files).toEqual([]);
@@ -91,7 +91,7 @@ describe('tier resolution', () => {
 
 describe('bookkeeping exclusions (each dropped individually)', () => {
   const EXCLUDED = [
-    '.claude-code-hermit/sessions/SHELL.md',
+    '.claude-code-hermit/state/runtime.json',
     '.claude-code-hermit/state/runtime.json',
     '.claude-code-hermit/state/monitors.runtime.json',
     '.claude-code-hermit/state/state-summary.md',
@@ -109,7 +109,7 @@ describe('bookkeeping exclusions (each dropped individually)', () => {
 
   test('an excluded path alongside a code change still runs cleanup', () => {
     const { root, stateDir } = projectAt('balanced');
-    const v = decide(stateDir, undefined, ['.claude-code-hermit/sessions/SHELL.md', 'scripts/x.ts'], root);
+    const v = decide(stateDir, undefined, ['.claude-code-hermit/state/runtime.json', 'scripts/x.ts'], root);
     expect(v.action).toBe('RUN');
     expect(v.focus_files).toEqual(['scripts/x.ts']);
   });
@@ -301,7 +301,7 @@ describe('proposal-act delegates the decision (no second copy of the rubric)', (
   );
 
   test('all three implementation paths route through the verb', () => {
-    // dispatched subagent, in-main e.5, and the queued NEXT-TASK bullet.
+    // dispatched subagent, in-main e.5, and the queued queued record note.
     const calls = skill.match(/proposal\.ts quality-gate/g) ?? [];
     expect(calls.length).toBe(3);
   });

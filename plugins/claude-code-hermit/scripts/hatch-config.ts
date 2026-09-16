@@ -141,13 +141,13 @@ if (Object.hasOwn(answers, 'routines')) {
     if (routinesAnswer.morning_time) {
       config.routines.push({
         id: 'morning', schedule: timeToCron(routinesAnswer.morning_time),
-        skill: 'claude-code-hermit:brief --morning', enabled: true, run_during_waiting: true,
+        skill: 'claude-code-hermit:brief --morning', enabled: true,
       });
     }
     if (routinesAnswer.evening_time) {
       config.routines.push({
         id: 'evening', schedule: timeToCron(routinesAnswer.evening_time),
-        skill: 'claude-code-hermit:brief --evening', enabled: true, run_during_waiting: true,
+        skill: 'claude-code-hermit:brief --evening', enabled: true,
       });
     }
   }

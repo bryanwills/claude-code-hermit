@@ -468,7 +468,7 @@ describe('Entrypoint: §4b boot conflict guard', () => {
   });
 
   test('entrypoint §4b: goes inert over a live non-docker owner', () => {
-    const r = runGuard({ runtime_mode: 'tmux', session_state: 'active' }, { liveness: 'fresh' });
+    const r = runGuard({ runtime_mode: 'tmux' }, { liveness: 'fresh' });
     expect(r.status).toBe(0);
     expect(r.signal).toBeNull();
     expect(r.stdout).toContain('BOOT CONFLICT');
@@ -476,7 +476,7 @@ describe('Entrypoint: §4b boot conflict guard', () => {
   });
 
   test('entrypoint §4b: boots over a cleanly-stopped owner', () => {
-    const r = runGuard({ runtime_mode: 'tmux', session_state: 'idle' }, { liveness: 'fresh' });
+    const r = runGuard({ runtime_mode: 'tmux', shutdown_completed_at: '2026-07-24T11:00:00Z' }, { liveness: 'fresh' });
     expect(r.status).toBe(0);
     expect(r.marker).toBe(false);
   });
@@ -490,14 +490,14 @@ describe('Entrypoint: §4b boot conflict guard', () => {
   // Stale-is-unknown is the guard's only protection against refusing every boot
   // after an unclean host exit (runtime.json frozen at active, owner long gone).
   test('entrypoint §4b: boots when the liveness signal is stale', () => {
-    const r = runGuard({ runtime_mode: 'tmux', session_state: 'active' }, { liveness: 'stale' });
+    const r = runGuard({ runtime_mode: 'tmux' }, { liveness: 'stale' });
     expect(r.status).toBe(0);
     expect(r.marker).toBe(false);
   });
 
   test('entrypoint §4b: HERMIT_FORCE_BOOT=1 overrides a live owner', () => {
     const r = runGuard(
-      { runtime_mode: 'tmux', session_state: 'active' },
+      { runtime_mode: 'tmux' },
       { liveness: 'fresh', forceBoot: '1' },
     );
     expect(r.status).toBe(0);

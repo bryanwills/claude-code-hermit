@@ -37,7 +37,6 @@ import {
   seedWorkspaceTrust,
   applyAlwaysOnDoctorSchedule,
   clearShutdownStampsOnBoot,
-  clearStatusCacheOnBoot,
   hydrateSetupTokenEnv,
   shouldRefuseBoot,
   shouldInstallWatchdogScheduler,
@@ -333,14 +332,7 @@ describe.if(!IN_CONTAINER)('boot singleton guard', () => {
   });
 
   // A cleanly-stopped instance leaves runtime_mode + a fresh liveness file
-  // behind, but either clean-shutdown marker alone proves it's dead → allow boot.
-  test('mismatch + fresh liveness but session_state idle → boot allowed', () => {
-    delete process.env.HERMIT_FORCE_BOOT;
-    fs.writeFileSync('.claude-code-hermit/state/runtime.json', JSON.stringify({ runtime_mode: 'docker', session_state: 'idle' }));
-    fs.writeFileSync('.claude-code-hermit/state/routine-monitor-liveness.json', '{}');
-    expect(shouldRefuseBoot('tmux')).toBeNull();
-  });
-
+  // behind, but the completed-shutdown marker proves it's dead → allow boot.
   test('mismatch + fresh liveness but shutdown_completed_at set → boot allowed', () => {
     delete process.env.HERMIT_FORCE_BOOT;
     fs.writeFileSync('.claude-code-hermit/state/runtime.json', JSON.stringify({ runtime_mode: 'docker', shutdown_completed_at: '2026-07-24T11:00:00Z' }));
@@ -412,11 +404,10 @@ describe('watchdog scheduler auto-install', () => {
 const RUNTIME_PATH = '.claude-code-hermit/state/runtime.json';
 
 // A realistic live record: a session mid-work, carrying the recovery markers
-// session-start reads. Used to prove nothing on the duplicate path rewrites it.
+// resident-start reads. Used to prove nothing on the duplicate path rewrites it.
 const LIVE_RUNTIME = {
   version: 1,
-  session_state: 'in_progress',
-  session_id: 'S-007',
+  cc_session_id: 'harness-id',
   runtime_mode: 'tmux',
   tmux_session: 'hermit-proj',
   transition: 'archiving',
@@ -432,11 +423,11 @@ describe('readRuntimeState tri-state', () => {
     fs.writeFileSync(RUNTIME_PATH, JSON.stringify(LIVE_RUNTIME));
     const read = readRuntimeState();
     expect(read.kind).toBe('ok');
-    expect(read.kind === 'ok' && read.data.session_state).toBe('in_progress');
+    expect(read.kind === 'ok' && read.data.runtime_mode).toBe('tmux');
   });
 
   test('malformed JSON reads as invalid, not missing', () => {
-    fs.writeFileSync(RUNTIME_PATH, '{"session_state": "in_progr');
+    fs.writeFileSync(RUNTIME_PATH, '{"runtime_mode": "tm');
     const read = readRuntimeState();
     expect(read.kind).toBe('invalid');
     expect(read.kind === 'invalid' && read.reason).toContain('malformed JSON');
@@ -514,9 +505,9 @@ describe('duplicateSessionRefusal', () => {
   });
 
   // The whole point of refusing: reconstructing state would zero the transition
-  // and last_error markers that session-start recovery depends on.
+  // and last_error markers that resident-start recovery depends on.
   test('never writes runtime.json — a corrupt record survives byte-identical', () => {
-    const corrupt = '{"session_state": "in_progr';
+    const corrupt = '{"runtime_mode": "tm';
     fs.writeFileSync(RUNTIME_PATH, corrupt);
     duplicateSessionRefusal('hermit-proj');
     expect(fs.readFileSync(RUNTIME_PATH, 'utf-8')).toBe(corrupt);
@@ -1912,72 +1903,36 @@ describe('applyAlwaysOnDoctorSchedule', () => {
 
 // ============================================================
 // clearShutdownStampsOnBoot: a fresh hermit-start supersedes any prior
-// shutdown intent left in runtime.json (e.g. from a nightly auto-close that
-// isn't a real hermit-stop) — both preserve-branches in main() call this
+// shutdown intent left in runtime.json. Both preserve-branches in main() call this
 // before writeRuntimeJson so watchdog restart/hygiene aren't bricked forever.
 // ============================================================
 
 describe('clearShutdownStampsOnBoot', () => {
   test('nulls both stamps when both were set', () => {
-    const runtime = { session_state: 'idle', shutdown_requested_at: '2026-07-03T23:30:00Z', shutdown_completed_at: '2026-07-04T00:30:00Z' };
+    const runtime = { shutdown_requested_at: '2026-07-03T23:30:00Z', shutdown_completed_at: '2026-07-04T00:30:00Z' };
     clearShutdownStampsOnBoot(runtime);
     expect(runtime.shutdown_requested_at).toBeNull();
     expect(runtime.shutdown_completed_at).toBeNull();
   });
 
-  test('nulls a lone shutdown_completed_at (the fleet pathology: auto-close without a matching request)', () => {
-    const runtime = { session_state: 'idle', shutdown_requested_at: null, shutdown_completed_at: '2026-07-04T00:30:00Z' };
+  test('nulls a lone shutdown_completed_at without a matching request', () => {
+    const runtime = { shutdown_requested_at: null, shutdown_completed_at: '2026-07-04T00:30:00Z' };
     clearShutdownStampsOnBoot(runtime);
     expect(runtime.shutdown_requested_at).toBeNull();
     expect(runtime.shutdown_completed_at).toBeNull();
   });
 
   test('leaves other fields untouched', () => {
-    const runtime = { session_state: 'idle', session_id: 'S-030', shutdown_requested_at: null, shutdown_completed_at: '2026-07-04T00:30:00Z' };
+    const runtime = { cc_session_id: 'harness-id', shutdown_requested_at: null, shutdown_completed_at: '2026-07-04T00:30:00Z' };
     clearShutdownStampsOnBoot(runtime);
-    expect(runtime.session_state).toBe('idle');
-    expect(runtime.session_id).toBe('S-030');
+    expect(runtime.cc_session_id).toBe('harness-id');
   });
 
   test('no-op when both were already null', () => {
-    const runtime = { session_state: 'idle', shutdown_requested_at: null, shutdown_completed_at: null };
+    const runtime = { shutdown_requested_at: null, shutdown_completed_at: null };
     clearShutdownStampsOnBoot(runtime);
     expect(runtime.shutdown_requested_at).toBeNull();
     expect(runtime.shutdown_completed_at).toBeNull();
-  });
-});
-
-// ============================================================
-// clearStatusCacheOnBoot: an always-on boot drops the sessions/.status.json
-// cost cache so the first post-boot turn doesn't continue the defunct prior
-// process's cumulative cost/token totals.
-// ============================================================
-
-describe('clearStatusCacheOnBoot', () => {
-  let dir: string;
-  let origCwd: string;
-  const statusPath = path.join('.claude-code-hermit', 'sessions', '.status.json');
-
-  beforeEach(() => {
-    origCwd = process.cwd();
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-status-cache-'));
-    process.chdir(dir);
-  });
-
-  afterEach(() => {
-    process.chdir(origCwd);
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  test('removes an existing sessions/.status.json', () => {
-    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
-    fs.writeFileSync(statusPath, JSON.stringify({ session_id: 'defunct-harness-uuid' }));
-    clearStatusCacheOnBoot();
-    expect(fs.existsSync(statusPath)).toBe(false);
-  });
-
-  test('no-op (no throw) when the cache does not exist', () => {
-    expect(() => clearStatusCacheOnBoot()).not.toThrow();
   });
 });
 

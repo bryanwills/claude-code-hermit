@@ -41,7 +41,6 @@ function fixture(opts: FixtureOpts = {}) {
   });
   writeJson(path.join(stateDir, 'runtime.json'), {
     version: 1,
-    session_state: 'in_progress',
     runtime_mode: 'interactive',
   });
 

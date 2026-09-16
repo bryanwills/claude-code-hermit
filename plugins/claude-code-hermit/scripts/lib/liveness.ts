@@ -2,7 +2,7 @@
  * Shared cross-runtime liveness signal.
  *
  * The monitor subprocesses (routine-monitor.sh, heartbeat-monitor.sh) and the
- * cost tracker write these files under the project state dir — which is
+ * resident write these files under the project state dir — which is
  * bind-mounted into the Docker container at the same path — and they die with
  * the claude process that spawned them. So a fresh mtime on any of them proves
  * *some* instance of this project is alive right now, readable identically from
@@ -10,7 +10,7 @@
  *
  * Asymmetry that matters: fresh proves alive; stale proves nothing. The routine
  * monitor writes every 60s, but heartbeat-liveness tracks `heartbeat.every`
- * (can be hours) and .status.json only updates on activity, so with routines
+ * (can be hours), so with routines
  * disabled or the Monitor tool unavailable an idle-but-alive instance reads
  * stale within minutes. Callers must treat a stale/absent signal as "unknown",
  * never "dead" — every guard keyed off this fails toward today's behavior.
@@ -26,7 +26,6 @@ const LIVENESS_FILES = [
   'state/routine-monitor-liveness.json',
   'state/heartbeat-liveness.json',
   'state/.heartbeat',
-  'sessions/.status.json',
 ];
 
 /** Age in seconds of the freshest liveness file, or null when none exist. */

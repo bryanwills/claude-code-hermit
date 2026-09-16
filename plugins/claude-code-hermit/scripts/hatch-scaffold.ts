@@ -17,7 +17,7 @@
  *   - PRESERVE (operator-editable or accumulated state): created only if absent,
  *     in BOTH modes. = OPERATOR.md, HEARTBEAT.md, knowledge-schema.md,
  *     every state/* file (reflection-state, alert-state, micro-proposals, *.jsonl).
- *   - NEVER created: state/pending-close.json (lazily created by daily-auto-close).
+ *   - NEVER created: retired lifecycle state.
  * On a FRESH hatch every class is created, so behaviour is identical to today;
  * the classes only diverge on --reinit.
  *
@@ -156,7 +156,7 @@ for (const jsonl of [
   // carry channel and user IDs.
   seedIfAbsent(dest, () => fs.writeFileSync(dest, '', { mode: 0o600 }));
 }
-// state/pending-close.json: deliberately never created.
+// retired lifecycle state: deliberately never created.
 
 console.log(JSON.stringify({ created, overwritten, preserved, operator_existed: operatorExisted }));
 process.exit(0);

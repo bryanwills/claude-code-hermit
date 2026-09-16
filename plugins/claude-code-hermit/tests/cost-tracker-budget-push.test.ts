@@ -23,15 +23,11 @@ function setupWithChannel(budgetConfig: object, opts: { maintainerChannelId?: st
   const stateDir = path.join(dir, '.claude.local', 'channels', 'telegram');
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_TOKEN=test-token\n');
-  fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+  fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
   const telegram: Record<string, unknown> = { enabled: true, dm_channel_id: '12345', state_dir: '.claude.local/channels/telegram' };
   if (opts.maintainerChannelId) {
     telegram.maintainer_channel_id = opts.maintainerChannelId;
-    // A degraded maintainer send falls back to a SHELL.md Findings append; give it
-    // a real file so the append succeeds (ok:true) and the assertion proves it's
-    // `delivered`, not `ok`, that gates notified.
-    fs.mkdirSync(path.join(cchDir, 'sessions'), { recursive: true });
-    fs.writeFileSync(path.join(cchDir, 'sessions', 'SHELL.md'), '# SHELL\n\n## Findings\n');
+
   }
   writeConfig(dir, {
     timezone: 'UTC',
@@ -98,12 +94,12 @@ describe('cost-tracker: budget push on warn (send fails -> notified stays false)
   });
 });
 
-describe('cost-tracker: warn, maintainer channel configured but unreachable -> degraded Findings, notified stays false', () => {
+describe('cost-tracker: warn, maintainer channel configured but unreachable -> degraded event log, notified stays false', () => {
   let dir: string; let cchDir: string;
 
   beforeAll(async () => {
     // maintainer_channel_id set: the warn detail routes maintainer-tier, the send
-    // fails (unreachable), and falls back to a *successful* SHELL.md Findings append
+    // fails (unreachable), and falls back to a *successful* watchdog event append
     // (ok:true). The old `if (res.maintainer?.ok)` guard flipped notified:true here,
     // defeating the heartbeat re-announce. The `delivered` guard must keep it false.
     ({ dir, cchDir } = setupWithChannel(
@@ -114,16 +110,16 @@ describe('cost-tracker: warn, maintainer channel configured but unreachable -> d
   });
   afterAll(() => { fs.rmSync(dir, { recursive: true }); });
 
-  test('degraded Findings fallback leaves notified:false', () => {
+  test('degraded event log fallback leaves notified:false', () => {
     const state = JSON.parse(fs.readFileSync(path.join(cchDir, 'state', 'budget-alerts.json'), 'utf-8'));
     const keys = Object.keys(state.alerts).filter((k) => k.startsWith('budget-warn:daily:'));
     expect(keys).toHaveLength(1);
     expect(state.alerts[keys[0]].notified).toBe(false);
   });
 
-  test('the maintainer detail did land in SHELL.md Findings (append succeeded)', () => {
-    const shell = fs.readFileSync(path.join(cchDir, 'sessions', 'SHELL.md'), 'utf-8');
-    expect(shell).toContain('maintainer alert suppressed');
+  test('the maintainer detail landed in the watchdog event log', () => {
+    const events = fs.readFileSync(path.join(cchDir, 'state', 'watchdog-events.jsonl'), 'utf-8');
+    expect(events).toContain('maintainer-notice');
   });
 });
 
@@ -164,7 +160,7 @@ function setupCustom(config: object): { dir: string; cchDir: string } {
   const stateDir = path.join(dir, '.claude.local', 'channels', 'telegram');
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, '.env'), 'TELEGRAM_BOT_' + 'TOKEN=test-token\n');
-  fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+  fs.writeFileSync(path.join(cchDir, 'state', 'runtime.json'), JSON.stringify({ cc_session_id: 'test-session' }));
   writeConfig(dir, config);
   return { dir, cchDir };
 }

@@ -276,25 +276,33 @@ case "$CMD" in
     fi
 
     if [ "$FORCE" = false ]; then
-      echo "[hermit] Requesting graceful session close..."
-      # Split text and Enter into two send-keys calls with a pause — Claude Code's
-      # TUI treats text+Enter in one burst as bracketed paste and Enter becomes a
-      # literal newline instead of submit. Same fix as scripts/hermit-start.ts.
-      cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" \
-        tmux send-keys -t "$TMUX_SESSION:0.0" "/claude-code-hermit:session-close --shutdown" 2>/dev/null || true
-      sleep 0.5
-      cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" \
-        tmux send-keys -t "$TMUX_SESSION:0.0" Enter 2>/dev/null || true
+      SHUTDOWN_SKILL=$(jq -r '.shutdown_skill // empty' "$PROJECT_DIR/.claude-code-hermit/config.json")
+      SENT_AT=""
 
-      echo "[hermit] Waiting for session to close (up to 60s)..."
+      echo "[hermit] Waiting for execution to settle (up to 60s)..."
       CLOSED=false
       for i in $(seq 1 60); do
-        CUR_STATE=$(jq -r '.session_state // "unknown"' "$RUNTIME_FILE" 2>/dev/null || echo "unknown")
-        SHUTDOWN_DONE=$(jq -r '.shutdown_completed_at // empty' "$RUNTIME_FILE" 2>/dev/null)
-        if [ "$CUR_STATE" = "idle" ] || [ -n "$SHUTDOWN_DONE" ]; then
-          echo "[hermit] Session closed after ${i}s."
-          CLOSED=true
-          break
+        if bun -e '
+          try {
+            const execution = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+            process.exit(typeof execution.state === "string" && execution.state !== "in_flight"
+              && (!process.argv[2] || Date.parse(execution.at) > Number(process.argv[2])) ? 0 : 1);
+          } catch { process.exit(1); }
+        ' "$PROJECT_DIR/.claude-code-hermit/state/execution.json" "$SENT_AT"; then
+          if [ -z "$SHUTDOWN_SKILL" ] || [ -n "$SENT_AT" ]; then
+            echo "[hermit] Execution settled after ${i}s."
+            CLOSED=true
+            break
+          fi
+          # Typed only once no turn is running: typed mid-turn, that turn's own end
+          # would satisfy this wait before the skill ran.
+          SENT_AT=$(bun -e 'console.log(Date.now())')
+          # Submit text and Enter separately so the TUI does not treat Enter as paste.
+          cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" \
+            tmux send-keys -t "$TMUX_SESSION:0.0" "$SHUTDOWN_SKILL" 2>/dev/null || true
+          sleep 0.5
+          cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" \
+            tmux send-keys -t "$TMUX_SESSION:0.0" Enter 2>/dev/null || true
         fi
         sleep 1
       done

@@ -3,7 +3,7 @@
 // Destroying a context (/clear) or shrinking it (/compact) is not just a keystroke:
 // hermit-owned state has to be updated in the same breath or the hermit's own view
 // of the world silently disagrees with reality. Before this lib the sequence lived
-// only inside hermit-watchdog.ts's private maybeContextClear/maybePostCloseClear, so
+// only inside hermit-watchdog.ts's private context reset tiers, so
 // any other caller — notably an operator-initiated reset arriving over a channel —
 // would have bypassed it.
 //
@@ -16,33 +16,14 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { flushResetBreadcrumb } from './progress-log';
 import { writeRuntimeJson, readRuntimeJson, runtimeTmpPath } from './runtime';
 
 type Json = any;
 
 /**
- * Delete the cached status file after a context reset.
- *
- * The status cache holds the running cumulative cost/token totals for the context that
- * was just destroyed, keyed to its harness session id. Leaving it in place makes the
- * next turn continue totals for a context that no longer exists. cost-tracker treats a
- * missing file as first-run and rebuilds cumulative totals from the index, so nothing is
- * lost. It is no part of the hygiene tiers' session resolution — that reads runtime.json's
- * cc_session_id only (hermit-watchdog.ts:resolveHygieneSessionId, issue #916).
- *
- * Moved here from hermit-start.ts (was clearStatusCacheOnBoot) so both the boot path
- * and every mid-run reset path share one implementation.
- */
-export function clearStatusCache(hermitRoot: string): void {
-  try { fs.unlinkSync(path.join(hermitRoot, 'sessions', '.status.json')); } catch {}
-}
-
-/**
  * Record WHEN the context was last reset, machine-readably.
  *
- * The breadcrumb below is prose for the next session to read; this stamp is for the
- * watchdog, which needs to know that a cost-log entry observed before it describes a
+ * The watchdog uses this timestamp to know that a cost-log entry observed before it describes a
  * context that no longer exists. Every reset path records it — manual or native-auto
  * /compact through this function (precompact-stamp.ts), /clear through
  * applyContextReset's own write — because the watchdog's own last_compacted_at only
@@ -50,7 +31,7 @@ export function clearStatusCache(hermitRoot: string): void {
  *
  * Fresh read-modify-write against an absolute path: hooks don't share a cwd, and a
  * cached runtime object would clobber fields another process wrote meanwhile. Fail-open
- * and never fabricates a partial runtime.json (session_state/session_id must survive).
+ * and never fabricates a partial runtime.json (unrelated keys must survive).
  */
 export function stampContextReset(hermitRoot: string): void {
   const stateDir = path.join(hermitRoot, 'state');
@@ -70,9 +51,8 @@ export function stampContextReset(hermitRoot: string): void {
 /**
  * Apply the hermit-owned bookkeeping that must accompany a context reset.
  *
- * Call this immediately BEFORE the destructive keystroke: the breadcrumb is the only
- * trace a /clear leaves behind (PreCompact never fires for /clear — see
- * precompact-stamp.ts), so writing it first means an interrupted reset is still visible.
+ * Call this immediately BEFORE the reset keystroke. PreCompact does not fire
+ * for /clear, so this path owns its runtime reset timestamp.
  *
  * Fail-open throughout: a bookkeeping failure must never suppress the reset itself.
  */
@@ -90,15 +70,4 @@ export function applyContextReset(
     runtime.last_context_reset_at = new Date().toISOString();
     writeRuntimeJson(runtime, path.join(hermitRoot, 'state'));
   } catch { /* fail-open */ }
-
-  try {
-    flushResetBreadcrumb(path.join(hermitRoot, 'sessions', 'SHELL.md'), {
-      kind: opts.kind,
-      trigger: opts.trigger,
-      hhmm: opts.hhmm,
-      tokens: opts.tokens,
-    });
-  } catch { /* fail-open — must never delay or suppress the reset */ }
-
-  clearStatusCache(hermitRoot);
 }

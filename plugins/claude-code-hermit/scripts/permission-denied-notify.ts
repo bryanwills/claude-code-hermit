@@ -7,7 +7,7 @@ process.stdout.on('error', () => {});
 // fixed text "Blocked by classifier"). This hook cannot block or retry the call;
 // it records a deduped maintainer-tier diagnostic, routed by tier: the maintainer chat
 // when one is configured, the primary chat on a technical profile without one,
-// and SHELL.md Findings on a non-technical profile (fail-closed on disclosure)
+// and state/watchdog-events.jsonl on a non-technical profile (fail-closed on disclosure)
 // or whenever the channel is absent or unreachable.
 //
 // Gating mirrors ask-gate.ts: only the managed unattended session
@@ -45,7 +45,7 @@ const PRUNE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours — carry-over cap
 const PROGRAM_MAX_LEN = 32;
 // A peer hook process's read-modify-write of the alerts file takes a few ms. Long
 // enough to wait out, short enough that a denied tool call never stalls on it —
-// the same posture (and constants) as lib/progress-log.ts's SHELL.md lock.
+// the same posture (and constants) as bounded lock handling.
 const LOCK_WAIT_MS = 2000;
 const LOCK_STALE_MS = 10_000;
 const MESSAGE_MAX_LEN = 300;
@@ -115,8 +115,7 @@ function writeAlerts(dir: string, alerts: Record<string, DenyWindow>): void {
  * read-modify-write and the event-log append. Claude Code does not serialise hook
  * invocations, so two denials in one assistant turn can otherwise each overwrite
  * the whole alerts map with its own stale copy, dropping a peer tool's open
- * window. Best-effort by design, the same posture as lib/progress-log.ts's
- * SHELL.md lock: waiting out a contended lock is not worth stalling a denied tool
+ * window. Best-effort by design, the same posture as bounded lock handling: waiting out a contended lock is not worth stalling a denied tool
  * call inside a 12s hook timeout, so we proceed unlocked instead.
  *
  * The lock file is named for the alerts file though it now guards both; renaming

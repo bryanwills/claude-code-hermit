@@ -10,7 +10,7 @@
 // {"decision":"block"} after a confirmed successful send, so a failed send never
 // silently swallows the operator's message — it falls through with a narrow relay
 // instruction instead. Non-channel prompts (operator terminal input, the internal
-// /session-close command hermit-stop injects) are never a channel envelope and
+// configured shutdown skill hermit-stop injects) are never a channel envelope and
 // pass through untouched.
 
 import { isAllowedSender } from '../channel-auth';

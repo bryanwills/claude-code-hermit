@@ -2,6 +2,9 @@
 name: weekly-review
 description: Generate the weekly review report for the current ISO week. Writes to .claude-code-hermit/compiled/review-weekly-YYYY-Www.md (dev-facing detail) and sends a plain-language channel summary (Delivered / Decisions / Waiting on you / Spend). Runs every Sunday at 23:00 via routine.
 ---
+
+Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+
 # Weekly Review
 
 Generates the weekly review for the current ISO week.
@@ -52,7 +55,7 @@ Generates the weekly review for the current ISO week.
    ```
    The excluded rows stay unconsolidated for next week's pass. If nothing failed, the set is exactly `reviewed_ids`.
 
-   Then, when `applied_row_ids` is non-empty, append **one** SHELL.md Findings line for the run naming the count of candidates filed and each `candidates[].path` of every candidate whose `row_ids` are in `applied_row_ids`. That line is the operator's audit trail for writes distilled from untrusted channel text, so it goes in even when nothing else about the week is notable. One line per run, never one per candidate. Skip it entirely when `applied_row_ids` is empty: nothing was filed, so there is nothing to audit.
+   Then, when `applied_row_ids` is non-empty, append **one** task note, inside an open record's turn, for the run naming the count of candidates filed and each `candidates[].path` of every candidate whose `row_ids` are in `applied_row_ids`. That line is the operator's audit trail for writes distilled from untrusted channel text, so it goes in even when nothing else about the week is notable. One line per run, never one per candidate. Skip it entirely when `applied_row_ids` is empty: nothing was filed, so there is nothing to audit.
 
    **Failure policy:** if `channel-log.ts` exits nonzero (a genuine DB error — not the normal "no DB yet" empty-result case), fail-open: skip the marking for this run and continue to step 5. An empty `reviewed_ids` (no unconsolidated rows) is the ordinary no-channel-activity case, not a failure.
 
@@ -67,7 +70,7 @@ Generates the weekly review for the current ISO week.
    - If no prior week file exists: omit the "vs prior week" comparison and show this week's spend only.
    - If the current-week file is missing (script failed): skip step 6 entirely and fall back to a plain note ("Weekly review didn't generate this week — nothing to send.").
 
-6. **Channel voice rule:** the message below is for the person who owns this hermit, not a developer. Never emit `PROP-NNN`/`S-NNN`, raw token counts, cron strings, or file paths. Speak in plain outcomes and counts.
+6. **Channel voice rule:** the message below is for the person who owns this hermit, not a developer. Never emit `PROP-NNN`/`T-...`, raw token counts, cron strings, or file paths. Speak in plain outcomes and counts.
 
    Channel-send the combined weekly summary:
    - Refresh the dashboard per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md`; if it returns a URL, note it for the message below.

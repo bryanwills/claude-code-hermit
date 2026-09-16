@@ -31,9 +31,7 @@ Steps are independent — read files and run scripts concurrently where possible
 7. Run `bun <plugin_root>/scripts/routines.ts health .claude-code-hermit --days 30` and capture
    stdout — one JSON object with per-routine `fires`, `failures`, `incomplete`, `cost_usd` and a
    `source` status. Skip gracefully if unavailable. Do not read `routine-metrics.jsonl` directly.
-8. `.claude-code-hermit/sessions/S-NNN-REPORT.md` files for the last 30 days — read Artifacts and
-   Changed sections plus `proposals_created` frontmatter. List filenames in
-   `.claude-code-hermit/compiled/` created in the last 30 days.
+8. Read the last 30 days of records through `scripts/lib/task-report.ts`. Use their outcomes, lessons and source paths. List filenames in `.claude-code-hermit/compiled/` created in the last 30 days.
 9. `.claude-code-hermit/OPERATOR.md` and `<plugin_root>/state-templates/OPERATOR.md` —
    read both.
 10. List dirs under `.claude/skills/` in the target project root and under

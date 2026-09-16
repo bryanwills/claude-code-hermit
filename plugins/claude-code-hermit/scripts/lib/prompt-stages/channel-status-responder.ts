@@ -4,7 +4,7 @@
 // "/status" (trimmed, case-insensitive, optionally addressed to this bot as
 // "/status@handle") and the sender passes the channel's
 // allowed_users gate, formats an operator-language status reply from
-// read-only state (pause, session status, budget, pending approvals, next
+// read-only state (pause, current task record, budget, pending approvals, next
 // routine) and sends it directly via lib/channel-send — bypassing the model
 // entirely. This is the one case a model-composed reply can't cover: a
 // paused session can speak but can't Read, so any model-answered status
@@ -27,6 +27,7 @@ import { friendlyBoundary, parseSimpleCronTime } from '../time';
 import { wallMinutes } from '../cron-shift';
 import { sendToChannel } from '../channel-send';
 import { STATUS, resolveLocale, type Locale } from '../messages';
+import { readTasks, isRunnable, type Task } from '../tasks';
 import type { StageContext, StageResult } from './types';
 
 type Json = any;
@@ -49,12 +50,19 @@ function pauseLine(dir: string, timezone: string, locale: Locale): string | null
   return STATUS[locale].pausedUntilDate(label, friendlyBoundary(status.until as string, timezone));
 }
 
+// The resident's first runnable record is its current work. An unreadable store is
+// treated as nothing to report rather than failing the reply.
+function currentTask(dir: string): Task | null {
+  try {
+    return readTasks(dir).find(isRunnable) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function taskLine(dir: string, locale: Locale): string | null {
-  const status = readJson(path.join(dir, 'sessions', '.status.json'));
-  if (!status) return null;
-  if (typeof status.task === 'string' && status.task) return STATUS[locale].workingOn(status.task);
-  if (status.status === 'idle') return STATUS[locale].idleNothing();
-  return null;
+  const task = currentTask(dir);
+  return task ? STATUS[locale].workingOn(task.title) : null;
 }
 
 // Only worth a line when something is actually pending — an empty queue
@@ -145,9 +153,7 @@ export function composeStatusReply(dir: string, config: Json, opts: { redact?: b
   if (opts.redact) {
     // Unauthenticated sender on a no-allowlist channel: coarse state only — never
     // spend figures, task text, pending-approval IDs, or the routine schedule.
-    const status = readJson(path.join(dir, 'sessions', '.status.json'));
-    const working = !!status && ((typeof status.task === 'string' && status.task.length > 0) || status.status === 'in_progress');
-    lines.push(working ? STATUS[locale].redactedWorking() : STATUS[locale].redactedIdle());
+    lines.push(currentTask(dir) ? STATUS[locale].redactedWorking() : STATUS[locale].redactedIdle());
     return lines.join(' ');
   }
 

@@ -48,7 +48,7 @@ function fixture(seed: Seed = {}): string {
   write(hermit, 'config.json', seed.config ?? BASE_CONFIG);
   write(hermit, 'state/alert-state.json',
     seed.alertState ?? { alerts: {}, last_digest_date: null, self_eval: {}, total_ticks: 0 });
-  write(hermit, 'state/runtime.json', seed.runtime ?? { session_state: 'idle' });
+  write(hermit, 'state/runtime.json', seed.runtime ?? {});
   write(hermit, 'state/micro-proposals.json', { pending: [] });
   if (seed.budget) write(hermit, 'state/budget-alerts.json', seed.budget);
   if (seed.checklist !== null) {
@@ -88,7 +88,6 @@ describe('heartbeat tick', () => {
       ['SKIP', { checklist: '# Heartbeat\n<!-- no items -->\n' }],
       ['OK', {}],
       ['EVALUATE', { alertState: { alerts: {}, self_eval: {}, total_ticks: 19 } }],
-      ['OK', { runtime: { session_state: 'waiting' }, config: { timezone: 'UTC', heartbeat: { every: '30m', active_hours: ALWAYS_ON, waiting_timeout: '1h' } } }],
     ];
     for (const [expected, seed] of cases) {
       const viaPrecheck = (await run('precheck', [fixture(seed)])).trim().split('|')[0];
@@ -167,10 +166,9 @@ describe('heartbeat tick', () => {
     expect((await tick(hermit)).notifications.budget).toEqual([]);
   });
 
-  // Step 2 of the auto-close sequence replaces SHELL.md wholesale, so this line
-  // has to be on disk before the skill starts closing.
+  // Frozen lifecycle files are never mutated by heartbeat work.
   test('stale legacy lifecycle markers never close work or write Monitoring', async () => {
-    const hermit = fixture({ runtime: { session_state: 'in_progress' } });
+    const hermit = fixture();
     write(hermit, 'state/last-operator-action.json', { at: '2026-01-01T00:00:00Z' });
     const before = fs.readFileSync(path.join(hermit, 'sessions/SHELL.md'), 'utf8');
     expect((await tick(hermit)).verdict).toBe('OK');

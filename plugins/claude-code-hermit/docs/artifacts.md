@@ -76,7 +76,7 @@ differ per type (called out in each subsection below):
    `{"<key>": {"url": "<returned url>", "hash": "<hash from step 1>", "updated": "<now, ISO>", "backend": "<active backend>"}}`
    (merge — never drop sibling keys belonging to other artifact types).
 5. On any failure (tool absent, no entitlement, publish error) — skip silently, append
-   one SHELL.md Findings line for the session (not one per attempt), and continue.
+   one `task.ts note <id>` inside an open record's turn (not one per attempt), otherwise skip the note, and continue.
    Never block or degrade the calling skill's normal channel/markdown output.
 
 ### Non-claude backend deviations

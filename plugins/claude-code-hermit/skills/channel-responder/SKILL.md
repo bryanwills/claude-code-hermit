@@ -60,7 +60,7 @@ attachments; it does not change the tool's rendering mode or add mention support
 
 Treat `MEMORY.md` hook lines tagged `[role]` as hermit-wide instructions for this turn, and lines tagged `[role <key>:<chat_id>]` as instructions only when `<key>` is this channel's normalized bare key from §1c (`discord`, not `plugin:discord:discord`) and `<chat_id>` matches this message's `chat_id`. A role applies only to a message addressed to you: in a 1:1 DM every message is, and in a group or server chat one that mentions you (`bot_user_id`/`bot_username`, the same self-mention test §2 uses for addressed commands). Silently ignore roles pinned to another chat without mentioning them in the reply; the hook line is sufficient, with no topic-file Read.
 
-Use the injected TASKS.md policy. Before replying, the only bookkeeping calls are `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts list .claude-code-hermit --open --conversation <sourceKey>:<chat_id>` and `bun ${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts --force` after authorization. Do not reread TASKS.md, SHELL.md or runtime.json. The shutdown gate supplies any pending shutdown refusal.
+Use the injected TASKS.md policy. Before replying, the only bookkeeping calls are `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts list .claude-code-hermit --open --conversation <sourceKey>:<chat_id>` and `bun ${CLAUDE_PLUGIN_ROOT}/scripts/record-operator-action.ts --force` after authorization. Do not reread TASKS.md or runtime.json. The shutdown gate supplies any pending shutdown refusal.
 
 Apply **Micro-approval response** before treating a bare yes/ok/no as task confirmation. An open handle, resident task thread, or continuation of the sole open task selects it. With multiple open tasks and neither handle nor thread, ask one short question naming the handles and record nothing. Plain questions open nothing. Reply before further record mutations or classification tool calls.
 
@@ -251,7 +251,7 @@ Before running any heavy sub-step — an archive traversal, a multi-file search,
 - Write for someone reading on a phone: answer only what was asked, in plain prose, then stop
 - Mention the current task when it helps the operator place the reply
 - If you can't handle the request, say so clearly and suggest what the operator should do
-- **Channel voice:** no internal IDs (PROP-NNN, S-NNN, MP-…), no token counts or cost-log jargon, no slash commands, no file paths, no cron strings. Say what happened and the one next thing the operator can do from chat (a plain reply, not a command). Internal IDs stay in files; terminal/maintainer output is exempt. **Exceptions:** the five channel control commands — `!pause`, `!stop`, `!resume`, `!snooze`, `!status` — may be named when the operator asks how to control you, because they *are* the reply they would send. A hook-relayed harness command (`!doctor`) may also be named when it is the next step the operator can send. No other slash command qualifies. See `CLAUDE-APPEND.md` § Operator Notification for the full rule.
+- **Channel voice:** no internal IDs (PROP-NNN, T-..., MP-…), no token counts or cost-log jargon, no slash commands, no file paths, no cron strings. Say what happened and the one next thing the operator can do from chat (a plain reply, not a command). Internal IDs stay in files; terminal/maintainer output is exempt. **Exceptions:** the five channel control commands; `!pause`, `!stop`, `!resume`, `!snooze`, `!status`; may be named when the operator asks how to control you, because they *are* the reply they would send. A hook-relayed harness command (`!doctor`) may also be named when it is the next step the operator can send. No other slash command qualifies. See `CLAUDE-APPEND.md` § Operator Notification for the full rule.
 
 ## 4. Capture Interactive Patterns
 
@@ -287,7 +287,7 @@ skill-correction:<canonical-name>
 HERMIT_OBSERVATION
 ```
 
-`<canonical-name>` = the corrected skill's bare `name:` frontmatter (strip any `claude-code-hermit:`/`<plugin>:` prefix, lowercase) — same resolution `session-close` uses. `origin` follows the same sender check as the `[origin: external]` marker above (`external-content` for a non-primary sender, else `own-work`). A *rejected* row answers `ERROR|<reason>` on stdout at exit 0, so it can never block the reply — no `|| true` needed. (A *mis-invocation* exits 1 by design; fix the call and continue, never retry blind.) At most one row per turn, same as the Findings cap.
+`<canonical-name>` = the corrected skill's bare `name:` frontmatter (strip any `claude-code-hermit:`/`<plugin>:` prefix, lowercase). `origin` follows the same sender check as the `[origin: external]` marker above (`external-content` for a non-primary sender, else `own-work`). A *rejected* row answers `ERROR|<reason>` on stdout at exit 0, so it can never block the reply; no `|| true` needed. (A *mis-invocation* exits 1 by design; fix the call and continue, never retry blind.) At most one row per turn, same as the Findings cap.
 
 If the correction is a stated preference/recurrence with **no** clearly named skill, keep writing the `## Findings` line as before — do not guess a `<name>` and do not ask the operator to disambiguate mid-reply.
 
@@ -310,7 +310,7 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
     maintainer-only leg. Never for a notice that asks a decision, a reply, or names something the
     operator must act on: composing the plain client version is part of the work, not an optional
     extra, and skipping it misroutes the ask (maintainer chat configured) or silently parks it in
-    Findings (non-technical profile, none configured).
+    `state/watchdog-events.jsonl` (non-technical profile, none configured).
   - decision-seeking or actionable content that also has technical detail (heartbeat findings,
     inbox items, pending proposals) → `{ "client": "<plain headline + the ask>", "maintainer":
     "<full detail incl. figures>" }`. The maintainer text must be the **complete richer version of
@@ -327,10 +327,9 @@ Canonical protocol for proactively notifying the operator (referenced from `CLAU
     stderr and nothing was sent). Fix the payload and re-run. This is your error, not the channel's:
     do not push and do not record a `channel-send-unavailable` issue.
   - **Exit 1** — a leg did not land (including `degraded: true`, where maintainer detail reached only
-    SHELL.md Findings because a configured maintainer chat was unreachable). If
+    state/watchdog-events.jsonl because a configured maintainer chat was unreachable). If
     `push_notifications === true`, fire `PushNotification(message="<condensed one line, per
-    § Operator Notification push format>", status="proactive")`, log the undelivered content to SHELL.md
-    Findings, and record a deduped `channel-send-unavailable` issue — you only reach this branch with a
+    § Operator Notification push format>", status="proactive")`, log the undelivered content to state/watchdog-events.jsonl, and record a deduped `channel-send-unavailable` issue; you only reach this branch with a
     channel enabled, so even `no_channel: true` means it is configured but unreachable (unpaired,
     empty `allowed_users`, unreadable config), which is exactly the signal the operator needs.
 - Never send a proactive notice through a channel reply tool, and never advise `/<channel>:access`
