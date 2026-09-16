@@ -218,7 +218,7 @@ export function renderFinal(o: Observed, deployment: string): string {
   } else if (deployment === 'tmux') {
     // This is the only shell command here; ! makes it runnable in the current session.
     steps.push('`!.claude-code-hermit/bin/hermit-start` — boot the always-on session');
-    consequence = `The hermit is not awake until step ${steps.length} finishes.`;
+    consequence = `The agent is not awake until step ${steps.length} finishes.`;
     if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');
   } else {
     if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');

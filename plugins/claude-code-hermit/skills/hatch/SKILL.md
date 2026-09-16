@@ -629,7 +629,7 @@ Ask both questions in one `AskUserQuestion` call.
 questions: [
   {
     header: "Deployment",
-    question: "How will you run hermit?",
+    question: "How will you run the agent?",
     options: [
       { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; the watchdog scheduler installs on first boot (opt out with watchdog.scheduler_enabled: false)" },
       { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
