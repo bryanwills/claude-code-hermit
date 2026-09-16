@@ -222,7 +222,7 @@ export function renderFinal(o: Observed, deployment: string): string {
     if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');
   } else {
     if (channelSummary(c) !== 'none') steps.push('`/claude-code-hermit:channel-setup` — set the bot token and pair');
-    steps.push('`/claude-code-hermit:session` — start working');
+    steps.push('`/claude-code-hermit:resident-start` — get the hermit ready');
     consequence = `No session is open until step ${steps.length} finishes.`;
   }
   steps.forEach((s, i) => out.push(`${i + 1}. ${s}`));

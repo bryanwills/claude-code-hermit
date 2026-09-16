@@ -67,7 +67,7 @@ export const SETTINGS: readonly Setting[] = [
     label: 'Model', hint: "model name passed straight to --model, or 'none' for the Claude Code default",
     applies: 'next hermit-start' },
   { arg: 'boot-skill', path: 'boot_skill', kind: 'string', nullable: true, group: 'Operational',
-    label: 'Boot skill', hint: "namespaced skill run at always-on launch, or 'none' for /claude-code-hermit:session",
+    label: 'Boot skill', hint: "namespaced skill run at always-on launch, or 'none' for /claude-code-hermit:resident-start",
     applies: 'next hermit-start' },
   { arg: 'permissions', path: 'permission_mode', kind: 'enum', values: PERMISSION_MODE,
     group: 'Operational', label: 'Permission mode', hint: 'how much Claude Code asks before acting',
