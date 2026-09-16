@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import { readTaskReports } from './lib/task-report';
+import { taskStandup } from './lib/tasks';
+import { dutySummary } from './lib/duty-summary';
 // weekly-review.ts — generates a weekly review report
 // Zero npm dependencies. Node stdlib only.
 // Usage: bun weekly-review.ts <hermit-state-dir>
@@ -63,37 +66,17 @@ weekStart.setUTCDate(jan4.getUTCDate() - (jan4Day - 1) + (currentWeek - 1) * 7);
 const weekEnd = new Date(weekStart);
 weekEnd.setUTCDate(weekStart.getUTCDate() + 7); // exclusive
 
-// --- Load sessions (pre-compute parsed dates) ---
-const sessionsDir = path.join(hermitDir, 'sessions');
-const sessionFiles = globDir(sessionsDir, /^S-\d+-REPORT\.md$/);
-const allSessions = sessionFiles
-  .map(f => { const r = readFileWithFrontmatter(f); return { file: f, fm: r && r.fm, content: r ? r.content : '' }; })
-  .filter(s => s.fm && s.fm.id && s.fm.date)
-  .map(s => ({ ...s, parsedDate: new Date(s.fm.date) }));
-
+// Task reports are the only work-record input; frozen archives are not read.
+const reports = readTaskReports(hermitDir);
+const allSessions = reports.filter(record => record.closed_at !== null).map(record => ({
+  file: record.source_path,
+  fm: { id: path.basename(record.source_path, '.md'), date: record.closed_at!, cost_usd: record.cost,
+    status: record.outcome, tags: [] as string[], tokens: undefined as number | undefined },
+  content: record.lessons.join('\n'), parsedDate: new Date(record.closed_at!),
+}));
 const weekSessions = allSessions.filter(s => s.parsedDate >= weekStart && s.parsedDate < weekEnd);
-
-// --- Deliverables (## Artifacts bullets from this week's session reports) ---
-// Reuses the session content already read above — no extra file reads. Mirrors
-// the `- [[compiled/<type>-<slug>-<date>]] — annotation` format that
-// scripts/session-archive.ts writes on session close.
-const ARTIFACT_BULLET_RE = /^-\s*\[\[([^\]]+)\]\]\s*(?:—\s*(.*))?$/;
-function extractArtifacts(content: string): string[] {
-  const lines = (content || '').split('\n');
-  const startIdx = lines.findIndex(l => l.trim() === '## Artifacts');
-  if (startIdx === -1) return [];
-  const out: string[] = [];
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^##\s/.test(line)) break;
-    const m = line.match(ARTIFACT_BULLET_RE);
-    if (!m) continue;
-    const annotation = (m[2] || '').trim();
-    out.push(annotation || m[1].replace(/^compiled\//, ''));
-  }
-  return out;
-}
-const delivered = weekSessions.flatMap(s => extractArtifacts(s.content));
+const delivered = reports.filter(record => record.outcome === 'done' && record.closed_at
+  && new Date(record.closed_at) >= weekStart && new Date(record.closed_at) < weekEnd).map(record => record.title);
 
 // --- Load proposals ---
 const proposalsDir = path.join(hermitDir, 'proposals');
@@ -122,31 +105,25 @@ const weekResolved = allProposals.filter(p => {
 
 // --- Metrics ---
 const sessionsCount = weekSessions.length;
-const totalCost = weekSessions.reduce((sum, s) => sum + parseFloat(s.fm.cost_usd || 0), 0);
+const totalCost = weekSessions.reduce((sum, s) => sum + Number(s.fm.cost_usd || 0), 0);
 const avgCost = sessionsCount > 0 ? totalCost / sessionsCount : 0;
 
-// Token aggregation: prefer session frontmatter; fall back to cost-log.jsonl date-range scan
-const allHaveTokens = sessionsCount > 0 &&
-  weekSessions.every(s => Number.isFinite(s.fm.tokens) && s.fm.tokens >= 0);
+// Task reports carry cost; token totals come from the week's cost-log rows.
 let totalTokens = 0;
-if (allHaveTokens) {
-  totalTokens = weekSessions.reduce((sum, s) => sum + s.fm.tokens, 0);
-} else {
-  const weekCostLog = costLogPath(hermitDir);
-  const weekStartStr = weekStart.toISOString().slice(0, 10);
-  const weekEndStr = weekEnd.toISOString().slice(0, 10);
-  try {
-    const lines = fs.readFileSync(weekCostLog, 'utf-8').trim().split('\n');
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const e = JSON.parse(line);
-        const d = (e.timestamp || '').slice(0, 10);
-        if (d >= weekStartStr && d < weekEndStr) totalTokens += e.total_tokens || 0;
-      } catch {}
-    }
-  } catch {}
-}
+const weekCostLog = costLogPath(hermitDir);
+const weekStartStr = weekStart.toISOString().slice(0, 10);
+const weekEndStr = weekEnd.toISOString().slice(0, 10);
+try {
+  const lines = fs.readFileSync(weekCostLog, 'utf-8').trim().split('\n');
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line);
+      const d = (e.timestamp || '').slice(0, 10);
+      if (d >= weekStartStr && d < weekEndStr) totalTokens += e.total_tokens || 0;
+    } catch {}
+  }
+} catch {}
 const avgTokens = sessionsCount > 0 ? Math.round(totalTokens / sessionsCount) : 0;
 
 // --- Honesty rule: pre-build tag counts for O(1) lookup ---
@@ -168,7 +145,7 @@ function canShowTagImpact(tag: string) {
 function countIncompleteSessions(propTags: string[], datePredicate: (d: Date) => boolean) {
   return allSessions.filter(s =>
     datePredicate(s.parsedDate) &&
-    (s.fm.status === 'blocked' || s.fm.status === 'partial') &&
+    (s.fm.status === 'cancelled' || s.fm.status === 'unconfirmed') &&
     propTags.some(t => (s.fm.tags || []).includes(t))
   ).length;
 }
@@ -433,7 +410,7 @@ const frontmatter = [
   'tags: [weekly, review]',
   'generated: true',
   `week: ${weekKey}`,
-  `sessions_count: ${sessionsCount}`,
+  `tasks_count: ${sessionsCount}`,
   // Commas neutralized — the shared frontmatter array parser (lib/frontmatter.ts)
   // naively splits on every comma with no quote-awareness, so a comma inside an
   // annotation would corrupt this into extra array entries. Quotes need no
@@ -446,8 +423,8 @@ const frontmatter = [
   `open_loops_count: ${openLoops.length}`,
   `total_cost_usd: ${totalCost.toFixed(2)}`,
   `total_tokens: ${totalTokens}`,
-  `avg_session_cost_usd: ${avgCost.toFixed(2)}`,
-  `avg_session_tokens: ${avgTokens}`,
+  `avg_task_cost_usd: ${avgCost.toFixed(2)}`,
+  `avg_task_tokens: ${avgTokens}`,
   `reflect_runs: ${reflectRuns}`,
   `reflect_candidates: ${reflectCandidates}`,
   `reflect_surfaced: ${reflectSurfaced}`,
@@ -465,11 +442,17 @@ let body = `## Week of ${dateRange}\n\n`;
 
 // Sessions
 if (sessionsCount > 0) {
-  body += `### Sessions\n`;
-  body += `${sessionsCount} session${sessionsCount !== 1 ? 's' : ''}, $${totalCost.toFixed(2)} (${formatTokens(totalTokens)}) total ($${avgCost.toFixed(2)} avg).\n\n`;
+  body += `### Tasks\n`;
+  body += `${sessionsCount} task${sessionsCount !== 1 ? 's' : ''}, $${totalCost.toFixed(2)} (${formatTokens(totalTokens)}) total ($${avgCost.toFixed(2)} avg).\n\n`;
 } else {
-  body += `### Sessions\nNo sessions this week.\n\n`;
+  body += `### Tasks\nNo closed tasks this week.\n\n`;
 }
+
+body += '### By person\n';
+for (const person of taskStandup(hermitDir).byPerson) {
+  body += `- ${person.name ?? person.identity}: ${person.promised.length} open, ${person.late.length} late, ${person.waiting.length} waiting\n`;
+}
+body += '\n### Duties\n' + dutySummary(hermitDir).map(line => '- ' + line).join('\n') + '\n\n';
 
 // Delivered (durable compiled/ outputs produced this week, per session ## Artifacts)
 if (delivered.length > 0) {
@@ -521,7 +504,7 @@ if (openLoops.length > 0) {
 // Reflect vital-signs — makes healthy-quiet distinguishable from dead: a week
 // of runs with zero surfaced/accepted while cost accumulates is the loop
 // telling the operator to prune it.
-if (reflectRuns > 0 || reflectObsTotal > 0) {
+{
   body += `### Reflect\n`;
   let line = `reflect: ${reflectRuns} run${reflectRuns !== 1 ? 's' : ''}, ${reflectCandidates} candidates, ${reflectSurfaced} surfaced, ${reflectAccepted} accepted, ~$${reflectCost.toFixed(2)}`;
   line += `; obs: ${reflectObsTotal} ledger${reflectObsWeek > 0 ? ` (+${reflectObsWeek} this week)` : ''}`;

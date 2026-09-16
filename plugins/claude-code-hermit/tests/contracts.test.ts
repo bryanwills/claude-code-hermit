@@ -591,10 +591,10 @@ describe('routine precheck validation', () => {
     expect(out.warnings.join(' ')).toContain('heartbeat-restart');
   });
 
-  test('the shipped daily-auto-close and doctor routines default to their builtin gates', () => {
+  test('the shipped doctor uses its gate and daily-auto-close is retired', () => {
     const template = readJson(path.join(TEMPLATES, 'config.json.template'));
     const byId = (id: string) => template.routines.find((r: any) => r.id === id);
-    expect(byId('daily-auto-close').precheck).toBe('auto-close');
+    expect(byId('daily-auto-close')).toBeUndefined();
     expect(byId('doctor').precheck).toBe('doctor');
     expect(runValidate({ routines: template.routines }).errors).toEqual([]);
   });
@@ -1364,7 +1364,7 @@ describe('procedure capture contract', () => {
 
 describe('bootstrap skills', () => {
   test('bootstrap skills are model-invocable', () => {
-    const BOOTSTRAP_SKILLS = ['heartbeat', 'hermit-routines', 'session'];
+    const BOOTSTRAP_SKILLS = ['heartbeat', 'hermit-routines', 'resident-start'];
     const offenders: string[] = [];
     for (const skill of BOOTSTRAP_SKILLS) {
       const text = read(path.join(SKILLS, skill, 'SKILL.md'));
@@ -2329,7 +2329,7 @@ describe('proposal-act dispatch contract', () => {
     // NEXT-TASK.md is consumed by a later /session-start as ordinary work, so step (e) never
     // runs again — the guards have to travel in the bullet or the queued path can resurrect a
     // target deleted after queueing, or rewrite one already fixed
-    const queued = skill.slice(skill.indexOf('- **"Create a session task"**'), skill.indexOf('- **"I\'ll handle it manually"**'));
+    const queued = skill.slice(skill.indexOf('- **"Queue a task"**'), skill.indexOf('- **"I\'ll handle it manually"**'));
     expect(queued).toContain('For a cited compiled/ or raw/ doc missing at its original path, search for the same basename under that directory\'s .archive/ and, on a match, treat the citation as present and verify against the archived copy; a doc absent from both locations is a real stale-paths.');
     expect(queued).toContain('If it exists, read it before writing and author only the behaviors from the ## Skill Improvement body that are not already present');
     expect(queued).toContain('never write into the plugin cache, and create a file at that name only after the operator explicitly confirms');
@@ -3785,8 +3785,8 @@ describe('heartbeat eval-runner return contract', () => {
     expect(skill).not.toContain('self_eval_updates');
   });
 
-  test('SKILL.md reads appended/notifications/heartbeat_result from the script, not the subagent', () => {
-    expect(skill).toContain('{"appended": <n>, "append_error": "<msg>"?, "notifications": [...], "self_eval_proposals"');
+  test('SKILL.md reads notifications/heartbeat_result from the script, not the subagent', () => {
+    expect(skill).toContain('{"notifications": [...], "self_eval_proposals"');
     expect(skill).toContain("per the **script's** `heartbeat_result`");
   });
 
@@ -3801,7 +3801,7 @@ describe('heartbeat eval-runner return contract', () => {
   // every wake, so each needs its deterministic half behind one script call.
   test('SKILL.md run drives the tick verb and marks budget alerts by mark_key', () => {
     expect(skill).toContain('scripts/heartbeat.ts tick');
-    expect(skill).toContain('scripts/heartbeat.ts ack-next-task');
+    expect(skill).toContain('scripts/heartbeat.ts ack-queue');
     expect(skill).toContain('`delivered: true`');
     expect(skill).toContain('--mark-budget-notified <mark_key>');
   });
@@ -3855,13 +3855,10 @@ describe('heartbeat eval-runner return contract', () => {
 describe('determinized lifecycle wiring contract', () => {
   test('curated session archives route re-derived knowledge to a durable home', () => {
     const close = read(path.join(SKILLS, 'session-close', 'SKILL.md'));
-    const session = read(path.join(SKILLS, 'session', 'SKILL.md'));
     expect(close).toContain('For question 2');
     const question2 = close.slice(close.indexOf('For question 2'), close.indexOf('For question 3'));
     expect(question2).toContain('remember it');
     expect(question2).toContain('compiled/topic-');
-    expect(session).toContain('remember it');
-    expect(session).toContain('compiled/topic-');
     expect(close).not.toContain('Substantial re-derived knowledge');
     expect(close).toContain('Lessons: none');
   });
@@ -3876,10 +3873,7 @@ describe('determinized lifecycle wiring contract', () => {
     expect(skill).toContain('apply-reflection-actions.ts');
   });
 
-  test('session SKILL.md advances the scheduled-check cursor via --scheduled-check-run', () => {
-    const skill = read(path.join(SKILLS, 'session', 'SKILL.md'));
-    expect(skill).toContain('--scheduled-check-run');
-  });
+
 });
 
 // ============================================================
@@ -3898,9 +3892,11 @@ describe('proposal lifecycle: no tool-mediated state writes', () => {
     expect(proposalCreate).not.toMatch(/Write tool|Edit the/);
   });
 
-  test('proposal-act/SKILL.md invokes proposal.ts patch/next-task/routine instead of Edit/Write', () => {
+  test('proposal-act/SKILL.md invokes proposal.ts patch/routine and task.ts open/note instead of Edit/Write', () => {
     expect(proposalAct).toContain('proposal.ts patch');
-    expect(proposalAct).toContain('proposal.ts next-task');
+    expect(proposalAct).toContain('task.ts open');
+    expect(proposalAct).toContain('task.ts note');
+    expect(proposalAct).not.toContain('proposal.ts next-task');
     expect(proposalAct).toContain('proposal.ts routine');
     expect(proposalAct).not.toMatch(/Write tool|Edit the/);
   });
@@ -3957,7 +3953,7 @@ describe('hermit-evolve permission delegation contract', () => {
 describe('stale plugin runtime header', () => {
   const HEADER = '---Stale Plugin Runtime---';
   const emitter = read(path.join(SCRIPTS, 'check-upgrade.sh'));
-  const sessionStart = read(path.join(SKILLS, 'session-start', 'SKILL.md'));
+  const sessionStart = read(path.join(SKILLS, 'resident-start', 'SKILL.md'));
   const brief = read(path.join(SKILLS, 'brief', 'SKILL.md'));
 
   test('check-upgrade.sh emits the header without an evolve directive', () => {
@@ -4004,67 +4000,12 @@ describe('worktree state-dir template contract', () => {
   });
 });
 
-// ---------- session-start: no interactive ask on an always-on boot ----------
-//
-// An always-on hermit has no operator at the terminal, so steps 9b and 10 asking
-// "What should I work on next?" / "What should I help with?" produce a question
-// nothing can answer: ask-gate.ts denies the AskUserQuestion outright, and the
-// model then re-asks over the channel, waking the operator to answer a question
-// the next channel request or queued task was going to settle. The guard is prose in
-// a skill, so only a contract keeps a later edit from dropping it.
-describe('session-start always-on boot never asks', () => {
-  const sessionStart = read(path.join(SKILLS, 'session-start', 'SKILL.md'));
-
-  // indexOf's -1 would slice silently rather than throw, so a renamed heading has to
-  // fail on its own terms: extractBlock guards the outer 9b-to-11 bound, and the inner
-  // split gets the same treatment. Without it a drifted step-10 heading leaves step9b
-  // holding both steps, which passes this contract for the wrong reason.
-  function steps(): { step9b: string; step10: string } {
-    const region = extractBlock(
-      sessionStart,
-      '\n9b. If resuming an idle session',
-      '\n11. Once I know what to work on',
-    );
-    const splitAt = region.indexOf('\n10. If starting a new session');
-    expect(splitAt, "step 10's heading is missing from the 9b-11 region").toBeGreaterThan(-1);
-    return { step9b: region.slice(0, splitAt), step10: region.slice(splitAt) };
-  }
-
-  test('the region and both steps are located', () => {
-    const { step9b, step10 } = steps();
-    expect(step9b).toContain('What should I work on next?');
-    expect(step10).toContain('What should I help with?');
-  });
-
-  // The guard is stated once, between step 8 and step 9, and both ask steps defer to it.
-  test('the always-on never-ask rule sits above the ask steps', () => {
-    const rule = extractBlock(
-      sessionStart,
-      '\n8. If `agent_name` is set',
-      '\n9. If resuming an existing session',
-    );
-    expect(rule, 'the hoisted always_on guard is missing').toContain('`config.always_on` is `true`');
-    expect(rule, 'the hoisted guard lost its never-ask directive').toContain('never ask');
-  });
-
-  test('each ask step defers to the always_on guard', () => {
-    const { step9b, step10 } = steps();
-    for (const [name, step] of [['9b', step9b], ['10', step10]] as const) {
-      expect(step, `step ${name} lost its always_on deferral`).toContain('the always-on rule above applied');
-    }
-  });
-
-  // The default boot skill delegates task selection to session-start. Its wrapper
-  // must not reintroduce an unanswered or already-answered task prompt.
-  test('the session boot skill delegates task selection and retains the unattended guard', () => {
-    const step3 = extractBlock(
-      read(path.join(SKILLS, 'session', 'SKILL.md')),
-      '\n### 3. If starting a new session',
-      '\n### 4. Plan the work',
-    );
-    expect(step3).not.toContain('What should I help with?');
-    expect(step3).toContain('`session-start` owns task selection and tags');
-    expect(step3, 'session §3 lost its always_on guard').toContain('`config.always_on` is `true`');
-    expect(step3, 'session §3 lost its do-not-ask directive').toContain('do **not** ask');
+// Resident boot reports readiness without selecting a commitment.
+describe('resident-start always-on readiness', () => {
+  test('boot has no interactive task selection', () => {
+    const skill = read(path.join(SKILLS, 'resident-start', 'SKILL.md'));
+    expect(skill).toContain('In always-on mode never ask for a task');
+    expect(skill).toContain('Startup does not select a task');
+    expect(skill).not.toContain('What should I work on next?');
   });
 });

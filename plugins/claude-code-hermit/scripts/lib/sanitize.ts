@@ -45,7 +45,7 @@ function safeForLLMMultiline(s: any): string {
   return defuseTags(safeMultiline(s));
 }
 
-// Tight, high-precision markers for content injected into session-start
+// Tight, high-precision markers for content injected into SessionStart
 // context (compiled bodies/stubs, catalog summaries, OPERATOR/SHELL excerpts).
 // Deliberately minimal: hermit's own compiled/ security artifacts quote
 // injection phrases, so every pattern here must be near-zero-FP on prose

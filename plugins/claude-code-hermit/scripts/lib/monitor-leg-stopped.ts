@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { effectiveHeartbeatMode } from './heartbeat/control';
 
 function readJson(file: string): any {
   try {
@@ -12,7 +13,7 @@ function readJson(file: string): any {
 /** Whether a supervised leg must not poll: heartbeat stopped, or routines in fallback for this boot. */
 export function legStopped(hermitDir: string, leg: string): boolean {
   if (leg === 'heartbeat') {
-    return readJson(path.join(hermitDir, 'state', 'heartbeat-monitor.control.json'))?.mode === 'stopped';
+    return effectiveHeartbeatMode(hermitDir) === 'stopped';
   }
   const record = readJson(path.join(hermitDir, 'state', 'routine-monitor.runtime.json'));
   let boot: string | null = null;

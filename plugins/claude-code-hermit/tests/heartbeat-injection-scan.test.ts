@@ -184,9 +184,9 @@ describe('injection gate: safety-gate pass-through under taint', () => {
     expect(await verdict(dir)).toBe('SKIP|injection-suspect (announced)');
   });
 
-  test('tainted + announced + 12h stale in-progress session → AUTO_CLOSE', async () => {
+  test('tainted + announced + stale lifecycle state stays suspended', async () => {
     const dir = build({ heartbeat: TAINTED_HEARTBEAT, injectionAlertHash: announced(), staleInProgress: true });
-    expect(await verdict(dir, false, { HERMIT_NOW: NOW })).toBe('AUTO_CLOSE');
+    expect(await verdict(dir, false, { HERMIT_NOW: NOW })).toBe('SKIP|injection-suspect (announced)');
   });
 });
 

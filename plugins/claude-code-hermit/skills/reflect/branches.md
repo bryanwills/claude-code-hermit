@@ -68,7 +68,7 @@ If any of the three cannot be stated concretely, do not create the proposal. Sub
 **Recurring operator requests (idle broadening):** a manual request repeating on a schedule (e.g. "operator asked for dependency check 3 of last 4 Mondays") becomes a proposal with `Type: routine` and a `## Config` block containing the routine JSON:
 ```markdown
 ## Config
-{"id":"weekly-deps","schedule":"0 9 * * 1","skill":"claude-code-hermit:session-start --task 'dependency audit'","enabled":true}
+{"id":"weekly-deps","schedule":"0 9 * * 1","skill":"claude-code-hermit:task list","enabled":true}
 ```
 When accepted via `proposal-act`, this JSON is parsed and added to `config.json` routines automatically.
 

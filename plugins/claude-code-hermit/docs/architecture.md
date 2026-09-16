@@ -15,7 +15,7 @@ A Claude Code plugin that turns any Claude Code instance into a self-improving p
                                  |
  +-------------------------------v----------------------------------+
  |                    LAYER 2: SESSION LAYER                        |
- |   sessions/SHELL.md <-- live state                               |
+ |   tasks/T-*.md <-- durable commitments                               |
  |   sessions/S-NNN-REPORT.md <-- archived handoff artifacts        |
  |   Lifecycle:  start --> work --> close --> archive                |
  +-------------------------------|----------------------------------+
@@ -51,30 +51,30 @@ Input-agnostic. Same session discipline regardless of how your hermit is invoked
 | Headless                                                         | `claude -p "..."` for scripted tasks |
 | [External control surface](external-control-surface.md)          | Orchestrator MCP (stdio)             |
 
-All channels converge on the resident, which binds non-home conversations to background helpers in their own worktrees while preserving its `sessions/SHELL.md` task. Bindings use `<sourceKey>:<chat_id>` and a stable helper session id; reports park the binding, and later replies resume it. [Claude Tag](https://claude.com/docs/claude-tag/concepts/how-it-works) provides thread-owned sessions natively in Slack; [Remote Control](https://code.claude.com/docs/en/remote-control) connects one person to their session; Hermit's conversation ownership serves self-hosted Discord and Telegram.
+All channels converge on the resident. Guild assignments can get resident-owned task threads without a helper binding; authorized replies in those open threads reach the resident without another mention. Other non-home conversations bind to background helpers in their own worktrees while preserving resident task records. Bindings use `<sourceKey>:<chat_id>` and a stable helper session id; reports park the binding, and later replies resume it. [Claude Tag](https://claude.com/docs/claude-tag/concepts/how-it-works) provides thread-owned sessions natively in Slack; [Remote Control](https://code.claude.com/docs/en/remote-control) connects one person to their session; Hermit's conversation ownership serves self-hosted Discord and Telegram.
 
 ---
 
-## Layer 2: Session Layer
+## Layer 2: Task Records
 
-Sessions provide bounded, task-scoped work with durable handoff artifacts.
+A task record is one commitment with an owner, requester, definition of done, progress, lessons and a named closure actor. Records live in `tasks/T-*.md`; only `task.ts` writes them. Several commitments can remain open while the resident handles channels and scheduled duties.
 
-```
-START -> WORK -> CLOSE -> ARCHIVE
-  |       |       |        |
-  v       v       v        v
-Create   Update   Finalize  Copy to
-SHELL.md progress status,   S-NNN-REPORT.md,
-         log      lessons   reset SHELL.md
+```text
+assignment -> open record -> work -> result awaiting confirmation
+                              |              |
+                              +---- check or confirmation -> done
+                              +---- explicit cancellation -> cancelled
 ```
 
-**Start:** Checks for existing SHELL.md. Resumes if `in_progress` or `waiting`, creates fresh if not. Loads OPERATOR.md. Reads the SHELL.md Progress Log to see plan steps. Runs morning routine if it hasn't fired today.
+**Start:** `/claude-code-hermit:resident-start` classifies the boot, inspects execution observations and open records after a crash, and reports readiness. It does not select work or accept a `--task` argument. `TASKS.md` supplies the operator's record policy at SessionStart.
 
-**Work:** Plan steps and their progress live in SHELL.md's timestamped Progress Log — one plan surface, durable across compaction and restart. Blockers recorded with cold-start context. A chat-assigned task also gets a progress card: the threaded "On it" reply, whose id is a `Progress card:` Progress Log line, edited at milestones and closed at completion. A channel with no `edit_message` gets short threaded replies instead and records no `Progress card` line. The card is presentation only; SHELL.md and `runtime.json` stay authoritative.
+**Work:** `task.ts note`, `block`, and `lesson` update the record. Guild assignments may have resident-owned threads and progress cards. Presentation on a channel never replaces the record. Execution observations in `state/execution.json` and the Claude Code registry describe whether the process is safe to interrupt, independently of whether commitments remain open.
 
-**Close:** Defaults to idle transition at every task boundary — your hermit says "What's next?" and waits. Reflection fires. Full shutdown only via `/session-close`. See [Always-On Lifecycle](always-on-ops.md#2-always-on-lifecycle).
+**Close:** A record closes only by a successful check, named human confirmation, or explicit cancellation. A submitted result alone is unconfirmed. Time, midnight, process shutdown and context resets do not close commitments. Close/cancel returns the next runnable resident record so work can continue in the same turn.
 
-**Archive:** SHELL.md -> `S-NNN-REPORT.md`, written by `scripts/session-archive.ts` (a deterministic script, not an agent — session lifecycle needs no model judgment given the payload main already compiled). Fresh template with carry-forward. Monitoring and Session Summary sections are compacted if over threshold (configurable via `compact` in config.json).
+**Read:** Brief, reflection, weekly review, health and reporting use `task-report.ts` to distinguish done, cancelled, unconfirmed and open records. Task spend is split equally across a turn's task IDs and indexed by date. Duty summaries show requested configuration beside observed execution.
+
+**Frozen archives:** Existing `sessions/`, including `SHELL.md` and `S-NNN-REPORT.md`, stays on disk after upgrade. Recall still indexes that history; task readers never open it and no history is converted into task records.
 
 ---
 
@@ -108,14 +108,11 @@ The plugin manifest registers 13 shared hooks. The four resident-only hooks (`pa
 | Heartbeat touch     | PostToolUse  | strict    | Marks activity for heartbeat gap detection             |
 | Contract tests      | PostToolUse  | strict    | Runs plugin contract tests after changes               |
 | Config validator    | PostToolUse  | strict    | Validates config.json after mutations                  |
-| Context loader      | SessionStart | all       | Loads OPERATOR.md, SHELL.md, latest report, cost data; on a managed session (`HERMIT_MANAGED=1`) also stamps the launch env into `runtime.json` |
+| Context loader      | SessionStart | all       | Loads OPERATOR.md, TASKS.md, open task records, cost data; on a managed session (`HERMIT_MANAGED=1`) also stamps the launch env into `runtime.json` |
 | Cost tracker        | Stop         | all       | Logs tokens/cost                                       |
-| Session diff        | Stop         | standard+ | Auto-populates `## Changed` from `git diff`            |
-| Session evaluator   | Stop         | standard+ | Validates SHELL.md quality, detects zombie/stale/bloat |
 | PermissionDenied notify | PermissionDenied (launch overlay) | managed unattended | Maintainer diagnostic (tool + reason), one 30-min window per tool with a suppressed count; maintainer chat, else primary chat on a technical profile, else Findings; no client message |
 | Stop pipeline       | Stop         | all       | Cost tracking, session diff, evaluation, heartbeat |
 | StopFailure stamp   | StopFailure  | all       | Records the turn's typed upstream failure to `state/stop-failure.json`; the watchdog classifies from it and notifies |
-| Precompact stamp    | PreCompact   | all       | Breadcrumb in SHELL.md before `/compact` (manual or auto); watchdog's emergency `/clear` flushes the same breadcrumb separately since PreCompact never fires on `/clear` |
 
 Hermits may add hooks at `strict` (e.g., git-push-guard). Profile-gated hooks check `AGENT_HOOK_PROFILE` internally and return early when the active profile doesn't match.
 
@@ -142,7 +139,7 @@ claude-code-hermit/
 ```
 your-project/
 ├── .claude-code-hermit/
-│   ├── sessions/SHELL.md, S-NNN-REPORT.md
+│   ├── tasks/T-*.md
 │   ├── proposals/PROP-NNN.md
 │   ├── compiled/review-weekly-YYYY-Www.md  # Weekly review reports (weekly-review.ts; type: review)
 │   ├── templates/
@@ -165,7 +162,6 @@ your-project/
 │   │   ├── telemetry-alert.json      # Telemetry export-failure alert dedup (telemetry-export-owned)
 │   │   ├── channel-health.json       # Advisory channel send-liveness (channel-send-owned)
 │   │   ├── operator-turn-open.json   # Transient "an operator turn is in flight" marker (opened on operator prompts, cleared at Stop)
-│   │   ├── pending-close-drain.json  # Shared backoff between queued-close drain emissions (auto-close-owned)
 │   │   ├── .heartbeat                # Activity marker (heartbeat-touch-owned)
 │   │   └── .lifecycle.lock           # Always-on lifecycle lock (hermit-start-owned)
 │   ├── bin/hermit-start, hermit-stop
@@ -187,31 +183,29 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 
 | File                           | Owner (sole writer)                                 | Readers                                                       |
 | ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------- |
-| `state/runtime.json`           | session-archive.ts + cost-tracker + startup-context.ts (session stamp) | heartbeat, session-start, /hermit-routines (rdw=false suppression), hermit-watchdog (config/env, registry, inbox), hermit-doctor (peer inbox) |
+| `state/runtime.json`           | hermit-start + cost-tracker + startup-context.ts (process stamp) | heartbeat, resident-start, /hermit-routines, hermit-watchdog (config/env, registry, inbox), hermit-doctor (peer inbox) |
 | `state/alert-state.json`       | heartbeat only                                      | heartbeat; evaluate-session (read-only nudge computation)     |
 | `state/reflection-state.json`  | reflect + session (non-overlapping phases)          | heartbeat (debounce), hermit-settings (session-check display) |
 | `state/channel-activity.json`  | channel-hook.ts only                                | channel-responder, heartbeat                                  |
 | `state/channel-replies.jsonl`  | channel-hook.ts (append only)                       | none — reflect's engagement join was removed (the ledger records outbound sends only, so it could not measure operator engagement) |
 | `state/channel-log.sqlite`     | channel-reply-reminder stage + channel-hook.ts (append, via `lib/channel-log.ts`); weekly-review marks/prunes | search.ts (recall, fourth source); weekly-review consolidation |
-| `state/session-diff.json`      | session-diff.ts only                                | session-close (display)                                       |
-| `state/observations.jsonl`     | reflect-precheck (`cost-spike`, `startup-drift`) + transcript-digest `--record-observation` (`behavior-digest`) + session-close via `observations.ts` (`skill-correction`, `procedure-noticed`) and channel-responder via `observations.ts` (`skill-correction`) + reflect (`quick-deferral`, `reflect-noticed`); append only | reflect (step 3b graduation), reflection-judge (§1.4 ledger verification) |
+| `state/observations.jsonl`     | reflect-precheck (`cost-spike`, `startup-drift`) + transcript-digest `--record-observation` (`behavior-digest`) + channel-responder via `observations.ts` (`skill-correction`) + reflect (`quick-deferral`, `reflect-noticed`); append only | reflect (step 3b graduation), reflection-judge (§1.4 ledger verification) |
 | `state/proposal-metrics.jsonl` | proposal-create + proposal-act (append only)        | generate-summary.ts, proposal.ts metrics (read-only)   |
 | `state/usage-metrics.jsonl`    | usage-track.ts (Read PostToolUse, append only; compacted >180d by weekly-review) | weekly-review (untouched-knowledge suggestions) |
 | `state/micro-proposals.json`   | reflect + channel-bridged skills (queue, schema owned by reflect § Queuing procedure) + channel-responder/brief (resolve) | brief, generate-summary.ts |
 | `state/state-summary.md`       | generate-summary.ts only                            | humans                                                        |
-| `state/monitors.runtime.json`  | watch skill only                                    | session-start (clear on start), session-close (stop all)      |
+| `state/monitors.runtime.json`  | watch skill only                                    | resident-start and watch lifecycle      |
 | `state/heartbeat-monitor.runtime.json` | `lib/heartbeat/start.ts` only — reached by `heartbeat start` and by `hermit-routines load` (`arm commit --heartbeat`) | heartbeat-start (write), heartbeat-stop (clear), heartbeat-restart (rewrite) |
 | `state/heartbeat-liveness.json` | heartbeat-monitor.sh (every poll iteration)         | doctor-check.ts (heartbeat liveness check), heartbeat status  |
 | `state/cc-stop-snapshot.json`  | stop-pipeline.ts only                               | doctor-check.ts (scheduler/background-task health check)      |
-| `state/operator-turn-open.json` | user-prompt-pipeline.ts (opens at hook exit for a kept, non-blocked prompt, via record-operator-action.ts `openTurnMarker`) + record-operator-action.ts `--force`; stop-pipeline.ts (clears at Stop — the only deleter) | routines.ts due + lib/heartbeat/precheck.ts, both via lib/auto-close.ts `operatorTurnOpen` (defer gate, 60-min TTL backstop against a marker orphaned by a failed Stop) |
+| `state/operator-turn-open.json` | user-prompt-pipeline.ts (opens at hook exit for a kept, non-blocked prompt, via record-operator-action.ts `openTurnMarker`) + record-operator-action.ts `--force`; stop-pipeline.ts (clears at Stop — the only deleter) | routines.ts due + lib/heartbeat/precheck.ts, both via the operator-turn guard (defer gate, 60-min TTL backstop against a marker orphaned by a failed Stop) |
 | `state/stop-failure.json`      | stop-failure-stamp.ts (writer), stop-pipeline.ts (deleter — cleared on the next healthy, non-guest Stop) | hermit-watchdog.ts (upstream API failure tier, preferred over the transcript scan while the stamp is the newer of the two) |
-| `state/pending-close-drain.json` | lib/auto-close.ts `stampDrainCooldown`, called by routines.ts due and lib/heartbeat/precheck.ts (non-peek only) | the same two drainers (shared backoff before re-emitting a queued close: 30 min for the routine poll, halved by the heartbeat drainer once `heartbeat.every` reaches 30 min) |
 | `state/.heartbeat`             | heartbeat-touch.ts only                             | heartbeat (detect activity gaps)                              |
 | `state/.lifecycle.lock`        | hermit-start.ts only                                | hermit-stop.ts (cleanup)                                      |
 | `state/cost-index.json`        | cost-tracker.ts + subagent-cost.ts (each folds its own append; tmp+rename, offset-based) | cost-tracker.ts (getCumulativeCost fallback), doctor-check.ts |
 | `state/watchdog-state.json`    | hermit-watchdog.ts only                             | doctor-check.ts (`last_run` liveness + `consecutive_stale` + `last_hygiene_eval` + `hygiene_eval_counts`) |
 | `state/context-surface.json`   | cost-tracker.ts only (derived at each compaction boundary) | hermit-watchdog.ts (compact-tier conversation gate), doctor-check.ts (`context-age`) |
-| `state/watchdog-events.jsonl`  | hermit-watchdog.ts only (append)                    | doctor-check.ts (event counts), session-start (restart reason)|
+| `state/watchdog-events.jsonl`  | hermit-watchdog.ts only (append)                    | doctor-check.ts (event counts), resident-start (restart reason)|
 | `state/template-manifest.json` | `manifest-seed.ts` (called by hatch seed, docker-setup baselines, hermit-evolve update-after-copy) | evolve-plan.ts (classify), doctor-check.ts (shape check) |
 
 Per-file update policies for managed files under `.claude-code-hermit/`:
@@ -243,13 +237,13 @@ Per-file update policies for managed files under `.claude-code-hermit/`:
 |  decisions, postmortems, assessments.        |
 |  Injected on startup.                        |
 +----------------------------------------------+
-|  sessions/SHELL.md                           |
-|  Owner: Agent. Lifetime: one session.        |
+|  tasks/T-*.md                               |
+|  Owner: task.ts. Lifetime: permanent.         |
 |  Task, plan, progress, blockers, findings.   |
 +----------------------------------------------+
-|  sessions/S-NNN-REPORT.md                    |
+|  TASKS.md                                   |
 |  Owner: Agent. Lifetime: permanent.          |
-|  Archived journals. Cold-start safety net.   |
+|  Operator policy for recording assignments. |
 +----------------------------------------------+
 |  state/channel-log.sqlite (PROP-010)         |
 |  Owner: Agent (hooks). Lifetime: substrate.  |
@@ -260,7 +254,7 @@ Per-file update policies for managed files under `.claude-code-hermit/`:
 +----------------------------------------------+
 ```
 
-OPERATOR.md is human-curated — your hermit reads it but never modifies it. Auto-memory is Claude Code's built-in [persistent memory](https://code.claude.com/docs/en/sub-agents) and the primary input to learning. `compiled/` is for durable domain outputs the operator wants surfaced across sessions — distinct from auto-memory, which handles operational lessons. SHELL.md is the live working document. Reports are the journal and cold-start safety net — not the input to learning. `channel-log.sqlite` is the episodic substrate below all of the above: it captures the operator's actual DM text (deterministically, at hook level) so a concluded channel thread survives context compaction even before anything from it gets promoted. It's feature-detected everywhere it's read — a hermit with no channel traffic never creates the file, and recall/consolidation simply see nothing from this source.
+OPERATOR.md is human-curated — your hermit reads it but never modifies it. Auto-memory is Claude Code's built-in [persistent memory](https://code.claude.com/docs/en/sub-agents) and the primary input to learning. `compiled/` is for durable domain outputs the operator wants surfaced across sessions — distinct from auto-memory, which handles operational lessons. Task records hold progress and lessons. Readers consume normalized outcomes; operator policy lives in TASKS.md. `channel-log.sqlite` is the episodic substrate below all of the above: it captures the operator's actual DM text (deterministically, at hook level) so a concluded channel thread survives context compaction even before anything from it gets promoted. It's feature-detected everywhere it's read — a hermit with no channel traffic never creates the file, and recall/consolidation simply see nothing from this source.
 
 The `proposal-triage` and `reflection-judge` gate agents each carry their own private `memory: project` store (at `.claude/agent-memory/<agent-name>/MEMORY.md`). These are **isolated from the operator's memory** — triage accumulates suppression-pattern heuristics, judge accumulates hollow-evidence shapes. Private memory sharpens judgment but is never the sole basis for a suppress verdict. Over-suppression is bounded by the reflect Component Health check (`state/reflection-state.json` and `state/proposal-metrics.jsonl` counters).
 
@@ -310,7 +304,7 @@ Reflection fires -> three-outcome decision:
     |                  |    3. Operator-actionable       |
     |                  |                               v
     |                  +---- /proposal-act accept/defer/dismiss
-    |                        -> accepted -> NEXT-TASK.md -> idle agency
+    |                        -> accepted -> queued task record -> pickup
     |                                                            |
     +---- Memory shows no recurrence -> auto-resolved -----------+
 ```
@@ -334,24 +328,20 @@ Both are managed by `/claude-code-hermit:hermit-routines`. Where the Monitor too
 
 Four mechanisms handle background work — each owns a distinct axis:
 
-- **hermit-routines**: the only place for time-based semantic work (reflect, plugin-check routines, weekly-review, daily-auto-close). One native plugin monitor started by the activation skill owns eligibility, gating in-script before any wake; a CronCreate anchor and, on platforms without Monitor, per-routine CronCreates cover re-arm and fallback.
+- **hermit-routines**: the only place for time-based semantic work (reflect, plugin-check routines, weekly-review). One native plugin monitor started by the activation skill owns eligibility, gating in-script before any wake; a CronCreate anchor and, on platforms without Monitor, per-routine CronCreates cover re-arm and fallback.
 - **heartbeat** — health/checklist/idle-wake gate only, on its own fixed cadence (default 30m), separate semantics from routine scheduling. Polls via `--peek` in a bash subprocess (zero model cost when quiet); wakes the model only on `EVALUATE` or `AUTO_CLOSE` verdicts. Must not be merged into routines — routines and heartbeat now both reach a zero-token quiet path independently, but they gate on different questions (a routine's own cron vs. the checklist's staleness) and merging would conflate the two.
 - **watch** — session-scoped external event streams via the `Monitor` tool. Dies with the session; not a scheduler.
-- **watchdog** — out-of-session process recovery (restart, wedge-nudge, re-arm). `post_close_clear`, `context_clear_tokens`, and `context_hygiene.compact` run on every scheduler tick **independent of `watchdog.enabled`**; they are scheduler-owned context-hygiene co-located in the watchdog script, not watchdog features. Setting `enabled: false` disables restart/nudge only.
+- **watchdog** — out-of-session process recovery (restart, wedge-nudge, re-arm). `context_hygiene.clear`, `context_clear_tokens`, and `context_hygiene.compact` run on every scheduler tick **independent of `watchdog.enabled`**; they are scheduler-owned context-hygiene co-located in the watchdog script, not watchdog features. Setting `enabled: false` disables restart/nudge only.
 
 New periodic semantic work belongs in hermit-routines. A plugin check uses `reflect --check-id <id> --check <namespaced skill>` as its routine skill; `scheduled_checks` is reserved for session-triggered work at task completion. Heartbeat, watchdog, and watch must not become general schedulers.
 
 ### Context Hygiene
 
-Three context-reset mechanisms live in the watchdog script, each owning a distinct timing:
+`context_hygiene.clear` sends `/clear` without a model wake after an hour of operator quiet, after a context reaches 24 hours, or after policy changes. Defaults are `enabled: true`, `quiet: "1h"`, `max_age: "24h"`, and `min_tokens: 20000`.
 
-1. **`post_close_clear`** — fires right after `daily-auto-close` archives the session. `/clear` is free here because the archive that just ran externalized everything; there is nothing left to preserve.
-2. **`watchdog.context_clear_tokens`** (700k default) — an emergency `/clear` for a context that grew far past routine hygiene. Destructive and conservative by design: it can fire mid-arc, with only `SHELL.md`'s task ledger (not the live reasoning thread) surviving.
-3. **`context_hygiene.compact`** (100k compactible-conversation default) — routine hygiene. Always-on hermits wake on events ≥2 min apart, past the 5-minute prompt-cache TTL, so every wake re-pays the full accumulated context from cold. A `/compact` at a low, frequent threshold keeps that cost bounded; `startup-context.ts`'s post-compaction pointer section (`source === "compact"`, see Layer 4/5 above) re-seeds `runtime.json` state, pending micro-approvals, and outbound channel routing on the next `SessionStart`, which is what makes a threshold this low safe — nothing operationally load-bearing survives only in the discarded conversation.
+Every trigger waits for the safe execution boundary: matching runtime identity, idle observed for at least 60 seconds, no running helper, an idle or shell registry entry when present, enough compactible tokens, and an unchanged pane across two ticks. Lifecycle guards and the lifecycle lock also apply. `state/context-clear.json` records the policy hash and trigger so the same reason does not fire twice for the current reset. Machine-learned chat destinations and version stamps do not count as policy edits. Native monitors survive a clear and are not re-armed for it.
 
-Mechanism 3 also has a secondary effect on mechanism-independent native/proactive auto-compaction (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`): by keeping context low at quiescent moments, it reduces how often native auto-compaction gets the chance to fire mid-task in the first place.
-
-A boundary marker (`state/compact-requested.json`), written by `session-archive.ts` on idle archive and by the `proposal-act` skill at arc-end moments, lets mechanism 3 waive its `min_interval` cooldown for one tick — never its 60k token floor. That same marker also gates the steering message mechanism 3 sends with `/compact`: a fresh marker **and** `session_state === 'idle'` together get a drop-completed-arc-detail message; anything else keeps the conservative focus-on-unfinished-work message. See `config-reference.md` § `context_hygiene` for the full guard list and config keys.
+The existing emergency `watchdog.context_clear_tokens` tier and routine `context_hygiene.compact` tier remain separate. Compaction summarizes the conversation; a clear discards it. Task records survive either action. See [configuration](config-reference.md#context_hygiene).
 
 ---
 
@@ -359,7 +349,7 @@ A boundary marker (`state/compact-requested.json`), written by `session-archive.
 
 **Give up:** No web dashboard, no metrics visualization, no multi-tenant isolation, no custom tool definitions (use Claude Code's native tools or [MCP servers](https://code.claude.com/docs/en/mcp)).
 
-**Gain:** Understand it in 30 minutes. No version conflicts, no build failures. Works with any codebase in any language. Session reports are human-readable markdown — grep them, review in GitHub, feed to another agent.
+**Gain:** Understand it in 30 minutes. No version conflicts, no build failures. Works with any codebase in any language. Task records are human-readable markdown — grep them, review in GitHub, feed to another agent.
 
 ---
 

@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { runEvidence } from './lib/evidence-runner';
+import { readTasks } from './lib/tasks';
 import path from 'node:path';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { flagValue, readStdinIfFlagged } from './lib/cli';
@@ -89,37 +91,6 @@ function chatFlag(args: string[]): string | undefined {
   return chat;
 }
 
-async function evidence(cmd: string, root: string, timeoutS: number) {
-  const proc = Bun.spawn(['bash', '-c', cmd], { cwd: root, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
-  const chunks: Buffer[] = [];
-  let size = 0;
-  let timedOut = false;
-  const readers = [proc.stdout.getReader(), proc.stderr.getReader()];
-  // A backgrounded grandchild inherits the pipes and keeps them open after the
-  // kill, so the deadline must also stop waiting on EOF, not just kill the child.
-  let deadline: (() => void) | undefined;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill('SIGKILL');
-    for (const reader of readers) void reader.cancel();
-    deadline?.();
-  }, Number(process.env.LATER_CHECK_TIMEOUT_MS) || timeoutS * 1000); // env: test-only seam
-  async function drain(reader: (typeof readers)[number]) {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const kept = Buffer.from(value.subarray(0, Math.max(0, 2048 - size)));
-      if (kept.length) chunks.push(kept);
-      size += kept.length;
-    }
-  }
-  try {
-    const drained = Promise.all([drain(readers[0]), drain(readers[1])]);
-    await Promise.race([drained, new Promise<void>(resolve => { deadline = resolve; })]);
-    const exit = await proc.exited;
-    return { exit, output: new TextDecoder('utf-8').decode(Buffer.concat(chunks), { stream: true }), timed_out: timedOut };
-  } finally { clearTimeout(timer); }
-}
 
 async function main() {
   const [verb, dirArg, ...args] = process.argv.slice(2);
@@ -129,7 +100,8 @@ async function main() {
   const rows = readRows(file);
   const date = new Date(resolveHermitNowMs());
   if (verb === 'due') {
-    console.log(rows.some(row => row.state === 'pending' && new Date(row.due) <= date) ? 'WAKE' : 'SKIP');
+    const taskCheckDue = readTasks(dir).some(record => record.status === 'open' && record.result && 'check' in record && record.check);
+    console.log(taskCheckDue || rows.some(row => row.state === 'pending' && new Date(row.due) <= date) ? 'WAKE' : 'SKIP');
     return;
   }
   if (verb === 'add') {
@@ -182,7 +154,7 @@ async function main() {
     }
     const result = row.cmd == null
       ? { exit: null, output: '', timed_out: false }
-      : await evidence(row.cmd, path.dirname(dir), row.timeout_s ?? DEFAULT_TIMEOUT_S);
+      : await runEvidence(row.cmd, path.dirname(dir), row.timeout_s ?? DEFAULT_TIMEOUT_S);
     if (!updatePending(file, row.id, { exit: result.exit, output: result.output })) { noop(); return; }
     console.log(JSON.stringify({ ...row, ...result, late: isLate(dir, row, date) }));
     return;

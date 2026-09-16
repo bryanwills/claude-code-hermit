@@ -788,9 +788,18 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     }
   }
 
-  if (config.post_close_clear !== undefined && typeof config.post_close_clear !== 'boolean') {
-    errors.push('post_close_clear: must be a boolean');
+  const clear = config.context_hygiene?.clear;
+  if (clear !== undefined) {
+    if (!clear || typeof clear !== 'object' || Array.isArray(clear)) errors.push('context_hygiene.clear: must be an object');
+    else {
+      if (clear.enabled !== undefined && typeof clear.enabled !== 'boolean') errors.push('context_hygiene.clear.enabled: must be a boolean');
+      if (clear.min_tokens !== undefined && (typeof clear.min_tokens !== 'number' || !Number.isFinite(clear.min_tokens) || clear.min_tokens <= 0)) errors.push('context_hygiene.clear.min_tokens: must be a positive number');
+      for (const key of ['quiet', 'max_age']) {
+        if (clear[key] !== undefined && (typeof clear[key] !== 'string' || !/^\d+(?:\.\d+)?[smhd]$/.test(clear[key]))) errors.push(`context_hygiene.clear.${key}: must be a duration string`);
+      }
+    }
   }
+  if (config.tasks?.queue_nudge_minutes !== undefined && (!Number.isFinite(config.tasks.queue_nudge_minutes) || config.tasks.queue_nudge_minutes <= 0)) errors.push('tasks.queue_nudge_minutes: must be a positive number');
 
   return { errors, warnings };
 }

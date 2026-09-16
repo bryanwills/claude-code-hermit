@@ -23,10 +23,10 @@ cd /path/to/your/project
 .claude-code-hermit/bin/hermit-start
 ```
 
-This reads `config.json`, starts a tmux session with your configured channels and permissions, and auto-runs `/claude-code-hermit:session`. To stop:
+This reads `config.json`, starts a tmux session with your configured channels and permissions, and auto-runs `/claude-code-hermit:resident-start`. To stop:
 
 ```bash
-.claude-code-hermit/bin/hermit-stop        # graceful (sends /session-close first)
+.claude-code-hermit/bin/hermit-stop        # graceful resident shutdown
 .claude-code-hermit/bin/hermit-stop --force # immediate kill
 ```
 
@@ -63,95 +63,49 @@ To spawn *new* sessions into a project from your phone, run `/claude-code-hermit
 
 ## 2. Always-On Lifecycle
 
-> The lifecycle below applies to both interactive and always-on sessions — Docker or tmux. This is the core reference for how sessions behave.
+The resident process stays available while individual task records track commitments. Heartbeat, monitors and channels continue between assignments.
 
-In always-on mode, the session stays open between tasks. Heartbeat, monitors, and channels keep running the whole time. Your hermit works, finishes, waits for the next thing — and stays productive in between.
+### Task flow
 
-### State flow
+1. `hermit-start` launches Claude Code in tmux and invokes `resident-start` for boot recovery and readiness, without selecting a task.
+2. An assignment opens a record when `TASKS.md` policy calls for one. Progress, waiting reasons and lessons are written through `task.ts`.
+3. A result stays open and unconfirmed until a check passes or a named person confirms it. Explicit cancellation closes it without claiming success.
+4. Close or cancel returns the next runnable resident record. Continue that work in the same turn.
+5. `hermit-stop` shuts down the resident process. Open commitments remain records for the next boot.
 
-```
-hermit-start -> [in_progress] -> task done -> [idle] -> new task -> [in_progress] -> ...
-                      |                                                               |
-                      +---> blocked on input -> [waiting] --+                         |
-                      |                                     |                         |
-                      |     timeout or operator reply ------+-> [idle] or [in_progress]
-                      |                                                               |
-                      +-------------------------------hermit-stop -> [archived]
-```
+Quiet hours and midnight never complete work. A task with a waiting reason remains open until its state changes, without parking the whole resident.
 
-1. `hermit-start` sets `always_on: true`, launches Claude Code in tmux
-2. Work finishes — **idle transition**: report archived, SHELL.md reset, heartbeat keeps running
-3. New request comes in (channel, NEXT-TASK.md, terminal) — back to `in_progress`
-4. Blocked on operator input — **waiting transition**: session stays open, heartbeat skips stale checks, configurable `waiting_timeout` auto-transitions to idle
-5. `hermit-stop` — **full shutdown**: close task, stop heartbeat, archive, kill tmux
+### Context clears
 
-### Close modes
+`context_hygiene.clear` defaults to an hour of operator quiet, a maximum context age of 24 hours, and a floor of 20,000 compactible tokens. A policy change is another trigger. The watchdog sends `/clear` only after the execution boundary is safe and the pane is unchanged across two ticks. No model wake is needed and native monitors keep running. See [context hygiene](config-reference.md#context_hygiene) for fields and guards.
 
-|                     | Idle Transition (task boundary)                                            | Auto-Idle (quiet `stale_threshold`) | Waiting (blocked on input)     | Auto-Close (12h idle OR midnight + 10min lull) | Full Shutdown (`/session-close`) |
-| ------------------- | -------------------------------------------------------------------------- | ----------------------------------- | ------------------------------ | ---------------------------------------------- | -------------------------------- |
-| **When**            | Work done — automatic                                                      | No operator action and no Progress Log for `heartbeat.stale_threshold` | Blocked on operator input      | 12h since last operator action, OR midnight daily-routine fires and operator goes idle ≥10min | You explicitly close             |
-| **Report archived** | Yes                                                                        | Yes (`closed_via: auto`, `status: partial`) | No (session stays open)        | Yes (frontmatter `closed_via: auto`)           | Yes                              |
-| **Reflection runs** | Yes                                                                        | No                                  | No                             | No (deferred to next session's heartbeat cycle) | Yes                              |
-| **Heartbeat**       | Keeps running (or starts)                                                  | Keeps running                       | Runs (skips waiting checks)    | Keeps running                                  | Stopped                          |
-| **Monitors**        | Keep running                                                               | Keep running                        | Keep running                   | Keep running                                   | Stopped (TaskStop + registry cleared) |
-| **Channels**        | Keep running (always-on only)                                              | Keep running                        | Keep running                   | Keep running                                   | Stopped                          |
-| **SHELL.md**        | Reset in-place, Monitoring & Summary compacted if over threshold           | Reset in-place                      | Unchanged (state in runtime.json) | Replaced with fresh template                | Replaced with fresh template     |
-| **Applies to**      | Both interactive and always-on                                             | Always-on (Stop hook + watchdog)    | Both interactive and always-on | Both interactive and always-on                 | Both interactive and always-on   |
+### Background work
 
-Default: idle transition when work finishes. A session left `in_progress` with no operator activity and no Progress Log for `heartbeat.stale_threshold` is archived as `partial` at the next turn end or watchdog tick. Waiting when blocked on operator input (configurable `waiting_timeout` auto-transitions to idle). Auto-close on either 12h operator inactivity OR the daily midnight routine once the operator is idle ≥10 min; a queued midnight close can be drained by either heartbeat or the Monitor-mode routine poll, both of which additionally defer while an operator turn is open and share one drain backoff marker (30 minutes, halved by the heartbeat drainer once `heartbeat.every` reaches 30 minutes). Neither 12h nor midnight threshold is configurable. Full shutdown only via explicit `/session-close` or `hermit-stop`.
+Quiet heartbeat polls stay in scripts. An EVALUATE wake handles checklist work and notices; clean results are damped by `heartbeat.clean_recheck_cooldown`. Reflection runs on its own schedule. Brief and weekly review consume task outcomes and requested/observed duty summaries, not frozen archives.
 
-### How sessions compound
 
-```
-  Task 1 -> work -> complete -> archive S-001
-  Task 2 -> work -> complete -> archive S-002
-  Task 3 -> work -> complete -> archive S-003
-     |-- Reflection fires at task boundaries and idle checks
-     |-- Auto-proposals created if patterns noticed
-
-  Throughout: heartbeat ticks on schedule
-  Morning: brief + priority check. Evening: daily journal.
-```
-
-**Hooks fire throughout the session:** `cost-tracker.ts` (costs), `session-diff.ts` (changed files), and `evaluate-session.ts` (quality nudges) run on every assistant turn (Stop). `channel-hook.ts` + `heartbeat-touch.ts` run on tool use (PostToolUse). Banned commands are native `permissions.deny` / `permissions.ask` entries, not a PreToolUse hook.
-
-### When learning fires
-
-Your hermit reflects on its own memory — not archived reports. Reflection triggers at these moments:
-
-| Trigger              | When                                          |
-| -------------------- | --------------------------------------------- |
-| Task boundary        | After completing work, during idle transition |
-| Heartbeat idle check | Every 4+ hours during idle                    |
-| Evening routine      | Last heartbeat tick of the day                |
-| Session close        | Before archiving the final report             |
-
-**Feedback loop:** When an accepted proposal's pattern stops recurring (based on memory), it auto-resolves. The heartbeat self-evaluates every 20 ticks — suggesting stale checks to remove and relevant ones to add.
-
-**Cost model:** Heartbeat EVALUATE runs in an isolated-context subagent (fresh ~40k context, not the main session's 200k–500k). It reads only files and needs none of the inherited conversational history. The main session applies the resulting writes and notifications. After a clean EVALUATE, the `clean_recheck_cooldown` (default `"6h"`) suppresses re-evaluation until a change-detecting gate (micro-proposal, pending-close, suppressed-digest) fires — reducing LLM wakes to ~3× per active-day for a healthy hermit.
 
 ### Daily rhythm
 
 If routines are configured (default after init or upgrade):
 
 - **Morning routine** — `brief --morning` at configured time (default: active hours start + 30m): generates a brief, reviews pending proposals, checks priorities. Framing adapts to `always_on` setting.
-- **Evening routine** — `brief --evening` at configured time (default: active hours end - 30m): summarizes the day's work, archives via session-close, flags tomorrow's priorities.
+- **Evening routine** — `brief --evening` at configured time (default: active hours end - 30m): summarizes the day's task outcomes and flags tomorrow's priorities.
 
 Both fire from `/claude-code-hermit:hermit-routines`: a native plugin monitor started by the activation skill where available, per-session CronCreate jobs as fallback. Configure with `/claude-code-hermit:hermit-settings routines`.
 
 ### Idle agency
 
-When the session is idle, the heartbeat tick checks `sessions/NEXT-TASK.md` and picks up an accepted proposal left there, gated by escalation level: `conservative` sends one notice and parks the session in `waiting`, `balanced` and `autonomous` start it via `session-start`. Pickup requires `always_on` — an interactive hermit is presented the queued task at its next `session-start` instead.
+A runnable record is open, owned by `resident`, and has neither a result nor a waiting reason. When one has waited longer than `tasks.queue_nudge_minutes` (default 60), heartbeat emits a notice with an acknowledgement token. Under `conservative`, it notifies the requester in the task's place; under `balanced` or `autonomous`, it continues the record in that turn. A matching acknowledgement suppresses repeat notices for that record state.
 
 Reflection is not driven by idleness; it runs on the `reflect` schedule under `/claude-code-hermit:hermit-routines`.
 
 ### Edge cases
 
-- **Crash during work:** SHELL.md persists. On restart, offers to resume.
-- **Crash during idle:** SHELL.md persists as `idle`. Asks what to work on next.
-- **Crash during waiting:** SHELL.md persists as `waiting`. On restart, re-enters waiting state and checks for operator response.
-- **hermit-start when already running:** Checks `state/runtime.json` before reporting health. Valid → prints attach guidance and exits 0. Missing, unreadable, or carrying no lifecycle record (`runtime_mode`/`tmux_session` empty) → exits 1 and tells you to restart the session: lifecycle state can't be rebuilt for a session already in flight, and inventing it would erase the `transition` / `last_error` markers session-start recovery reads. Until you restart, attach and the watchdog stay degraded.
-- **Docker SIGTERM:** The entrypoint traps SIGTERM and attempts a graceful session close (30s timeout) before the container exits. Sessions are archived even on raw `docker compose down`.
+- **Crash during work:** records persist. `resident-start` reports open work and the execution observation without prompting to archive it or selecting a new task.
+- **Waiting for input:** the record's `waiting_on` remains visible; unrelated resident duties continue.
+- **Already running:** `hermit-start` verifies runtime metadata and reports attach guidance. Missing metadata requires a restart so recovery can establish the correct process identity.
+- **Container shutdown:** stopping the process does not confirm or cancel its open records.
 
 ---
 
@@ -165,17 +119,16 @@ Routines live in `config.json` as a `routines` array:
 
 ```json
 "routines": [
-  {"id": "morning", "schedule": "30 8 * * *", "skill": "claude-code-hermit:brief --morning", "run_during_waiting": true, "enabled": true},
-  {"id": "evening", "schedule": "30 22 * * *", "skill": "claude-code-hermit:brief --evening", "run_during_waiting": true, "enabled": true},
-  {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:hermit-routines load", "run_during_waiting": true, "enabled": true},
-  {"id": "weekly-deps", "schedule": "0 9 * * 1", "skill": "claude-code-hermit:session-start --task 'dependency audit'", "enabled": false}
+  {"id": "morning", "schedule": "30 8 * * *", "skill": "claude-code-hermit:brief --morning", "enabled": true},
+  {"id": "evening", "schedule": "30 22 * * *", "skill": "claude-code-hermit:brief --evening", "enabled": true},
+  {"id": "heartbeat-restart", "schedule": "0 4 * * *", "skill": "claude-code-hermit:hermit-routines load", "enabled": true},
+  {"id": "weekly-deps", "schedule": "0 9 * * 1", "skill": "my-plugin:dependency-audit", "enabled": false}
 ]
 ```
 
 - `id`: unique name for dedup and display
 - `schedule`: 5-field cron expression (`minute hour dom month dow`), written in `config.timezone`. Monitor mode evaluates it directly in that timezone; the CronCreate anchor/fallback path converts it to machine-local time at registration (see [Config reference — routines.schedule](../docs/config-reference.md#cron-schedule-rules))
 - `skill`: full slash-command name (e.g. `claude-code-hermit:brief --morning` for plugin skills, `ha-refresh-context` for local project skills)
-- `run_during_waiting`: optional — if `true`, fires even when session status is `waiting` (default: `false`)
 - `model`: optional — one of `opus`, `sonnet`, `haiku`. Runs the skill in a subagent at that model to save cost on lightweight routines (e.g. URL checks, threshold comparisons). Subagents run in isolated context and return only a one-line status, so only use it on stateless routines — not ones whose value is chat/transcript output, and not `heartbeat-restart` (ignored there). See [config-reference](config-reference.md#routines) for details.
 - `enabled`: toggle without removing
 
@@ -185,13 +138,13 @@ Manage with `/claude-code-hermit:hermit-settings routines`. Changes take effect 
 
 `hermit-start.ts` auto-sends `/claude-code-hermit:hermit-routines load` after launching the always-on session. The skill resolves `$CLAUDE_PLUGIN_ROOT`, then asks `scripts/routines.ts arm begin` what actually needs arming — a `HEALTHY` verdict (monitor registered for this boot, ticking, and matching config; anchor current) stops the skill right there with no `TaskStop`/`Monitor`/`Cron*` calls at all. On `ARM` it executes the plan the verb printed:
 
-**Monitor mode (tried first).** Activates one native plugin monitor started by the activation skill (`scripts/routine-monitor.sh`, 60s poll) running `scripts/routines.ts due`, which reads `config.routines` directly, evaluates each enabled non-anchor routine's schedule against `state/routine-schedule.json` cursors, applies the pause/waiting/idle gates itself, and prints a single `ROUTINE_DUE [hermit-routine:<id>] ...` line only for routines that should actually wake the session ; a routine that's due-but-skipped costs zero model tokens. `hermit-routines run <ids>` handles the wake: it re-runs `scripts/routines.ts precheck` for the `started` stamp, invokes the skill on `PROCEED`, then calls `scripts/routines.ts finish`, which verifies any declared `expect_artifact` contract and writes the one terminal row to `state/routine-metrics.jsonl`. The anchor (`heartbeat-restart`) still registers via a single `CronCreate`, kept fresh by the same diff-planner (`scripts/routines.ts arm`) described below, scoped to that one routine.
+**Monitor mode (tried first).** Activates one native plugin monitor started by the activation skill (`scripts/routine-monitor.sh`, 60s poll) running `scripts/routines.ts due`, which reads `config.routines` directly, evaluates each enabled non-anchor routine's schedule against `state/routine-schedule.json` cursors, applies the pause and execution gates itself, and prints a single `ROUTINE_DUE [hermit-routine:<id>] ...` line only for routines that should actually wake the session ; a routine that's due-but-skipped costs zero model tokens. `hermit-routines run <ids>` handles the wake: it re-runs `scripts/routines.ts precheck` for the `started` stamp, invokes the skill on `PROCEED`, then calls `scripts/routines.ts finish`, which verifies any declared `expect_artifact` contract and writes the one terminal row to `state/routine-metrics.jsonl`. The anchor (`heartbeat-restart`) still registers via a single `CronCreate`, kept fresh by the same diff-planner (`scripts/routines.ts arm`) described below, scoped to that one routine.
 
 **CronCreate fallback** (Monitor tool unavailable, or the subprocess fails to spawn): every enabled routine, anchor included, registers as its own per-session CronCreate. `scripts/routines.ts arm begin --fallback` diffs against `state/cron-registry.json` (a derived mirror, keyed to the current boot via `state/.boot-id`) — unchanged (`KEEP`), re-registered (`DELETE`+`CREATE`) on a schedule/metadata edit, or re-registered regardless of config changes once aging toward CC's 7-day auto-expiry cliff. The schedule shift (`config.timezone` → machine local time, via `lib/cron-shift.ts`) happens inside this step — monitor-mode routines skip it, evaluating directly in `config.timezone`. Each `CREATE` gets a prompt that runs `scripts/routines.ts precheck`, invokes the skill on `PROCEED`, then calls `scripts/routines.ts finish`, which verifies any declared `expect_artifact` contract and writes the one terminal row to `state/routine-metrics.jsonl`; each `DELETE` tears down the matching `[hermit-routine:*]` entry first. On an unchanged, fresh config this is a no-op with zero `CronList`/`CronCreate`/`CronDelete` calls. CronCreate fires only between REPL turns — never mid-task; a fire that comes due during `in_progress` is deferred (not dropped) until idle.
 
 `/claude-code-hermit:hermit-routines load --reset` bypasses both diffs and does an unconditional sweep — the escape hatch for suspected drift.
 
-`routines.ts precheck` gates every routine fire regardless of delivery mechanism (the `heartbeat-restart` anchor is the exception — its rendered prompt runs `arm anchor`, which applies the pause gate and the `started`/`fired` stamps itself): it suppresses `run_during_waiting: false` routines with a `skipped-waiting` event when `session_state == "waiting"`, and any routine with a `skipped-paused` event when the binding pause flag is set; otherwise it stamps `started` and returns `PROCEED`. When the routine declares `expect_artifact`, `precheck` also freezes that fire's contract into `state/routine-run.json` — the `{date}` token resolved in `config.timezone` at start, plus the target's filesystem identity — which `routines.ts finish` compares against afterwards. In monitor mode, `routines.ts due` applies the same two gates itself before ever waking the session, plus a lateness gate (occurrences older than `routine_max_lateness_minutes`, default 60, are consumed with a `skipped-late` event and never wake the session) and an operator-turn defer (Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) approximating the idle gate CronCreate gets for free from the harness. A deferred occurrence records a `held_at` poll stamp in `state/routine-schedule.json`: its lateness clock runs from that stamp, so time spent deferred does not count and the occurrence fires at the first poll after the turn clears. Only observed polls earn that credit: an occurrence already past the limit when the turn opens is still consumed as `skipped-late`, and so is one whose deferral was interrupted by downtime.
+`routines.ts precheck` gates every routine fire regardless of delivery mechanism (the `heartbeat-restart` anchor is the exception — its rendered prompt runs `arm anchor`, which applies the pause gate and the `started`/`fired` stamps itself): it suppresses a routine with a `skipped-paused` event when the binding pause flag is set; otherwise it stamps `started` and returns `PROCEED`. When the routine declares `expect_artifact`, `precheck` also freezes that fire's contract into `state/routine-run.json` — the `{date}` token resolved in `config.timezone` at start, plus the target's filesystem identity — which `routines.ts finish` compares against afterwards. In monitor mode, `routines.ts due` applies the pause gate itself before ever waking the session, plus a lateness gate (occurrences older than `routine_max_lateness_minutes`, default 60, are consumed with a `skipped-late` event and never wake the session) and an operator-turn defer (Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) approximating the idle gate CronCreate gets for free from the harness. A deferred occurrence records a `held_at` poll stamp in `state/routine-schedule.json`: its lateness clock runs from that stamp, so time spent deferred does not count and the occurrence fires at the first poll after the turn clears. Only observed polls earn that credit: an occurrence already past the limit when the turn opens is still consumed as `skipped-late`, and so is one whose deferral was interrupted by downtime.
 
 **`heartbeat-restart`** fires at 4am daily and re-invokes `load`, re-arming the routine monitor (or, in fallback mode, the routine CronCreates — which expire after 7 days without this daily re-arm); unless `heartbeat.enabled` is explicitly false, the same fire re-registers the heartbeat Monitor.
 
@@ -256,12 +209,12 @@ Watchdog restarts resume the resident conversation when the compact tier is enab
 
 For a manual start that keeps the conversation, use `hermit-start --resume` or `hermit-docker restart --resume` (`hermit-docker up --resume` also accepts the opt-in). Manual resume skips the size gate but still requires a transcript with a user turn. Starts without `--resume` create a fresh conversation. Resume applies only to always-on boots with a bootstrap prompt; the existing archive-or-resume recovery question still controls whether work continues.
 
-Progress and blockers remain in `sessions/SHELL.md` on disk even when a restart starts a fresh conversation.
+Progress and waiting reasons remain in task records even when a restart starts a fresh conversation.
 
 1. Run `hermit-status` to check current state (includes the tmux attach command for Docker)
 2. Reattach to tmux, start Claude Code
-3. SessionStart hook loads OPERATOR.md, SHELL.md, latest report
-4. `session-start` presents current work, progress, blockers.
+3. SessionStart hook loads OPERATOR.md, TASKS.md and open task records
+4. `resident-start` reports recovery state and open commitments without selecting work.
 5. Confirm resume or start fresh
 
 ---
@@ -312,16 +265,16 @@ Claude Max 20x ($200/month) recommended for overnight agents. Pro plan stalls du
 ```markdown
 ## Constraints
 
-If you hit a rate limit, update SHELL.md: "Rate limited at [timestamp]. Waiting for reset."
+If you hit a rate limit, record the waiting reason through `task.ts block` for the affected task.
 ```
 
 ### Data persistence
 
-SHELL.md is gitignored. Protect in-progress state with periodic commits to a separate branch, or by removing SHELL.md from `.gitignore`. Docker users can also use named volumes — see [Always-On Setup](always-on.md).
+Task records are durable local state. Back up `.claude-code-hermit/tasks/` with your other resident state. Docker users can also use named volumes — see [Always-On Setup](always-on.md).
 
 ### Channel resilience
 
-If Telegram/Discord goes down, your hermit keeps running — just loses remote communication. Enable remote control as a backup. Check SHELL.md via SSH if channels are unavailable.
+If Telegram/Discord goes down, your hermit keeps running — just loses remote communication. Enable remote control as a backup. Inspect task records via SSH if channels are unavailable.
 
 ### Multi-operator warning
 

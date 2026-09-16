@@ -182,7 +182,7 @@ describe('index version bump forces a rebuild', () => {
 
     const idx = updateCostIndex(logPath, idxPath, 'UTC');
 
-    expect(idx.version).toBe(3);
+    expect(idx.version).toBe(4);
     expect(idx.by_week).toBeDefined();
     expect(idx.by_month).toBeDefined();
     expect(idx.total_cost_usd).toBe(1.0);

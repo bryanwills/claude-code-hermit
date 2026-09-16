@@ -150,7 +150,7 @@ describe('hermit-stop contract', () => {
     }
   });
 
-  test('no session, non-interactive → idle written with cleared transition', async () => {
+  test('no session, non-interactive → shutdown stamped with cleared transition', async () => {
     const dir = makeDir();
     try {
       writeConfig(dir);
@@ -162,7 +162,7 @@ describe('hermit-stop contract', () => {
       expect(stdout).toContain('No running session: hermit-test');
       expect(stdout).toContain('S-001-REPORT.md');
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
-      expect(rt.session_state).toBe('idle');
+      expect(rt.session_state).toBe('in_progress');
       expect(rt.transition).toBeNull();
       expect(rt.transition_target).toBeNull();
       expect(rt.transition_started_at).toBeNull();
@@ -186,7 +186,7 @@ describe('hermit-stop contract', () => {
       expect(stdout).toContain('not closed gracefully');
       expect(fs.readFileSync(log, 'utf-8')).toContain('kill-session -t hermit-test');
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
-      expect(rt.session_state).toBe('idle');
+      expect(rt.session_state).toBe('in_progress');
       expect(rt.last_error).toBe('unclean_shutdown');
       expect(rt.shutdown_requested_at).toBeDefined();
       expect(readJson(dir, '.claude-code-hermit/config.json').always_on).toBe(false);
@@ -208,7 +208,7 @@ describe('hermit-stop contract', () => {
       expect(tmuxLog).toContain('session-close --shutdown');
       expect(stdout).toContain('Session exited without generating a report');
       const rt = readJson(dir, '.claude-code-hermit/state/runtime.json');
-      expect(rt.session_state).toBe('idle');
+      expect(rt.session_state).toBe('in_progress');
       expect(rt.last_error).toBe('unclean_shutdown');
       expect(rt.shutdown_requested_at).toBeDefined();
       expect(rt.shutdown_completed_at).toBeDefined();

@@ -1,0 +1,41 @@
+import { test, expect } from 'bun:test';
+import { taskFixture } from './helpers/tasks';
+import { runScript } from './helpers/run';
+import { decodeTask, mutateTask } from '../scripts/lib/tasks';
+
+test('stored command closes by check and failing checks keep the task open', async () => {
+  const f = taskFixture();
+  try {
+    for (const code of [1, 0]) {
+      const { id } = await f.open(['--check', `printf proof; exit ${code}`]);
+      const result = await runScript('task-check.ts', { cwd: f.dir + '/..', env: { AGENT_DIR: f.dir }, args: [id] });
+      expect(result.exitCode).toBe(0);
+      const record = decodeTask(f.text(id));
+      expect(record.closed_by).toBe(code === 0 ? 'check' : null);
+      expect(record.body).toContain('proof');
+    }
+  } finally { f.cleanup(); }
+});
+
+test('changing a check, its definition or status refuses the old snapshot', async () => {
+  const f = taskFixture();
+  try {
+    const { id } = await f.open(['--check', 'true']);
+    const snapshot = await f.ok('check-snapshot', [id]);
+    await f.ok('note', [id, '--check', 'false']);
+    expect(() => mutateTask(f.dir, 'check-result', id, { 'result-rev': String(snapshot.result_rev), exit: '0', 'output-stdin': true }, 'proof')).toThrow('stale-check');
+    await f.ok('note', [id, '--check', 'clear']);
+    expect((await f.ok('list', ['--with-check'])).rows).toEqual([]);
+  } finally { f.cleanup(); }
+});
+
+test('task.ts exposes no check-result verb, so only a real check run closes by check', async () => {
+  const f = taskFixture();
+  try {
+    const { id } = await f.open(['--check', 'false']);
+    const r = await f.run('check-result', [id, '--result-rev', '0', '--exit', '0', '--output-stdin'], 'proof');
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('invalid-verb');
+    expect(decodeTask(f.text(id)).status).toBe('open');
+  } finally { f.cleanup(); }
+});

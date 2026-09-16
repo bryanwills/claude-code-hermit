@@ -61,7 +61,7 @@ describe('channel-reply-reminder', () => {
   test('first message after context reset — invoke the responder now', withDir(async (dir) => {
     write(hermit(dir, 'state', 'execution.json'), JSON.stringify({
       state: 'unknown', turn_id: null, at: new Date().toISOString(),
-      source: null, cc_session_id: null, reason: 'session-start:compact',
+      source: null, cc_session_id: null, reason: 'resident-start:compact',
     }));
     const r = await run('<channel source="discord" chat_id="1" user="U1">plain message</channel>', dir);
     expect(r.stdout).toContain('now; this is the first message since the context was reset');

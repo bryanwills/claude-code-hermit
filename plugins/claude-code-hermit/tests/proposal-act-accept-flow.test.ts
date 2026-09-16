@@ -41,8 +41,8 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('default, typical answer');
   });
 
-  test("'Create a session task' option present", () => {
-    expect(skill).toContain('Create a session task');
+  test("'Queue a task' option present", () => {
+    expect(skill).toContain('Queue a task');
   });
 
   test("'I'll handle it manually' option present", () => {
@@ -73,7 +73,7 @@ describe('proposal-act accept flow', () => {
     expect(line).toContain('## References');
   });
 
-  test('session task always re-verifies the proposal against the current tree', () => {
+  test('queued task always re-verifies the proposal against the current tree', () => {
     const line = lineContaining('re-verify its ## References');
     expect(line).toContain('**(always, first step)**');
     expect(line).toContain('.claude-code-hermit/proposals/PROP-NNN-*.md');
@@ -161,7 +161,7 @@ describe('PROP-017 channel-safe approvals', () => {
 
   test('step 4 channel branch queues the three option labels', () => {
     expect(skill).toContain('"implement now"');
-    expect(skill).toContain('"session task"');
+    expect(skill).toContain('"queued task"');
     expect(skill).toContain('"manual"');
   });
 

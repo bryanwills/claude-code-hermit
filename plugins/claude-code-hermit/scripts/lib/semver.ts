@@ -1,5 +1,5 @@
 // Leading-X.Y.Z semver comparison, shared by every surface that decides which way a
-// version gap points: the session-start banner (check-upgrade.sh mirrors this in its
+// version gap points: the SessionStart banner (check-upgrade.sh mirrors this in its
 // bun -e snippet), the boot notice (hermit-start.ts), the evolve planner
 // (evolve-plan.ts) and the stamp writer (evolve-finalize.ts). They must agree on the
 // direction — a surface that ordered prereleases differently could tell the operator to

@@ -2,7 +2,7 @@
 //
 // Claude Code builds `.claude/output-styles/<outputStyle>.md` into the SYSTEM
 // PROMPT at session start, which is why tone lives here rather than in
-// session-start context — the system prompt is re-read on every API call and
+// SessionStart context — the system prompt is re-read on every API call and
 // survives compaction, while injected context ages and is dropped.
 //
 // Two surfaces need these values — apply-settings' voice-render op (which writes

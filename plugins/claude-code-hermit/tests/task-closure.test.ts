@@ -12,3 +12,18 @@ it('duty evidence only closes its matching dedupe key', async () => { const f = 
 it('cancel requires reason and records actor', async () => { const f = taskFixture(); try { const { id } = await f.open(); expect((await f.run('cancel', [id, '--actor', 'discord:u2', '--reason-stdin'])).stderr).toContain('empty-reason'); await f.ok('cancel', [id, '--actor', 'discord:u2', '--reason-stdin'], 'No longer needed'); const lib = await taskLib(); expect(lib.decodeTask(f.text(id))).toMatchObject({ closed_by: 'cancelled', closed_actor: 'discord:u2', closed_reason: 'No longer needed' }); } finally { f.cleanup(); } });
 for (const verb of ['close', 'cancel']) it(`replayed ${verb} leaves closed record unchanged`, async () => { const f = taskFixture(); try { const { id } = await f.open(); await f.ok('cancel', [id, '--actor', 'discord:u1', '--reason-stdin'], 'Stop'); const before = f.text(id); expect((await f.run(verb, [id, '--actor', 'discord:u1', ...(verb === 'close' ? ['--by', 'confirmed'] : ['--reason-stdin'])], 'Stop')).stderr).toContain('not-open'); expect(f.text(id)).toBe(before); } finally { f.cleanup(); } });
 it('only close and cancel produce closed status across every verb', async () => { const f = taskFixture(); try { const { id } = await f.open(); const lib = await taskLib(); for (const [verb, args, input] of [['note', [id], 'Progress'], ['block', [id, '--result-stdin'], 'Ready'], ['list', [], ''], ['standup', [], '']] as [string, string[], string][]) { await f.ok(verb, args, input); expect(lib.decodeTask(f.text(id)).status).toBe('open'); } expect((await f.run('close', [id, '--by', 'auto', '--actor', 'hermit'])).stderr).toContain('invalid-closed-by'); } finally { f.cleanup(); } });
+it('check-result closes only on zero and refuses a closed record', async () => {
+  const f = taskFixture();
+  try {
+    const { id } = await f.open(['--check', 'true']);
+    const lib = await taskLib();
+    const result = (exit: string, output: string) => lib.mutateTask(f.dir, 'check-result', id, { 'result-rev': '0', exit, 'output-stdin': true }, output);
+    result('1', 'not yet');
+    expect(lib.decodeTask(f.text(id)).closed_by).toBeNull();
+    result('0', 'verified');
+    expect(lib.decodeTask(f.text(id))).toMatchObject({ status: 'closed', closed_by: 'check', closed_reason: 'check:exit-0' });
+    const closed = f.text(id);
+    expect(() => result('0', 'again')).toThrow('stale-check');
+    expect(f.text(id)).toBe(closed);
+  } finally { f.cleanup(); }
+});
