@@ -6,6 +6,7 @@
 
 - Core 1.4.0 is required for task records and resident startup.
 - Scheduled routines invoke domain skills directly.
+- Coaching artifacts link to an open task when present, and progress notes use task records.
 
 ### Upgrade Instructions
 
