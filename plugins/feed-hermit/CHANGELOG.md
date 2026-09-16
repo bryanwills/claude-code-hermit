@@ -1,12 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-09-16
 
 ### Changed
 
 - Core 1.4.0 is required for task records and resident startup.
 - Scheduled routines invoke domain skills directly.
-- Feed artifacts link to an open task when present, and source-scout progress notes use task records.
+- Progress notes (added sources, injection attempts, source-scout findings) write to the open task record instead of SHELL.md.
 
 ### Upgrade Instructions
 

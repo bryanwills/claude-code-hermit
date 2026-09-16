@@ -8,7 +8,7 @@ A feed-to-brief domain layer for `claude-code-hermit`: a curated source registry
 - `agents/source-fetcher.md`: Haiku raw-collection web/RSS fetcher
 - `scripts/reddit-fetch.ts`: subreddit fetcher (unauthenticated by default, authed via env); `scripts/validate-sources.ts`: `feed-sources.md` table validator, wired as a PostToolUse hook on edits
 - `hooks/fetch-guard.ts`: PreToolUse WebFetch allowlist
-- `state-templates/`: `CLAUDE-APPEND.md`, `feed-sources.md`/`feed-categories.md`/`FEEDS.md` seeds, `starter-pack.md`, routine prompt files under `compiled/`
+- `state-templates/`: `CLAUDE-APPEND.md`, `feed-sources.md`/`feed-categories.md`/`FEEDS.md` seeds, `starter-pack.md`
 - `docs/schema.md`: the registry table and archive-frontmatter contracts; `docs/reddit.md`: reddit fetch setup
 
 ## Data ownership
