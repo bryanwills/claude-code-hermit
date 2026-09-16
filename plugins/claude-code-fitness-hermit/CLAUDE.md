@@ -4,7 +4,7 @@ A fitness/training domain layer for `claude-code-hermit`: skills, a Strava data 
 
 ## Structure
 
-- `skills/`: `hatch`, `fitness-brief` (`--morning|--evening|--slot <name>`; owns Strava connectivity, activity sync, RPE binding, and the Run deep-dive), `activity-deep-dive`, `capture-activity-rpe` (auto-triggered from channel replies), `set-rpe`, `weekly-coaching-patterns`, `domain-brainstorm` (operator-invoked only)
+- `skills/`: `hatch`, `fitness-brief` (`--morning|--evening|--slot <name>`; owns Strava connectivity, activity sync, RPE binding, and the Run deep-dive), `activity-deep-dive`, `capture-activity-rpe` (auto-triggered from channel replies), `set-rpe`, `weekly-coaching-patterns`, `weekly-load-review` (weekly training load vs. rolling baseline), `monday-planning` (weekly training plan suggestion), `domain-brainstorm` (operator-invoked only)
 - `agents/strava-data-cruncher.md`: Haiku bulk-aggregation subagent; owns the per-invocation API-call cap
 - `state-templates/CLAUDE-APPEND.md`: the Fitness Workflow block
 - `settings.json`: pre-approved permissions for read-class Strava MCP tools and hermit state writes
