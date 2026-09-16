@@ -21,7 +21,6 @@ import { auditConfigChange } from './lib/config-audit';
 import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME_JSON, RUNTIME_TMP, LIFECYCLE_LOCK } from './lib/runtime';
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
-import { clearStatusCache } from './lib/context-reset';
 import { AuthMode, claudeStateFile, defaultConfigDir, readTokenValue, resolveAuthMode, TOKEN_ENV_VAR } from './lib/setup-token';
 import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
 import { isContainer } from './lib/container';
@@ -150,10 +149,10 @@ const DEFAULT_CONFIG: Json = {
   ask_gate: true,
   routine_max_lateness_minutes: 60,
   routines: [
-    { id: 'heartbeat-restart', schedule: '0 4 * * *', skill: 'claude-code-hermit:hermit-routines load', run_during_waiting: true, enabled: true },
+    { id: 'heartbeat-restart', schedule: '0 4 * * *', skill: 'claude-code-hermit:hermit-routines load', enabled: true },
     { id: 'reflect', schedule: '0 9 * * *', skill: 'claude-code-hermit:reflect', enabled: true },
     { id: 'weekly-review', schedule: '0 23 * * 0', skill: 'claude-code-hermit:weekly-review', enabled: true },
-    { id: 'doctor', schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor --maintainer', model: 'haiku', run_during_waiting: true, enabled: true, precheck: 'doctor', precheck_timeout_s: 120 },
+    { id: 'doctor', schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor --maintainer', model: 'haiku', enabled: true, precheck: 'doctor', precheck_timeout_s: 120 },
   ],
   monitors: [],
   // No AGENT_HOOK_PROFILE here, and none in config.json.template either. Its
@@ -462,24 +461,24 @@ function checkStaleRuntime(config: Json, sessionName: string): void {
   const runtime = readRuntimeJson();
   if (runtime === null) return;
 
-  const state = runtime.session_state;
   const mode = runtime.runtime_mode;
   const shutdownCompleted = runtime.shutdown_completed_at;
 
-  if (['in_progress', 'waiting', 'suspect_process'].includes(state)) {
+  if (!shutdownCompleted) {
     if (mode === 'tmux' || mode === 'docker') {
       // Check if the tmux session from the previous run still exists
       const prevTmux = 'tmux_session' in runtime ? runtime.tmux_session : '';
       if (!tmuxSessionAlive(prevTmux)) {
         console.log(
-          `[hermit] Warning: Previous session crashed (runtime.json says ${state}, tmux session "${prevTmux}" is gone).`,
+          `[hermit] Warning: Previous session crashed (tmux session "${prevTmux}" is gone).`,
         );
         console.log('[hermit] /resident-start will offer recovery.');
         runtime.last_error = 'unclean_shutdown';
         writeRuntimeJson(runtime);
       }
-    } else if (mode === 'interactive' && !pyTruthy(shutdownCompleted)) {
-      console.log('[hermit] Warning: Previous interactive session did not close cleanly.');
+    } else if (mode === 'interactive' && readJson(path.join(STATE_DIR, 'execution.json'))?.state === 'in_flight') {
+      // Interactive exits never stamp shutdown_completed_at; only a turn left running is unclean.
+      console.log('[hermit] Warning: Previous interactive session ended during a turn.');
       console.log('[hermit] /resident-start will offer recovery.');
       runtime.last_error = 'unclean_shutdown';
       writeRuntimeJson(runtime);
@@ -502,33 +501,11 @@ function checkStaleRuntime(config: Json, sessionName: string): void {
 /**
  * Clears shutdown_requested_at/shutdown_completed_at on an existing runtime.json
  * before a fresh hermit-start boot. A deliberate start supersedes any prior
- * shutdown intent — a stamp left over from a non-hermit-stop close (a nightly
- * auto-close reusing /session-close's "Full Shutdown" framing while the always-on
- * process stays alive) otherwise bricks watchdog restart recovery AND
- * context-hygiene compaction/clear forever, since passesLifecycleGuards treats any
- * non-null stamp as "the hermit is stopping". Mutates `existing` in place.
+ * shutdown intent. Mutates `existing` in place.
  */
 function clearShutdownStampsOnBoot(existing: Json): void {
   existing.shutdown_requested_at = null;
   existing.shutdown_completed_at = null;
-}
-
-/**
- * Removes the sessions/.status.json cost cache on an always-on boot. The file carries
- * the running cumulative cost/token totals for a session that is now over, plus that
- * session's harness id; leaving it in place makes the first post-boot turn continue a
- * dead session's totals. cost-tracker treats a missing file as first-run and rebuilds
- * cumulative totals from the index, so nothing is lost.
- *
- * The watchdog also imports this and calls it mid-run at context-reset time (post-close
- * and emergency /clear in hermit-watchdog.ts) for the same reason: once /clear destroys a
- * context, the totals cached against it describe a context that no longer exists.
- *
- * This file is no longer any part of the hygiene tiers' session resolution — that reads
- * runtime.json's cc_session_id only (resolveHygieneSessionId, issue #916).
- */
-function clearStatusCacheOnBoot(): void {
-  clearStatusCache(path.join(STATE_DIR, '..'));
 }
 
 /**
@@ -1320,9 +1297,8 @@ export function shouldRefuseBoot(bootMode: BootMode): string[] | null {
   const rt = readRuntimeJson();
   if (rt && rt.runtime_mode && rt.runtime_mode !== bootMode) {
     // A cleanly-stopped instance is definitively dead; its frozen runtime_mode
-    // and not-yet-aged liveness file don't prove it's still running. Mirrors the
-    // watchdog's own "deliberately down" gate (session_state idle / shutdown_*).
-    const cleanlyStopped = rt.session_state === 'idle' || Boolean(rt.shutdown_completed_at);
+    // and not-yet-aged liveness file do not prove it is still running.
+    const cleanlyStopped = Boolean(rt.shutdown_completed_at);
     const age = sharedLivenessAgeSecs();
     if (!cleanlyStopped && age !== null && age < LIVENESS_FRESH_SECS) {
       return [
@@ -1678,9 +1654,6 @@ async function main(): Promise<void> {
   // Detect runtime mode
   const runtimeMode = isContainer() ? 'docker' : 'tmux';
 
-  // The prior process's harness session is over — drop its stale cost cache so the first
-  // post-boot turn doesn't continue a dead session's cumulative totals (see helper).
-  clearStatusCacheOnBoot();
   // Fresh boot marker for hermit-routines' cron-registry diff (see helper).
   writeBootId();
 
@@ -1798,7 +1771,6 @@ export {
   readRuntimeState,
   checkStaleRuntime,
   clearShutdownStampsOnBoot,
-  clearStatusCacheOnBoot,
   writeBootId,
   acquireLifecycleLock,
   fetchRegisteredMarketplaces,

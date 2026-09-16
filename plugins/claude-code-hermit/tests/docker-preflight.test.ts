@@ -50,7 +50,7 @@ describe('docker-preflight.ts', () => {
     expect(out.existing.entrypoint).toBe(false);
   });
   // liveOwner mirrors the entrypoint's split-brain guard and hermit-start's
-  // shouldRefuseBoot: a non-docker runtime_mode that is neither idle nor cleanly
+  // shouldRefuseBoot: a non-docker runtime_mode that is not cleanly
   // shut down, backed by a liveness file inside the 600s freshness window.
   function seedOwner(dir: string, runtime: object, ageSecs = 0) {
     const stateDir = path.join(dir, '.claude-code-hermit', 'state');
@@ -71,7 +71,7 @@ describe('docker-preflight.ts', () => {
 
   test('live tmux owner: reported with mode and liveness age', async () => {
     const dir = freshDir();
-    seedOwner(dir, { runtime_mode: 'tmux', session_state: 'active' });
+    seedOwner(dir, { runtime_mode: 'tmux' });
 
     const out = await run(dir);
     expect(out.liveOwner.mode).toBe('tmux');
@@ -84,21 +84,21 @@ describe('docker-preflight.ts', () => {
   // container, so it must never gate the wizard.
   test('a live docker owner never gates the wizard', async () => {
     const dir = freshDir();
-    seedOwner(dir, { runtime_mode: 'docker', session_state: 'active' });
+    seedOwner(dir, { runtime_mode: 'docker' });
 
     expect((await run(dir)).liveOwner).toBe(null);
   });
 
   test('cleanly-stopped owner is definitively dead, not live', async () => {
     const dir = freshDir();
-    seedOwner(dir, { runtime_mode: 'tmux', session_state: 'idle' });
+    seedOwner(dir, { runtime_mode: 'tmux', shutdown_completed_at: '2026-07-24T11:00:00Z' });
 
     expect((await run(dir)).liveOwner).toBe(null);
   });
 
   test('stale liveness proves nothing: no live owner', async () => {
     const dir = freshDir();
-    seedOwner(dir, { runtime_mode: 'tmux', session_state: 'active' }, 660);
+    seedOwner(dir, { runtime_mode: 'tmux' }, 660);
 
     expect((await run(dir)).liveOwner).toBe(null);
   });

@@ -5,9 +5,9 @@
 //     The monitor's poll. Owns all gating/state/liveness writes and prints a
 //     `ROUTINE_DUE [hermit-routine:<id>] …` line only when routines are due.
 //     That line is load-bearing: record-operator-action.ts's isRoutinePrompt()
-//     matches it, and tests/auto-close.test.ts guards it against drift.
+//     matches it, and tests/heartbeat-monitor-emissions.test.ts guards it against drift.
 //
-//   bun routines.ts precheck <id> <rdw> [delivery]
+//   bun routines.ts precheck <id> [delivery]
 //     Per-routine gate at fire time. Prints PROCEED or a SKIP verdict.
 //
 //   bun routines.ts cron-registry <mode> <hermit-state-dir> [plugin-root] [--ids …]
@@ -19,8 +19,8 @@
 //   bun routines.ts finish <routine-id> [delivery] [--outcome-stdin]
 //     Terminal gate for a fire. Verifies any declared `expect_artifact` contract
 //     against the baseline `precheck` froze, writes the one terminal ledger row,
-//     and prints `fired` or `failed|<reason>|<detail>`. With --outcome-stdin: the fire's
-//     one-line outcome, appended to SHELL.md's `## Progress Log`.
+//     and prints `fired` or `failed|<reason>|<detail>`. With --outcome-stdin the
+//     dispatcher drains outcome text; finish does not write a journal.
 //
 //   bun routines.ts log-event <routine-id> <event> [delivery]
 //     Appends one line to state/routine-metrics.jsonl.

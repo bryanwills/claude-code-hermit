@@ -235,11 +235,11 @@ Return a single JSON object — no prose, no markdown wrapping. Every field is r
                             "shell_findings_line": "<pre-rendered finding text>"|null } ],
   "routine_candidates": [ { "routine_id": "<id>", "action": "disable|retime|diagnostic",
                             "tier": 1, "schedule": "<new-cron>"|null,
-                            "evidence": "<text>", "sessions": ["<S-NNN>"],
+                            "evidence": "<text>", "sessions": ["<T-...>"],
                             "shell_findings_line": "<pre-rendered>"|null } ],
   "procedure_candidates": [ { "slug": "<slug>", "title": "<title>", "tier": 3,
                               "evidence_source": "archived-session", "evidence_origin": "own-work",
-                              "evidence": "<text>", "sessions": ["<S-NNN>"]|"none",
+                              "evidence": "<text>", "sessions": ["<T-...>"]|"none",
                               "artifact": "<file — value>"|null } ],
   "last_resolution_check": "PROP-NNN|null",
   "last_sparse_nudge": { "PROP-NNN": "<ISO>" }

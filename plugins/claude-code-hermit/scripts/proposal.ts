@@ -18,7 +18,7 @@
 //   create <stateDir>
 //     stdin (heredoc): `Key: value` header lines, a bare `---` separator line,
 //     then the raw markdown body. Headers: Title (required), Source (default
-//     manual), Session (default state/runtime.json session_id), Category
+//     manual), Session (task id when provided), Category
 //     (default improvement; improvement|routine|capability|constraint|bug),
 //     Tags / Related-Sessions (JSON string arrays, default []),
 //     Self-Eval-Key (optional checklist key). Claims the ID and writes the file
@@ -141,14 +141,8 @@ export function verbCreate(stateDir: string, stdin: string): string {
 
   const source = grabHeader(header, 'Source') || 'manual';
   const selfEvalKey = grabHeader(header, 'Self-Eval-Key');
-  let session = grabHeader(header, 'Session');
-  // Falsy, not just null: a bare `Session:` line means "no session", which must
-  // fall through to the runtime.json default (and then to null) rather than
-  // writing `session: ""` — every other header defaults on falsy too.
-  if (!session) {
-    const runtime = readJson(path.join(stateDir, 'state', 'runtime.json'));
-    session = runtime?.session_id ?? null;
-  }
+  const session = grabHeader(header, 'Session') || null;
+
   const category = grabHeader(header, 'Category') || 'improvement';
   if (!VALID_CATEGORIES.has(category)) return 'ERROR|invalid-category';
 

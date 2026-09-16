@@ -1,14 +1,13 @@
-// `routines.ts precheck` — consolidates a routine fire's pre-dispatch gate (waiting-check +
-// pause-check) and the `started` stamp into one script call, replacing 2-3 separate
+// `routines.ts precheck` — consolidates a routine fire's pre-dispatch gate (pause-check) and the `started` stamp into one script call, replacing 2-3 separate
 // model-issued tool calls per fire with one. Mirrors reflect-precheck.ts's /
 // `heartbeat.ts precheck`'s verdict-token contract. Delegates the JSONL write to lib/routines/event.ts,
 // which stays the single writer — the #464 dedup guard and JSONL schema live in exactly
 // one place.
-// Usage: bun routines.ts precheck <routine-id> <rdw:true|false> [delivery]
+// Usage: bun routines.ts precheck <routine-id> [delivery]
 // Output (stdout): SKIP | PROCEED, optionally followed by one `REFLECT RUN|<phases-json>`
 // line carrying the reflect gate's verdict so the skill does not re-run that script
 // (which would append its observation rows a second time).
-// Side effect: stamps skipped-waiting | skipped-paused | skipped-precheck |
+// Side effect: stamps skipped-paused | skipped-precheck |
 // precheck-error | started via logRoutineEvent().
 // Exit 0 always — fail-open to PROCEED on any read error (a malformed runtime.json must
 // never silently kill a routine).
@@ -31,8 +30,7 @@ function emit(verdict: string): never {
 }
 
 const id = process.argv[2];
-const rdw = process.argv[3] === 'true';
-const delivery = process.argv[4] || 'cron-create';
+const delivery = process.argv[3] || 'cron-create';
 
 if (!id) emit('PROCEED');
 
@@ -145,20 +143,6 @@ function captureArtifactBaseline(): void {
       baseline: statIdentity(path.join(HERMIT_ROOT, resolved)),
     });
   } catch { /* fail-open: a broken capture must not block the routine */ }
-}
-
-function sessionStateIsWaiting(): boolean {
-  try {
-    const runtime = JSON.parse(fs.readFileSync(path.join(HERMIT_ROOT, 'state', 'runtime.json'), 'utf-8'));
-    return runtime.session_state === 'waiting';
-  } catch {
-    return false; // fail-open: unreadable/missing runtime.json reads as not-waiting
-  }
-}
-
-if (!rdw && sessionStateIsWaiting()) {
-  stamp('skipped-waiting');
-  emit('SKIP');
 }
 
 let paused = false;

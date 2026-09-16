@@ -29,7 +29,7 @@ function render(costLog: string): string {
         if (e.timestamp && e.timestamp.startsWith(today)) {
           cost += e.estimated_cost_usd || 0;
           tokens += e.total_tokens || 0;
-          if (e.session_id) sessions.add(e.session_id);
+          if (e.session_id || e.cc_session_id) sessions.add(e.session_id || e.cc_session_id);
         }
       } catch {}
     }

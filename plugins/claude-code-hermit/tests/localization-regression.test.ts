@@ -20,7 +20,6 @@ describe('en catalog byte-identity (pre-refactor literals)', () => {
     expect(STATUS.en.pausedUntilResume('X')).toBe('Paused (X) until you resume it.');
     expect(STATUS.en.pausedUntilDate('X', 'B')).toBe('Paused (X) until B.');
     expect(STATUS.en.workingOn('T')).toBe('Working on T.');
-    expect(STATUS.en.idleNothing()).toBe('Idle — nothing in progress.');
     expect(STATUS.en.redactedWorking()).toBe('Working.');
     expect(STATUS.en.redactedIdle()).toBe('Idle.');
     expect(STATUS.en.oneApproval('ID')).toBe('1 approval waiting (reply "ID yes/no").');

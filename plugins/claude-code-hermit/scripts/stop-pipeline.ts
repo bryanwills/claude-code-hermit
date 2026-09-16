@@ -1,18 +1,14 @@
 import { observeExecution } from './lib/tasks';
 // stop-pipeline.ts — unified Stop hook
 // Reads stdin once, runs all stop stages in sequence, touches heartbeat.
-// Stages, in order: cost tracking, session diff, evaluation, auto-idle, heartbeat.
+// Stages, in order: cost tracking, harness commands, heartbeat.
 // All stage output goes to stderr; nothing is emitted on stdout.
 
 import { run as costTracker } from './cost-tracker';
-import { run as sessionDiff } from './session-diff';
-import { run as evaluateSession } from './evaluate-session';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir, sessionId } from './lib/cc-compat';
 import { drainHarnessCommand } from './lib/harness-drain';
 import { isGuest } from './lib/guest-marker';
-import { readSettledConfig } from './lib/config-read';
-import { parseDuration, resolveHermitNowMs } from './lib/time';
-import { autoIdleDue, runAutoIdle } from './lib/auto-close';
+import { resolveHermitNowMs } from './lib/time';
 import { recordOperatorTurnEnd } from './record-operator-action';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -57,8 +53,7 @@ async function main(): Promise<void> {
     observeExecution(HERMIT_DIR, 'idle', sessionId(payload), null, null);
     let closedOperatorTurn = false;
     try { fs.unlinkSync(TURN_FILE); closedOperatorTurn = true; } catch {}
-    // Quiet time runs from the operator turn's end, so a long turn is not auto-idled
-    // at its own Stop (Stage 3b) or by the next watchdog tick.
+    // Quiet time runs from the operator turn's end.
     if (closedOperatorTurn) recordOperatorTurnEnd(resolveHermitNowMs());
     // A Stop at all means the turn produced an assistant reply, so any stamp
     // stop-failure-stamp.ts left behind describes an episode that is over. Cleared
@@ -67,40 +62,11 @@ async function main(): Promise<void> {
     try { fs.unlinkSync(STOP_FAILURE_FILE); } catch {}
   }
 
-  const profile = (process.env.AGENT_HOOK_PROFILE || 'standard').trim().toLowerCase();
-  const isStandardPlus = profile !== 'minimal';
-
   // Stage 1: cost-tracker (always)
   try {
     const out = await costTracker(payload);
     if (out) console.error(out);
   } catch (e: any) { console.error(`[stop-pipeline] cost-tracker: ${e.message}`); }
-
-  // Stage 2: session-diff (standard+, state-aware debounce)
-  if (isStandardPlus) {
-    try { await sessionDiff(payload); }
-    catch (e: any) { console.error(`[stop-pipeline] session-diff: ${e.message}`); }
-  }
-
-  // Stage 3: evaluate-session (standard+)
-  if (isStandardPlus) {
-    try {
-      const out = await evaluateSession(payload);
-      if (out) console.error(out);
-    } catch (e: any) { console.error(`[stop-pipeline] evaluate-session: ${e.message}`); }
-  }
-
-  // Stage 3b: auto-idle a quiet in_progress session (resident, standard+)
-  if (!guest && isStandardPlus) {
-    try {
-      const config = readSettledConfig(HERMIT_DIR);
-      const staleMs = parseDuration(config.heartbeat?.stale_threshold, 2 * 3600_000);
-      const nowMs = resolveHermitNowMs();
-      if (autoIdleDue(HERMIT_DIR, nowMs, staleMs).due) {
-        runAutoIdle(HERMIT_DIR, nowMs, config);
-      }
-    } catch (e: any) { console.error(`[stop-pipeline] auto-idle: ${e.message}`); }
-  }
 
   // Stage 4: drain a channel-requested harness command (/model, /effort, /compact, /clear).
   // The turn it arrived on has just ended, so the pane is idle and safe to type into —

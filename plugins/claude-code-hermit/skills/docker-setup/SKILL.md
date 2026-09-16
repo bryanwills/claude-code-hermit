@@ -499,7 +499,7 @@ Tell the operator (set expectations — this step takes ~30-60s and otherwise lo
 
 Then run, in sequence:
 
-1. `.claude-code-hermit/bin/hermit-docker down` — sends `/session-close --shutdown` via tmux and polls for graceful close up to 60s before removing the container. If it prints "Timed out waiting for graceful close; forcing stop", flag it in the final summary (session that witnessed setup didn't close cleanly — not blocking but worth noting).
+1. `.claude-code-hermit/bin/hermit-docker down`; sends the configured shutdown skill, if any, and polls for a fresh execution boundary up to 60s before removing the container. If it prints "Timed out waiting for graceful close; forcing stop", flag it in the final summary (session that witnessed setup didn't close cleanly; not blocking but worth noting).
 
 2. `docker compose -f docker-compose.hermit.yml up -d` — recreates the container. Use `docker compose` directly, as in step 8, not `hermit-docker up`. Docker's named volume preserves credentials, plugins, workspace trust. Bind-mounts preserve `.claude.local/channels/<plugin>/access.json` and `.claude-code-hermit/`.
 

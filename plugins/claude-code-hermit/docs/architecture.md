@@ -16,7 +16,7 @@ A Claude Code plugin that turns any Claude Code instance into a self-improving p
  +-------------------------------v----------------------------------+
  |                    LAYER 2: SESSION LAYER                        |
  |   tasks/T-*.md <-- durable commitments                               |
- |   sessions/S-NNN-REPORT.md <-- archived handoff artifacts        |
+ |   tasks/T-*.md           <-- commitment records               |
  |   Lifecycle:  start --> work --> close --> archive                |
  +-------------------------------|----------------------------------+
                                  |
@@ -150,7 +150,6 @@ your-project/
 │   │   ├── channel-activity.json     # Last channel interaction timestamp (channel-hook-owned)
 │   │   ├── channel-replies.jsonl     # Append-only channel reply log (channel-hook-owned)
 │   │   ├── channel-log.sqlite        # Episodic DM log + FTS5 index (PROP-010); created lazily, absent until first message
-│   │   ├── session-diff.json         # Uncommitted file tracking (session-diff-owned)
 │   │   ├── proposal-metrics.jsonl    # Append-only event log (proposal-create + proposal-act)
 │   │   ├── usage-metrics.jsonl       # Append-only compiled-read usage log (usage-track.ts)
 │   │   ├── micro-proposals.json      # Pending micro-approvals list (reflect + channel-bridged asks + channel-responder)
@@ -177,14 +176,14 @@ No `package.json`, no `node_modules`, no build step.
 
 One writer per state file. No shared mutation bus. (Exception: `state/micro-proposals.json` has several writers — reflect and the channel-bridged asking skills queue entries, channel-responder/brief resolve them — but the hermit runs as a single sequential session, so these never overlap; the "one writer" rule is about avoiding concurrent mutation, which single-session execution already guarantees here.)
 
-**The single-session guarantee does not extend to hooks.** Claude Code does not serialise hook invocations: one assistant turn issuing parallel tool calls spawns several hook processes that run concurrently (probed 2026-08-28 — four denials, four pids, every `START` before the first `END`). A hook that owns a state file therefore cannot rely on the rule above, and must either append rather than read-modify-write (`lib/denial-log.ts`) or take the advisory lock (`lib/lockfile.ts`, as `lib/progress-log.ts` and `permission-denied-notify.ts` do).
+**The single-session guarantee does not extend to hooks.** Claude Code does not serialise hook invocations: one assistant turn issuing parallel tool calls spawns several hook processes that run concurrently (probed 2026-08-28 — four denials, four pids, every `START` before the first `END`). A hook that owns a state file therefore cannot rely on the rule above, and must either append rather than read-modify-write (`lib/denial-log.ts`) or take the advisory lock (`lib/lockfile.ts`, as `permission-denied-notify.ts` does).
 
 `startup-context.ts`'s session stamp is the one read-modify-write on `runtime.json` from a hook, and it is exempt by timing rather than by locking: `SessionStart` fires once per session, seconds after `hermit-start` has finished its own write (which lands within milliseconds of `tmux new-session`, before Claude Code has booted). It is also idempotent: every later `SessionStart` in the same session recomputes the same four fields and skips the write when nothing moved, which keeps `updated_at` from drifting forward on a mere compaction and hiding a wedged session from doctor's liveness check.
 
 | File                           | Owner (sole writer)                                 | Readers                                                       |
 | ------------------------------ | --------------------------------------------------- | ------------------------------------------------------------- |
 | `state/runtime.json`           | hermit-start + cost-tracker + startup-context.ts (process stamp) | heartbeat, resident-start, /hermit-routines, hermit-watchdog (config/env, registry, inbox), hermit-doctor (peer inbox) |
-| `state/alert-state.json`       | heartbeat only                                      | heartbeat; evaluate-session (read-only nudge computation)     |
+| `state/alert-state.json`       | heartbeat only                                      | heartbeat     |
 | `state/reflection-state.json`  | reflect + session (non-overlapping phases)          | heartbeat (debounce), hermit-settings (session-check display) |
 | `state/channel-activity.json`  | channel-hook.ts only                                | channel-responder, heartbeat                                  |
 | `state/channel-replies.jsonl`  | channel-hook.ts (append only)                       | none — reflect's engagement join was removed (the ledger records outbound sends only, so it could not measure operator engagement) |
@@ -320,7 +319,7 @@ Hermit provides the **timing infrastructure** (when to reflect), the **proposal 
 ### Daily Rhythm
 
 Morning routine (configurable time, default: active hours start + 30m): brief, proposal review, priority check, pending micro-proposals surfaced.
-Evening routine (configurable time, default: active hours end - 30m): daily journal archived as S-NNN, reflection, preparation for tomorrow.
+Evening routine (configurable time, default: active hours end - 30m): task outcomes, reflection, preparation for tomorrow.
 
 Both are managed by `/claude-code-hermit:hermit-routines`. Where the Monitor tool is available, one native plugin monitor started by the activation skill evaluates every enabled routine's schedule outside the session ; a skipped fire costs zero model tokens, and routines due in the same poll batch into one wake. Eligibility gating defers only while an operator turn is genuinely open (a Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) ; coarser than CronCreate's harness turn-level idle gate: a routine wake can still interject into an active conversation, but a session merely left `in_progress` no longer starves routines. `heartbeat-restart` stays a CronCreate **re-arm anchor**, firing daily at 4am to re-invoke `load` (re-arming the monitor) and, unless `heartbeat.enabled` is explicitly false, activate the native heartbeat monitor. Where Monitor is unavailable (Bedrock/Google Cloud Agent Platform/Foundry, `DISABLE_TELEMETRY`), `load` falls back to per-routine CronCreate registrations, idle-gated at the harness turn level and re-armed daily by the same anchor before the 7-day expiry cliff.
 
@@ -329,7 +328,7 @@ Both are managed by `/claude-code-hermit:hermit-routines`. Where the Monitor too
 Four mechanisms handle background work — each owns a distinct axis:
 
 - **hermit-routines**: the only place for time-based semantic work (reflect, plugin-check routines, weekly-review). One native plugin monitor started by the activation skill owns eligibility, gating in-script before any wake; a CronCreate anchor and, on platforms without Monitor, per-routine CronCreates cover re-arm and fallback.
-- **heartbeat** — health/checklist/idle-wake gate only, on its own fixed cadence (default 30m), separate semantics from routine scheduling. Polls via `--peek` in a bash subprocess (zero model cost when quiet); wakes the model only on `EVALUATE` or `AUTO_CLOSE` verdicts. Must not be merged into routines — routines and heartbeat now both reach a zero-token quiet path independently, but they gate on different questions (a routine's own cron vs. the checklist's staleness) and merging would conflate the two.
+- **heartbeat**; health/checklist/idle-wake gate only, on its own fixed cadence (default 30m), separate semantics from routine scheduling. Polls via `--peek` in a bash subprocess (zero model cost when quiet); wakes the model only on `EVALUATE` verdicts. Must not be merged into routines; routines and heartbeat now both reach a zero-token quiet path independently, but they gate on different questions (a routine's own cron vs. the checklist's staleness) and merging would conflate the two.
 - **watch** — session-scoped external event streams via the `Monitor` tool. Dies with the session; not a scheduler.
 - **watchdog** — out-of-session process recovery (restart, wedge-nudge, re-arm). `context_hygiene.clear`, `context_clear_tokens`, and `context_hygiene.compact` run on every scheduler tick **independent of `watchdog.enabled`**; they are scheduler-owned context-hygiene co-located in the watchdog script, not watchdog features. Setting `enabled: false` disables restart/nudge only.
 

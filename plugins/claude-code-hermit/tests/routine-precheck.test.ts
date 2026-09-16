@@ -1,5 +1,5 @@
 // Contract tests for `routines.ts precheck` — consolidates a routine fire's
-// pre-dispatch gate (waiting-check + pause-check) and the `started` stamp into one
+// pre-dispatch gate (pause-check) and the `started` stamp into one
 // script call. Exercised as a subprocess (argv/stdout/exit-code/file writes), the same
 // way tests/hermit-pause.test.ts exercises hermit-pause.ts (both resolve the hermit
 // root via lib/cc-compat's hermitDir(), which fails open to a path resolved against
@@ -24,8 +24,6 @@ const readMetricsRows = (dir: string) => {
     return [];
   }
 };
-const writeRuntime = (dir: string, sessionState: string) =>
-  fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_state: sessionState }));
 
 function withDir(fn: (dir: string) => Promise<void> | void) {
   return async () => {
@@ -34,12 +32,12 @@ function withDir(fn: (dir: string) => Promise<void> | void) {
   };
 }
 
-const run = (id: string, rdw: 'true' | 'false', dir: string) =>
-  runScript('routines.ts', { args: ['precheck', id, rdw], cwd: dir });
+const run = (id: string, dir: string) =>
+  runScript('routines.ts', { args: ['precheck', id], cwd: dir });
 
 describe('routine-precheck', () => {
-  test('idle, unpaused, rdw=false → PROCEED + one started row', withDir(async (dir) => {
-    const r = await run('morning-brief', 'false', dir);
+  test('unpaused → PROCEED + one started row', withDir(async (dir) => {
+    const r = await run('morning-brief', dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('PROCEED');
     const rows = readMetricsRows(dir);
@@ -48,29 +46,9 @@ describe('routine-precheck', () => {
     expect(typeof rows[0].ts).toBe('string');
   }));
 
-  test('rdw=false, session_state=waiting → SKIP + skipped-waiting row, no started', withDir(async (dir) => {
-    writeRuntime(dir, 'waiting');
-    const r = await run('inbox-check', 'false', dir);
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('SKIP');
-    const rows = readMetricsRows(dir);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ routine_id: 'inbox-check', event: 'skipped-waiting' });
-  }));
-
-  test('rdw=true, session_state=waiting → waiting is not consulted; falls through to PROCEED', withDir(async (dir) => {
-    writeRuntime(dir, 'waiting');
-    const r = await run('always-fire-routine', 'true', dir);
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('PROCEED');
-    const rows = readMetricsRows(dir);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ routine_id: 'always-fire-routine', event: 'started' });
-  }));
-
-  test('paused (operator), rdw=false, idle → SKIP + skipped-paused row', withDir(async (dir) => {
+  test('paused (operator) → SKIP + skipped-paused row', withDir(async (dir) => {
     setPause(hermit(dir), { reason: 'operator', by: 'test' });
-    const r = await run('weekly-review', 'false', dir);
+    const r = await run('weekly-review', dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('SKIP');
     const rows = readMetricsRows(dir);
@@ -78,19 +56,9 @@ describe('routine-precheck', () => {
     expect(rows[0]).toMatchObject({ routine_id: 'weekly-review', event: 'skipped-paused' });
   }));
 
-  test('paused (operator), rdw=true → pause still applies → SKIP + skipped-paused row', withDir(async (dir) => {
-    setPause(hermit(dir), { reason: 'operator', by: 'test' });
-    const r = await run('always-fire-routine', 'true', dir);
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('SKIP');
-    const rows = readMetricsRows(dir);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].event).toBe('skipped-paused');
-  }));
-
   test('malformed runtime.json → fail-open PROCEED, no crash', withDir(async (dir) => {
     fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), '{not valid json');
-    const r = await run('daily-brief', 'false', dir);
+    const r = await run('daily-brief', dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('PROCEED');
     const rows = readMetricsRows(dir);
@@ -111,7 +79,7 @@ describe('routine-precheck', () => {
     fs.writeFileSync(hermit(dir, 'config.json'), '{}');
     fs.mkdirSync(path.join(dir, 'app', 'sub'), { recursive: true });
     const r = await runScript('routines.ts', {
-      args: ['precheck', 'nested-routine', 'false'],
+      args: ['precheck', 'nested-routine'],
       cwd: path.join(dir, 'app', 'sub'),
     });
     expect(r.exitCode).toBe(0);
@@ -122,13 +90,13 @@ describe('routine-precheck', () => {
   }));
 
   test('row schema is exactly (ts, routine_id, event, delivery)', withDir(async (dir) => {
-    await run('schema-check', 'false', dir);
+    await run('schema-check', dir);
     const rows = readMetricsRows(dir);
     expect(Object.keys(rows[0]).sort()).toEqual(['delivery', 'event', 'routine_id', 'ts']);
   }));
 
   test('explicit delivery arg "monitor" serializes delivery: monitor', withDir(async (dir) => {
-    const r = await runScript('routines.ts', { args: ['precheck', 'test-routine', 'false', 'monitor'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['precheck', 'test-routine', 'monitor'], cwd: dir });
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('PROCEED');
     const rows = readMetricsRows(dir);
@@ -137,7 +105,7 @@ describe('routine-precheck', () => {
   }));
 
   test('no delivery arg defaults to delivery: cron-create (unchanged)', withDir(async (dir) => {
-    const r = await run('legacy-routine', 'false', dir);
+    const r = await run('legacy-routine', dir);
     expect(r.exitCode).toBe(0);
     const rows = readMetricsRows(dir);
     expect(rows[0]).toMatchObject({ event: 'started', delivery: 'cron-create' });
@@ -163,7 +131,7 @@ describe('routine-precheck — wake gate in fallback delivery', () => {
 
   test('SKIP short-circuits before the started stamp', withDir(async (dir) => {
     writeGatedConfig(dir, writeGate(dir, '#!/usr/bin/env bash\necho SKIP\n'));
-    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'cron-create'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'cron-create'], cwd: dir });
     expect(r.stdout.trim()).toBe('SKIP');
     const rows = readMetricsRows(dir);
     // No `started`: a fire that never opened must not read as abandoned later.
@@ -172,14 +140,14 @@ describe('routine-precheck — wake gate in fallback delivery', () => {
 
   test('WAKE proceeds and opens the attempt', withDir(async (dir) => {
     writeGatedConfig(dir, writeGate(dir, '#!/usr/bin/env bash\necho WAKE\n'));
-    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'cron-create'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'cron-create'], cwd: dir });
     expect(r.stdout.trim()).toBe('PROCEED');
     expect(readMetricsRows(dir).map((x: any) => x.event)).toEqual(['started']);
   }), 20000);
 
   test('a failing gate proceeds and records why', withDir(async (dir) => {
     writeGatedConfig(dir, writeGate(dir, '#!/usr/bin/env bash\nexit 2\n'));
-    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'cron-create'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'cron-create'], cwd: dir });
     expect(r.stdout.trim()).toBe('PROCEED');
     const rows = readMetricsRows(dir);
     expect(rows.map((x: any) => x.event)).toEqual(['precheck-error', 'started']);
@@ -193,7 +161,7 @@ describe('routine-precheck — wake gate in fallback delivery', () => {
       'echo SKIP',
       '',
     ].join('\n')));
-    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'false', 'monitor'], cwd: dir });
+    const r = await runScript('routines.ts', { args: ['precheck', 'gated', 'monitor'], cwd: dir });
     expect(r.stdout.trim()).toBe('PROCEED');
     expect(fs.existsSync(hermit(dir, 'state', 'gate-calls.txt'))).toBe(false);
   }), 20000);

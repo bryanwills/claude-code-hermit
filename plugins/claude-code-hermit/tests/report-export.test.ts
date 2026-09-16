@@ -126,7 +126,6 @@ function writeSessionReport(hermitDir: string): void {
 
 function writeRuntimeFixture(hermitDir: string, overrides: Json = {}): void {
   fs.writeFileSync(statePath(hermitDir, 'runtime.json'), JSON.stringify({
-    session_state: 'idle',
     runtime_mode: 'tmux',
     tmux_session: 'TMUX-SESSION-MARKER',
     last_error: 'LAST-ERROR-MARKER',

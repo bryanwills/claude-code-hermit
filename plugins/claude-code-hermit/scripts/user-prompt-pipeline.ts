@@ -95,8 +95,7 @@ async function main(raw: string): Promise<void> {
     // mangled — MAX_STDIN_BYTES truncation cuts mid-JSON. Carry on with an empty
     // prompt rather than returning: the audit and timestamp stages don't need the
     // text, and every prompt-matching stage below fails closed on ''. Returning
-    // here would leave the turn unrecorded and let heartbeat's AUTO_CLOSE gate
-    // read the operator as silent.
+    // here would leave the turn unrecorded and read the operator as silent.
     if (raw.length === 0) return;
     prompt = '';
   }

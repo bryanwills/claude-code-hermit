@@ -1,14 +1,12 @@
 // lib/md-write.ts — transactional markdown/frontmatter write helpers, promoted
-// from apply-reflection-actions.ts so proposal.ts's create/patch/shell-append
-// verbs can reuse the same atomic-write and section-append primitives.
+// from apply-reflection-actions.ts so proposal writers can reuse atomic-write
+// and section-append primitives.
 //
 // Also the single home for the `## <heading>` section grammar (findSection and
-// the extract/replace/placeholder helpers built on it). Every SHELL.md reader
+// the extract/replace/placeholder helpers built on it). Every Markdown reader
 // and writer goes through here so they agree on where a section starts and ends.
 
 import fs from 'node:fs';
-import path from 'node:path';
-import { acquireLockWithWait, releaseLock } from './lockfile';
 
 type Json = any;
 
@@ -83,7 +81,7 @@ export function extractSection(content: string, heading: string): string | null 
   if (!section) return null;
   const body = content.slice(section.start, section.end);
   // `\r?\n`, not `\n`: findSection's `$` matches before a CR too, so on a CRLF
-  // SHELL.md the span starts at the `\r` and a bare `\n` strip would leave it
+  // Markdown the span starts at the `\r` and a bare `\n` strip would leave it
   // glued to the first body line.
   return body.replace(/^\r?\n/, '');
 }
@@ -99,17 +97,17 @@ export function stripPlaceholders(text: string): string {
 }
 
 // True for a blocker line already marked resolved. Two spellings, one convention:
-// `~ <text>` is the mid-session mark an operator or the model writes into SHELL.md the
+// `~ <text>` is the mid-session mark an operator or the model writes into Markdown the
 // moment a blocker clears, and `- [resolved] <text>` is how the archived report renders
 // it. Neither is a current blocker. Shared so the two sides of that convention cannot
-// drift — session-archive decides what a report and the next session carry, while
+// drift — readers decide what a report and the next session carry, while
 // startup-context decides what a resumed or compacted session is told it is blocked on;
 // if those disagree, a cleared blocker comes back from whichever side is behind.
 // The tilde must be followed by whitespace or end-of-line — `~ <text>` is the whole
 // convention. Matching a bare `~` would swallow any blocker that opens on a home path
 // ("- ~/.claude/settings.json is read-only"), silently retiring a live blocker and
 // mangling its text in the archived report.
-// One marker source for both the test and the strip: session-archive needs the text
+// One marker source for both the test and the strip: readers need the text
 // without the marker, and re-spelling the pattern there is how the two last drifted.
 const RESOLVED_MARKER = String.raw`(?:~(?=\s|$)|\[resolved\])`;
 const RESOLVED_LINE_RE = new RegExp(String.raw`^\s*-?\s*${RESOLVED_MARKER}`, 'i');
@@ -157,39 +155,4 @@ export function appendToSection(content: string, heading: string, line: string):
   // that separates this section from the next heading, gluing them together.
   const after = content.slice(insertAt).replace(/^\n*/, atEOF ? '\n' : '\n\n');
   return before + line + after;
-}
-
-// All mechanical SHELL rewrites share this lock, including lifecycle resets.
-// Dead owners are reclaimed by lockfile; a busy or unwritable lock is a retry,
-// never permission to overwrite a peer's read-modify-write without the lock.
-export function withShellLock<T>(shellPath: string, fn: () => T): T {
-  const lockPath = `${shellPath}.lock`;
-  if (!acquireLockWithWait(lockPath, 2000)) throw new Error('SHELL.md lock unavailable; retry the operation');
-  try { return fn(); }
-  finally { releaseLock(lockPath); }
-}
-
-// Best-effort append of a pre-rendered line to `<stateDir>/sessions/SHELL.md`
-// under `## <heading>` (Findings/Progress Log). Returns null on success, an
-// error message otherwise — never throws.
-export function appendShellLine(sessionsDir: string, heading: string, line: string): string | null {
-  const shellPath = path.join(sessionsDir, 'SHELL.md');
-  try {
-    return withShellLock(shellPath, () => {
-      let shell: string;
-      try { shell = fs.readFileSync(shellPath, 'utf-8'); }
-      catch { return 'SHELL.md unreadable'; }
-      let next: string;
-      try { next = appendToSection(shell, heading, line); }
-      catch (e: any) { return `SHELL.md has no ## ${heading} section: ${e.message}`; }
-      try {
-        writeFileAtomic(shellPath, next);
-        return null;
-      } catch (e: any) {
-        return 'SHELL.md write failed: ' + e.message;
-      }
-    });
-  } catch (e: any) {
-    return e.message;
-  }
 }

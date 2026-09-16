@@ -258,7 +258,7 @@ doctor: { ts, checks: [{ id, status }] } | null,
 cost: { today, this_month, all_time: { total_cost_usd, total_tokens, total_sessions }, by_source } | null,
 alerts: { active, suppressed, total_ticks } | null,
 session: { id, status, date, duration, cost_usd, tokens, escalation, closed_via, proposals_created_count } | null,
-runtime: { session_state, runtime_mode, paused, paused_until, watchdog: { last_run, events_last_24h } }
+runtime: { runtime_mode, paused, paused_until, watchdog: { last_run, events_last_24h } }
 ```
 
 A source that's missing or unreadable on disk becomes `null` for its section — the bundle assembler never crashes on partial state.
@@ -385,11 +385,11 @@ Ask: "Set tasks.queue_nudge_minutes to 90." This changes the notice delay, not a
 
 ## Routines
 
-Monitor scheduling applies one global lateness limit to all scheduled routines. After downtime, the latest missed occurrence runs only if it is within `routine_max_lateness_minutes` of the current minute. Exactly the limit remains eligible; older occurrences are consumed as `skipped-late` before prechecks or model wakes. Missed occurrences still collapse into one run per routine within the existing 24-hour search window. Time an occurrence spends deferred by an open operator turn does not count toward lateness, so it fires at the first poll after the turn clears; an occurrence already past the limit when the turn opens, or one whose deferral was interrupted by downtime, is still skipped. Pause/waiting skips retain precedence. This is a dispatch-time check, not a deadline on already dispatched work.
+Monitor scheduling applies one global lateness limit to all scheduled routines. After downtime, the latest missed occurrence runs only if it is within `routine_max_lateness_minutes` of the current minute. Exactly the limit remains eligible; older occurrences are consumed as `skipped-late` before prechecks or model wakes. Missed occurrences still collapse into one run per routine within the existing 24-hour search window. Time an occurrence spends deferred by an open operator turn does not count toward lateness, so it fires at the first poll after the turn clears; an occurrence already past the limit when the turn opens, or one whose deferral was interrupted by downtime, is still skipped. Pause skips retain precedence. This is a dispatch-time check, not a deadline on already dispatched work.
 
 The default is 60 minutes, including existing installations that omit the setting. For example, a 09:00 routine can run at 10:00 but is skipped at 10:01. A skipped weekly routine waits until its next scheduled occurrence. Set the limit to 1440 to retain the previous catch-up window. No config rewrite is needed to adopt the default, and operator-configured values are preserved on upgrade.
 
-The limit requires Monitor scheduling. CronCreate fallback warns during registration that it cannot enforce the limit. The `heartbeat-restart` re-arm anchor are unaffected.
+The limit requires Monitor scheduling. CronCreate fallback warns during registration that it cannot enforce the limit. The `heartbeat-restart` re-arm anchor is unaffected.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|

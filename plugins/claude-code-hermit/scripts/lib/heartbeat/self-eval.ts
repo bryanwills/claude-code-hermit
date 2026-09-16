@@ -2,7 +2,7 @@
 // still earn its place, and is the checklist itself getting too heavy?
 //
 // Every input is a file this process already reads — the checklist, the alert
-// state, SHELL.md's session id, and `proposals/*.md`
+// state, local date, and `proposals/*.md`
 // frontmatter — so none of it needs judgment. It runs inside `heartbeat.ts
 // alert-state`, which owns `self_eval{}`; the counters it produces are written
 // with the rest of the tick's state, and the entries that cross a threshold are
@@ -10,7 +10,7 @@
 //
 // Two counters, mirror images, both advanced once per pass (not per tick):
 //   clean_ticks: intervals in which the item raised nothing. Twenty of those with
-//                 three distinct sessions behind them means the item is dead weight.
+//                 three distinct local dates behind them means the item is dead weight.
 //   noise_ticks — passes in which an item whose proposal the operator already
 //                 dismissed fired anyway. Same threshold, opposite conclusion.
 
@@ -43,12 +43,6 @@ function readChecklist(stateDir: string): string[] {
   } catch { return []; }
 }
 
-/** `**ID:**` from SHELL.md — the session a pass is attributed to. */
-function readSessionId(shell: string): string | null {
-  const m = shell.match(/\*\*ID:\*\*\s*(\S+)/);
-  return m ? m[1] : null;
-}
-
 /**
  * Compute this pass's `self_eval{}` and the entries that crossed a proposal
  * threshold. Pure over its inputs apart from the two file reads it owns
@@ -59,13 +53,12 @@ export function runSelfEval(opts: {
   stateDir: string;
   prevSelfEval: Json;
   alerts: Json;          // this tick's classified alerts, keyed like the checklist
-  shell: string;         // sessions/SHELL.md content ('' when unreadable)
   today: string;         // tz-local YYYY-MM-DD, for first_observed
 }): { self_eval: Json; proposals: SelfEvalProposal[] } {
-  const { stateDir, alerts, shell, today } = opts;
+  const { stateDir, alerts, today } = opts;
   const self_eval: Json = { ...(opts.prevSelfEval && typeof opts.prevSelfEval === 'object' ? opts.prevSelfEval : {}) };
   const items = readChecklist(stateDir);
-  const sessionId = readSessionId(shell);
+  const sessionId = today;
 
   const upsert = (key: string, text: string): Json => {
     const entry = { ...(self_eval[key] && typeof self_eval[key] === 'object' ? self_eval[key] : {}) };
@@ -79,7 +72,7 @@ export function runSelfEval(opts: {
     return entry;
   };
 
-  // `sessions_seen` counts the distinct sessions an entry has been evaluated in, so it
+  // `sessions_seen` counts the distinct local dates an entry has been evaluated in, so it
   // advances on every pass — a firing one included. Tying it to clean passes alone would
   // make the noisy threshold (noise_ticks AND sessions_seen) unreachable for exactly the
   // item it exists for: one that fires on every pass never has a clean pass to count.

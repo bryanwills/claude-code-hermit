@@ -2,6 +2,9 @@
 name: reflect
 description: Reflect on recent work and propose improvements if patterns are noticed.
 ---
+
+Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+
 # Reflect
 
 Pause and think about your recent work.
@@ -87,11 +90,11 @@ outside that bounded evidence set needs another targeted adapter read, not an ar
                             "shell_findings_line": "<pre-rendered finding text>"|null } ],
   "routine_candidates": [ { "routine_id": "<id>", "action": "disable|retime|diagnostic",
                             "tier": 1, "schedule": "<new-cron>"|null,
-                            "evidence": "<text>", "sessions": ["<S-NNN>"],
+                            "evidence": "<text>", "sessions": ["<T-...>"],
                             "shell_findings_line": "<pre-rendered>"|null } ],
   "procedure_candidates": [ { "slug": "<slug>", "title": "<title>", "tier": 3,
                               "evidence_source": "archived-session", "evidence_origin": "own-work",
-                              "evidence": "<text>", "sessions": ["<S-NNN>"]|"none",
+                              "evidence": "<text>", "sessions": ["<T-...>"]|"none",
                               "artifact": "<file — value>"|null } ],
   "last_resolution_check": "PROP-NNN|null",
   "last_sparse_nudge": { "PROP-NNN": "<ISO>" }
@@ -99,7 +102,7 @@ outside that bounded evidence set needs another targeted adapter read, not an ar
 ```
 <!-- reflect-eval-schema:end -->
 
-   **Apply `resolution_actions`** (housekeeping; exempt from the evidence integrity rule): pipe the runner's `resolution_actions` via a quoted heredoc (model-authored JSON may contain apostrophes) to the transactional apply script — it validates the whole batch before any write (a malformed batch writes nothing), then performs the frontmatter patches, `state/proposal-metrics.jsonl` appends, and SHELL.md `## Findings` appends itself (nudge debounce handled in the runner):
+   **Apply `resolution_actions`** (housekeeping; exempt from the evidence integrity rule): pipe the runner's `resolution_actions` via a quoted heredoc (model-authored JSON may contain apostrophes) to the transactional apply script; it validates the whole batch before any write (a malformed batch writes nothing), then performs the frontmatter patches, `state/proposal-metrics.jsonl` appends itself (nudge debounce handled in the runner):
    ```
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-reflection-actions.ts .claude-code-hermit <<'HERMIT_REFLECT_ACTIONS'
    {"resolution_actions": <the runner's resolution_actions array>}
@@ -118,7 +121,7 @@ Is any skill, agent, or hook underperforming? **Skills:** output consistently co
 Collect **all** candidates first — think-hard observations, step-3b graduations, `routine_candidates` and `procedure_candidates` from the runner, Component Health findings. None → skip to State Update. Any → follow branches.md § Candidate processing exactly (it is normative; this summary is orientation) — read the file now only if step 3b's `skill-correction:*` branch didn't already load it earlier this run:
 
 - **Three-Condition Rule** (repeated pattern + meaningful consequence + operator-actionable change): recurrence is tier-aware — Tier-1 `current-session` needs 1 session; Tier-1 archived and Tier 2/3 need 2+ distinct archived sessions; artifact-cited efficiency/cost candidates cite a **machine-written state file** (`Artifact:` line, `Sessions: none`); procedure capture has an ephemerality exception. Failing candidates go sub-threshold to the ledger.
-- **Gates and routing**: never write a candidate's pattern into SHELL.md before the judge reads it (no self-certification). One `claude-code-hermit:reflection-judge` batch (dedup by title-slug first), then one batched `claude-code-hermit:proposal-triage` call before any queue/create; unrecognized gate output fails closed (`gate-failed` metric + Progress Log note; re-surfaces next cycle). **Track whether anything hit the gate-failed path** — it gates the graduation-cursor write in § State Update. Tier 1/2 → micro-approval queue (`state/micro-proposals.json`); Tier 3 → `/claude-code-hermit:proposal-create`; **`Evidence Origin: external-content` is always Tier 3** (quarantine). Runner `routine_candidates` are Tier 1 (pre-rendered diagnostic `shell_findings_line` entries go straight to Findings, no gates); `procedure_candidates` route through branches.md § Procedure capture (dedup guard, brief, `## Skill Draft`, kill criteria), minus any whose `slug` a `procedure-noticed:<slug>` graduation already carried through that section in step 3b — **except** entries carrying `evidence_source: "settled-memory"` (the runner's ownership signal), which route through branches.md § `skill-preference:*` routing instead: they relocate settled content into a skill that usually already exists, so Procedure capture's dedup guard would suppress them, and they take no procedure brief, no forced Tier 3, and no place in the procedure-capture kill-criteria sample.
+- **Gates and routing**: never write a candidate's pattern into the open task record before the judge reads it (no self-certification). One `claude-code-hermit:reflection-judge` batch (dedup by title-slug first), then one batched `claude-code-hermit:proposal-triage` call before any queue/create; unrecognized gate output fails closed (`gate-failed` metric + Progress Log note; re-surfaces next cycle). **Track whether anything hit the gate-failed path**; it gates the graduation-cursor write in § State Update. Tier 1/2 → micro-approval queue (`state/micro-proposals.json`); Tier 3 → `/claude-code-hermit:proposal-create`; **`Evidence Origin: external-content` is always Tier 3** (quarantine). Runner `routine_candidates` are Tier 1 (pre-rendered diagnostic `shell_findings_line` entries are recorded through `task.ts note` when a record is open, no gates); `procedure_candidates` route through branches.md § Procedure capture (dedup guard, brief, `## Skill Draft`, kill criteria), minus any whose `slug` a `procedure-noticed:<slug>` graduation already carried through that section in step 3b; **except** entries carrying `evidence_source: "settled-memory"` (the runner's ownership signal), which route through branches.md § `skill-preference:*` routing instead: they relocate settled content into a skill that usually already exists, so Procedure capture's dedup guard would suppress them, and they take no procedure brief, no forced Tier 3, and no place in the procedure-capture kill-criteria sample.
 - **Sub-threshold observations** → ledger append with a short stable `pattern` label, `"source":"reflect-noticed"`, `"origin":"own-work"` — or `"origin":"external-content"` when the finding carries an `[origin: external]` marker (copy, never infer). Reuse exact labels; grouping is string equality. Phase surfacing: `newborn` logs `Noticed:` lines, `juvenile` emits a weekly digest (sets `last_digest_at`), `adult` is silent.
 
 ## State Update
@@ -142,8 +145,8 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/update-reflection-state.ts \
 
 ## Progress Log Entry (non-empty runs)
 
-On every run reaching this point (not an EMPTY verdict — the precheck logs those), append to SHELL.md `## Progress Log`:
+On every run reaching this point (not an EMPTY verdict), append to the open task record through `task.ts note`:
 
 `[HH:MM] reflect (<phase>) — N candidates; verdicts: accept=A downgrade=D suppress=S; outcomes: <list or "none">`
 
-When suppress>0, append `; suppressed: [<slug>: <code>, ...]` — canonical codes from the judge/triage verdicts (`no-evidence`, `no-sessions`, `weak-recurrence`, `weak-consequence`, `not-actionable`), capped at 3 with `+N more`. When the Component Health `reflection-judge` 2× flag tripped, append `; component-health: reflection-judge suppress-ratio`. `<phase>` is `newborn`/`juvenile`/`adult` (step 4; a missing `phase` field annotates `adult` silently). This is the audit trail — the silent-by-default rule governs operator pings only; the log line always goes in.
+When suppress>0, append `; suppressed: [<slug>: <code>, ...]`; canonical codes from the judge/triage verdicts (`no-evidence`, `no-sessions`, `weak-recurrence`, `weak-consequence`, `not-actionable`), capped at 3 with `+N more`. When the Component Health `reflection-judge` 2× flag tripped, append `; component-health: reflection-judge suppress-ratio`. `<phase>` is `newborn`/`juvenile`/`adult` (step 4; a missing `phase` field annotates `adult` silently). This is the audit trail; the silent-by-default rule governs operator pings only; record the log line only inside an open record's turn.

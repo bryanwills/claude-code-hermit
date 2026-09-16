@@ -19,7 +19,6 @@
 // break shell quoting.
 // Usage: bun heartbeat.ts alert-state <state-file-path>   # eval-json on stdin
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { runSelfEval, type SelfEvalProposal } from './self-eval';
 import {
@@ -181,7 +180,7 @@ function apply(payloadJson: string): void {
   // Dropped silently — no monitoring line, no notification, no resolution ping:
   // those entries carry `detail` but neither `text` nor `suppressed`, so aging
   // them through classifyTick emits a literal "resolved — undefined" into
-  // SHELL.md. doctor-check.ts owns this prefix now, in its own file.
+  // alert state. doctor-check.ts owns this prefix now, in its own file.
   for (const k of Object.keys(classifiable)) {
     if (k.startsWith(DOCTOR_PREFIX)) delete classifiable[k];
   }
@@ -203,7 +202,7 @@ function apply(payloadJson: string): void {
 
   // Structured keys' text bakes in a raw PROP-NNN/MP-… id, which must never
   // reach the operator channel (house channel-voice rule) — silence their
-  // first-observation notification. SHELL.md monitoring lines are unaffected.
+  // first-observation notification. Internal diagnostic lines are unaffected.
   const silentOnNewKeys = new Set(structuredItems.map(i => i.key));
 
   const result = classifyTick({
@@ -224,7 +223,7 @@ function apply(payloadJson: string): void {
   // so classifyTick emits nothing and the digest gate is off by design — the operator
   // is never told their pending questions became unreadable (#764). Notify directly,
   // once per day, for as long as the read keeps failing. Channel-voice split: the
-  // operator gets plain language, the parse error goes to the SHELL.md monitoring line.
+  // operator gets plain language; parser details stay in internal diagnostic lines.
   const shouldNotifyStructuredFailure =
     hasStructuredReadFailure && state.structured_read_failure_notified_date !== today;
   if (shouldNotifyStructuredFailure) {
@@ -263,13 +262,10 @@ function apply(payloadJson: string): void {
   let selfEvalProposals: SelfEvalProposal[] = [];
   if (typeof state.total_ticks === 'number' && state.total_ticks % 20 === 0) {
     try {
-      let shell = '';
-      try { shell = fs.readFileSync(path.join(stateDir, 'sessions', 'SHELL.md'), 'utf-8'); } catch { /* no history */ }
       const evaluated = runSelfEval({
         stateDir,
         prevSelfEval: self_eval,
         alerts,
-        shell,
         today,
       });
       self_eval = evaluated.self_eval;

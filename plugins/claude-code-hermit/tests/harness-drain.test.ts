@@ -19,7 +19,6 @@ type Runtime = Record<string, unknown>;
 
 const LIVE_RUNTIME: Runtime = {
   version: 1,
-  session_state: 'in_progress',
   runtime_mode: 'headless',
   tmux_session: 'hermit-test',
   shutdown_requested_at: null,

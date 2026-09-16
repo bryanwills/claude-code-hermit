@@ -33,7 +33,7 @@ function withHermitDir(fn: (dir: string, hermitDir: string) => Promise<void>) {
       fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
       fs.mkdirSync(path.join(hermitDir, 'state'), { recursive: true });
       fs.writeFileSync(path.join(hermitDir, 'state', 'runtime.json'),
-        JSON.stringify({ session_id: 'test-session', session_state: 'active' }));
+        JSON.stringify({ session_id: 'test-session' }));
       await fn(dir, hermitDir);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });

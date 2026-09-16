@@ -3,13 +3,15 @@ name: hermit-doctor
 description: Runs the hermit's read-only health checks (runtime, config, hooks, state integrity, cost and spend, scheduling and watchdog, channels, credentials, permissions, docker, backup) and reports the summary. Use when diagnosing an install, before a release, or after suspicious behavior. Activates on messages like "/hermit-doctor", "health check", "diagnose the hermit", "what's wrong", "run diagnostic".
 ---
 
+Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+
 # Hermit Doctor
 
 Runs read-only health checks against the current hermit install (`channel-liveness`
 is the only one that performs outbound API calls — see Notes) and surfaces the summary. Safe
 to run at any time. Produces no side effects beyond writing
 `.claude-code-hermit/state/doctor-report.json` and `.claude-code-hermit/state/doctor-alerts.json`,
-and appending a summary block to SHELL.md.
+and appending a summary block to the open task record.
 
 ## Notification route
 
@@ -19,8 +21,8 @@ on the next run rather than counted as delivered.
 Every run sends the same two-leg notice and `channel-send.ts` resolves each leg against this
 install's own config: the maintainer leg reaches the configured `maintainer_channel_id`, else the
 primary chat on a `technical` profile (the client leg is dropped there, since both landed in one
-chat), else `SHELL.md` Findings on a `non-technical` one. A configured maintainer destination that
-is unreachable fails closed to Findings and never spills into the primary chat.
+chat), else `state/watchdog-events.jsonl` on a `non-technical` one. A configured maintainer destination that
+is unreachable fails closed to `state/watchdog-events.jsonl` and never spills into the primary chat.
 
 `--maintainer` is accepted and ignored (routine strings may still pass it): audience is decided by
 the row's own tier and the operator's config, not by the flag.
@@ -40,10 +42,7 @@ the row's own tier and the operator's config, not by the flag.
    - `⚠ <id> — <detail>` when `status: warn`
    - `✗ <id> — <detail>` when `status: fail`
 
-3. Append a summary section to `.claude-code-hermit/sessions/SHELL.md` under a new
-   `## Doctor Report (<ts>)` heading. Use the same per-check lines from step 2. Place it
-   above the `## Monitoring` section so it sits with session-level context, not
-   with monitoring chatter.
+3. Inside an open record's turn, record the per-check summary with `task.ts note .claude-code-hermit <id>`. Otherwise skip the note.
 
 4. Return the per-check lines to the caller and nothing else.
 
@@ -57,7 +56,7 @@ the row's own tier and the operator's config, not by the flag.
      no "recovered" ping.
    - `escalation.persisted: false` — the ledger could not be written. `prior_state_known: false` —
      the ledger was unreadable and had to be rebuilt, so what was already announced is unknown.
-     **On either, send nothing** and record the findings under `## Findings` in SHELL.md instead;
+     **On either, send nothing** and let the maintainer fallback record the findings in `state/watchdog-events.jsonl` instead;
      a notification you cannot dedup would repeat every run.
 
    **When `escalation.new` is non-empty.** Compose one complete, concise summary covering every
@@ -92,7 +91,7 @@ the row's own tier and the operator's config, not by the flag.
    and what the operator should do about it. The maintainer leg is the complete richer version of
    the same notice, never a tiered-rows-only fragment, because it stands alone wherever both
    audiences resolve to one chat. Omit `client` when every new row is tiered. Send no `fallback`
-   key: its default is what routes a maintainer leg to Findings on a `non-technical` install.
+   key: its default is what routes a maintainer leg to `state/watchdog-events.jsonl` on a `non-technical` install.
 
    When doctor was invoked from a channel, do not quote a tiered row back into your reply; say a
    maintainer diagnostic was recorded and leave it at that.
@@ -105,13 +104,13 @@ the row's own tier and the operator's config, not by the flag.
    Pass every `escalation.new[].id` you just announced, tiered rows included. If the send failed
    or degraded, skip this step: an id left unconfirmed keeps `escalation.new` non-empty, so the
    next run retries it instead of dropping it, and the doctor routine keeps waking on it.
-   For exit-code handling and the Findings fallback, follow
+   For exit-code handling and the event-log fallback, follow
    `/claude-code-hermit:channel-responder` § Outbound notification protocol.
 
 ## Silence policy
 
 - If every check is `ok`, return only: `All checks passed.` Do not notify via
-  channel (Tier 0). Still append to SHELL.md so the run is traceable. Clearing the stale
+  channel (Tier 0). Still append to the open task record so the run is traceable. Clearing the stale
   `doctor:*` entries is the script's job, not yours — it happens on every run.
 - If any check is `warn` or `fail`, return the full per-check summary. Notification is
   governed by `escalation.new` (step 5), not a blanket per-run ping: only findings not yet

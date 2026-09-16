@@ -29,7 +29,7 @@ Readers use `task-report.ts` for normalized task outcomes. Never open frozen ses
 {
   "report_summary": { "date": "<ISO>", "tags": ["<tag>"], "working_on": "<one-line>",
                        "status": "<completed|partial|blocked>", "next_start_point": "<text>" }|null,
-  "sessions_today": [ { "session": "S-NNN", "summary": "<one-line>" } ],
+  "sessions_today": [ { "session": "T-...", "summary": "<one-line>" } ],
   "findings": ["<text>"],
   "tomorrow": ["<text>"],
   "pending_proposals": ["<PROP-NNN: title>"],

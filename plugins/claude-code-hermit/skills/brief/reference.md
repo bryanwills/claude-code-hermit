@@ -1,6 +1,6 @@
 # Brief evaluation reference
 
-Return structured JSON for the calling skill to compose and deliver. Read fresh bounded digests; never read frozen session archives or NEXT-TASK.md.
+Return structured JSON for the calling skill to compose and deliver. Read fresh bounded digests; never read frozen session archives .
 
 ## Inputs
 
@@ -25,7 +25,7 @@ Keep the existing compatibility keys below; `sessions_today` contains task recor
 {
   "report_summary": { "date": "<ISO>", "tags": ["<tag>"], "working_on": "<one-line>",
                        "status": "<completed|partial|blocked>", "next_start_point": "<text>" }|null,
-  "sessions_today": [ { "session": "S-NNN", "summary": "<one-line>" } ],
+  "sessions_today": [ { "session": "T-...", "summary": "<one-line>" } ],
   "findings": ["<text>"],
   "tomorrow": ["<text>"],
   "pending_proposals": ["<PROP-NNN: title>"],

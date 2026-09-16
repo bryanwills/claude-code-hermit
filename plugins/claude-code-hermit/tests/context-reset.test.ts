@@ -43,23 +43,23 @@ test('applyContextReset anchors both fields to hermitRoot, not the cwd', async (
   const shellPath = path.join(hermitRoot, 'sessions', 'SHELL.md');
   fs.writeFileSync(shellPath, '## Progress Log\n');
   const runtimeJson = path.join(hermitRoot, 'state', 'runtime.json');
-  fs.writeFileSync(runtimeJson, JSON.stringify({ session_id: 'S-042', tmux_session: 'hermit' }));
+  fs.writeFileSync(runtimeJson, JSON.stringify({ cc_session_id: 'resident', tmux_session: 'hermit' }));
 
   const foreignCwd = freshDir();
-  await applyResetFromCwd(hermitRoot, foreignCwd, { session_id: 'S-042', tmux_session: 'hermit' });
+  await applyResetFromCwd(hermitRoot, foreignCwd, { cc_session_id: 'resident', tmux_session: 'hermit' });
 
   const written = JSON.parse(fs.readFileSync(runtimeJson, 'utf-8'));
   expect(written.context_cleared).toBe(true);
   expect(typeof written.last_context_reset_at).toBe('string');
   // Both fields land in ONE file: the stamp used to be written by a second, separately
   // anchored call, so a foreign cwd split them across two runtime.json files.
-  expect(written.session_id).toBe('S-042');
+  expect(written.cc_session_id).toBe('resident');
   expect(typeof written.updated_at).toBe('string');
 
   // writeRuntimeJson mkdirs its target, so a cwd-relative resolve would have silently
   // created a decoy state dir here and written the flag into it.
   expect(fs.existsSync(path.join(foreignCwd, '.claude-code-hermit'))).toBe(false);
-  expect(fs.readFileSync(shellPath, 'utf-8')).toContain('context cleared (test)');
+  expect(fs.readFileSync(shellPath, 'utf-8')).toBe('## Progress Log\n');
 
   // The atomic write renames its temp away; nothing is left behind.
   const leftovers = fs.readdirSync(path.join(hermitRoot, 'state')).filter((f) => f.endsWith('.tmp'));

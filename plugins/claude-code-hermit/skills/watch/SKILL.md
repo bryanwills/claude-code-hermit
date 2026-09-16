@@ -2,6 +2,9 @@
 name: watch
 description: Background watching via the CC Monitor tool. Starts subprocesses that stream events as conversation notifications — zero token cost when quiet. Supports declared config watches (auto-registered on session start) and ad-hoc operator-invoked watches.
 ---
+
+Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+
 # Watch
 
 Run background event watchers using the CC Monitor tool. Each stdout line from
@@ -27,7 +30,7 @@ Two classes:
 ## Runtime Registry
 
 All active watches are tracked in `.claude-code-hermit/state/monitors.runtime.json`.
-This is the **sole source of truth** — not SHELL.md.
+This is the **sole source of truth**.
 
 ```json
 {
@@ -55,16 +58,13 @@ This is the **sole source of truth** — not SHELL.md.
 }
 ```
 
-SHELL.md `## Monitoring` entries are a **journal only** — no code path reads
-them for decisions. Start/stop decisions read from the runtime registry.
+Start/stop decisions read from the runtime registry.
 
 ## Plan
 
 ### Starting an ad-hoc watch
 
 1. Parse instruction + optional interval from operator message. Default interval: 5m.
-2. Verify active session exists (`.claude-code-hermit/sessions/SHELL.md` must exist).
-   If none: "No active session. Run `/claude-code-hermit:session` first."
 3. Generate id: `adhoc-<epoch>-<4char-random>` (e.g., `adhoc-1744460400-a3f2`).
    Timestamp + random suffix avoids collisions across sessions.
 4. Determine command shape:
@@ -157,8 +157,7 @@ Called automatically by resident-start on a genuine boot. Can also be called man
 
 1. Parse id from operator message (or `--all` flag)
 2. **`stop <id>`:** Look up the entry in the registry. When it has a `task_id`,
-   call `TaskStop`; a `peer-idle` entry has none, so just remove it. Then update
-   SHELL.md `[ACTIVE]` to `[STOPPED]`.
+   call `TaskStop`; a `peer-idle` entry has none, so just remove it. Remove the entry from the registry.
 3. **`stop` (no id):**
    - Count ad-hoc watches in registry (`source: "adhoc"`), including `peer-idle`
    - 0 active: "No active watches to stop."
@@ -166,7 +165,7 @@ Called automatically by resident-start on a genuine boot. Can also be called man
    - 2+ active: list them, ask which one (or use `--all`)
 4. **`stop --all`:** For each entry with a `task_id`, call `TaskStop`. Remove
    entries without one, including `peer-idle`, without calling `TaskStop`. Clear
-   all entries from the registry and log to SHELL.md.
+   all entries from the registry and log to the open task record.
 5. After any stop: write registry back
 
 Note: If `TaskStop` returns an error for a given task_id (the watch already
@@ -210,7 +209,7 @@ CC sends a completion notification into the conversation. On seeing this:
 
 1. Match the `task_id` from the notification against the runtime registry
 2. If found: remove the entry and write registry back
-3. Log to SHELL.md: `[HH:MM] Watch <id> exited`
+3. Log to the open task record: `[HH:MM] Watch <id> exited`
 
 If the notification is missed (compaction, context pressure), the stale entry is
 harmless. The next session start clears the registry unconditionally.
@@ -243,7 +242,7 @@ for X:
    expired; no longer watching it."` — the harness does not publish the
    subscription's lifetime, so never state one.
 3. Name the session by display name only, never by socket path or pid. Remove the
-   entry, write the registry, and log one SHELL.md line.
+   entry, write the registry, and, inside an open record's turn, log one task note.
 
 Never message the watched session back. The notice fires when X's turn ends, not
 when its background work ends. Leave the helper running: never `claude stop` an
@@ -263,8 +262,6 @@ unattached session itself. Stop one only when the operator asks or it is stuck.
 - **Config hot-reload:** Config watches do NOT hot-reload during a session.
   Changes to `config.json` monitors only apply at the next session start
   or after a manual `/watch stop <id>` + `/watch start`.
-- On `/session-close`: session-close stops all watches before archiving. The
-  registry is cleared.
 - On session start: the registry is cleared unconditionally before registering
   config watches. Monitors are session-scoped.
 

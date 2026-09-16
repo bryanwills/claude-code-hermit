@@ -41,9 +41,15 @@ describe('sharedLivenessAgeSecs', () => {
 
   test('a single stale file reads older than the fresh threshold', () => {
     const root = makeRoot();
-    writeAged(root, 'sessions/.status.json', LIVENESS_FRESH_SECS + 300);
+    writeAged(root, 'state/routine-monitor-liveness.json', LIVENESS_FRESH_SECS + 300);
     const age = sharedLivenessAgeSecs(root);
     expect(age!).toBeGreaterThan(LIVENESS_FRESH_SECS);
+  });
+
+  test('retired cost cache does not prove liveness', () => {
+    const root = makeRoot();
+    writeAged(root, 'sessions/.status.json', 0);
+    expect(sharedLivenessAgeSecs(root)).toBeNull();
   });
 
   test('picks up the bare .heartbeat file', () => {

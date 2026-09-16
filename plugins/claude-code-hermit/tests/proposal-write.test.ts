@@ -28,6 +28,8 @@ function seedState(dir: string, opts: { timezone?: string; routines?: any[] } = 
   const base = stateArg(dir);
   fs.mkdirSync(path.join(base, 'proposals'), { recursive: true });
   fs.mkdirSync(path.join(base, 'templates'), { recursive: true });
+  fs.mkdirSync(path.join(base, 'sessions'), { recursive: true });
+  fs.writeFileSync(shellPath(dir), 'frozen archive\n');
   fs.copyFileSync(
     path.join(PLUGIN_ROOT, 'state-templates', 'PROPOSAL.md.template'),
     path.join(base, 'templates', 'PROPOSAL.md.template'),
@@ -82,14 +84,14 @@ describe('proposal.ts create', () => {
     expect(r.stdout.trim()).toMatch(/^PROP-008-/);
   }));
 
-  test('session defaults from runtime.json when Session header omitted', withDir(async (dir) => {
+  test('session defaults to null when Session header omitted', withDir(async (dir) => {
     seedState(dir);
-    fs.writeFileSync(path.join(stateArg(dir), 'state', 'runtime.json'), JSON.stringify({ session_id: 'S-042' }));
+    fs.writeFileSync(path.join(stateArg(dir), 'state', 'runtime.json'), JSON.stringify({ cc_session_id: 'resident' }));
     const stdin = heredoc({ Title: 'Session default test' }, MIN_BODY);
     const r = await runProposal(stateArg(dir), ['create'], { stdin });
     const id = r.stdout.trim();
     const content = fs.readFileSync(propPath(dir, id), 'utf-8');
-    expect(content).toContain('session: S-042');
+    expect(content).toContain('session: null');
   }));
 
   test('template missing -> ERROR|template-missing, zero writes', withDir(async (dir) => {
@@ -100,6 +102,14 @@ describe('proposal.ts create', () => {
     expect(r.stdout.trim()).toBe('ERROR|template-missing');
     expect(fs.readdirSync(path.join(stateArg(dir), 'proposals'))).toHaveLength(0);
     expect(metricsLines(dir)).toHaveLength(0);
+  }));
+
+  test('Session header carries an explicit task id', withDir(async (dir) => {
+    seedState(dir);
+    const stdin = heredoc({ Title: 'Task proposal', Session: 'T-20260916-120000' }, MIN_BODY);
+    const result = await runProposal(stateArg(dir), ['create'], { stdin });
+    expect(result.exitCode).toBe(0);
+    expect(fs.readFileSync(propPath(dir, result.stdout.trim()), 'utf-8')).toContain('session: T-20260916-120000');
   }));
 
   const invalidCases: Array<[string, Record<string, string>, string, string]> = [

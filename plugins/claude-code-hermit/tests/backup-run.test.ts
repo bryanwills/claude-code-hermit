@@ -57,7 +57,7 @@ function fixture(over: any = {}): Fixture {
     agent_name: 'Testhermit', timezone: 'UTC',
     backup: { enabled: true, mode: 'workspace', schedule: '0 3 * * *', remote: bare, push: true, include: [], ...over },
   }, null, 2));
-  fs.writeFileSync(path.join(hermit, 'sessions', 'SHELL.md'), '# Shell\n');
+  fs.writeFileSync(path.join(hermit, 'sessions', 'frozen-report.md'), '# Shell\n');
   write(root, 'README.md', '# project\n');
   write(root, '.gitignore', 'node_modules/\n');
 
@@ -94,7 +94,7 @@ describe('backup run — workspace mode', () => {
 
     const files = committedFiles(f.root);
     expect(files).toContain('.claude-code-hermit/config.json');
-    expect(files).toContain('.claude-code-hermit/sessions/SHELL.md');
+    expect(files).toContain('.claude-code-hermit/sessions/frozen-report.md');
     expect(files).toContain('.claude-code-hermit/memory-mirror/memory/MEMORY.md');
 
     expect(git(f.root, 'log', '-1', '--pretty=%s')).toContain('hermit backup');

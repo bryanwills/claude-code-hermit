@@ -16,11 +16,6 @@
 //   "doctor"       — runs doctor-check.ts --gate: SKIP when escalation.new is empty
 //                    and the ledger is healthy, WAKE otherwise. The gate run IS the
 //                    fire's run (checks + ledger writes happen once, not twice).
-//   "auto-close"   — runs session-archive.ts auto-close-decision: WAKE on close-now,
-//                    SKIP on queued (the verb already queued it) or noop. On the
-//                    `resting` noop only (idle, no active session) the gate stamps
-//                    clear-requested.json itself, so the daily context reset survives
-//                    a hermit that never opened a session.
 //   "<path>"       — a project-relative executable the operator owns. Verdict-only:
 //                    the first stdout line must be SKIP or WAKE. Nothing it prints
 //                    reaches the wake prompt — gate output is untrusted text, and the
@@ -39,7 +34,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { lastRoutineFire } from './history';
 import { writeFileAtomic } from '../md-write';
-import { localISOStamp } from '../time';
 
 type Json = any;
 
@@ -53,9 +47,8 @@ export type GateVerdict = {
 
 export const BUILTIN_REFLECT = 'reflect';
 export const BUILTIN_DOCTOR = 'doctor';
-export const BUILTIN_AUTO_CLOSE = 'auto-close';
 export const BUILTIN_LATER = 'later';
-const BUILTINS = new Set([BUILTIN_REFLECT, BUILTIN_DOCTOR, BUILTIN_AUTO_CLOSE, BUILTIN_LATER]);
+const BUILTINS = new Set([BUILTIN_REFLECT, BUILTIN_DOCTOR, BUILTIN_LATER]);
 export const DEFAULT_GATE_TIMEOUT_S = 30;
 export const MAX_GATE_TIMEOUT_S = 300;
 /** Verdict is one short line; anything past this is a misbehaving gate, not a payload. */
@@ -68,7 +61,7 @@ const MAX_GATE_STDOUT = 4096;
  * root is not necessarily known.
  */
 export function validatePrecheckValue(value: unknown): string | null {
-  if (typeof value !== 'string') return 'must be a string ("reflect", "doctor", "auto-close", "later", or a project-relative script path)';
+  if (typeof value !== 'string') return 'must be a string ("reflect", "doctor", "later", or a project-relative script path)';
   const raw = value.trim();
   if (!raw) return 'must not be empty';
   if (BUILTINS.has(raw)) return null;
@@ -310,43 +303,6 @@ function runDoctorGate(hermitDir: string, timeoutMs: number): GateVerdict {
 }
 
 /**
- * The daily-boundary reset marker the auto-close gate stamps on a `resting` noop
- * verdict (idle, no active session) — not on every `noop`.
- * Mirrors session-archive.ts's writeMarker so the watchdog's maybePostCloseClear
- * (the sole reader of clear-requested.json) sees the same shape regardless of which
- * writer produced it — a real close (session-archive.ts) or an idle no-op (here).
- */
-function writeClearRequestedMarker(hermitDir: string): void {
-  try {
-    const p = path.join(hermitDir, 'state', 'clear-requested.json');
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    writeFileAtomic(p, JSON.stringify({ requested_at: localISOStamp(), reason: 'daily-boundary' }, null, 2) + '\n');
-  } catch { /* fail-open — the watchdog simply resets on the next real close instead */ }
-}
-
-function runAutoCloseGate(hermitDir: string, timeoutMs: number): GateVerdict {
-  const { firstLine, ok, detail } = spawnBuiltinScript(hermitDir, 'session-archive.ts', ['auto-close-decision', `--state-dir=${path.resolve(hermitDir)}`], timeoutMs);
-  if (!ok) return { verdict: 'error', detail: detail || 'spawn' };
-
-  let parsed: Json;
-  try { parsed = JSON.parse(firstLine); } catch { return { verdict: 'error', detail: 'bad-verdict' }; }
-  if (!parsed || parsed.ok !== true) return { verdict: 'error', detail: 'decision-error' };
-
-  if (parsed.decision === 'close-now') return { verdict: 'wake' };
-  if (parsed.decision === 'queued') return { verdict: 'skip' };
-  if (parsed.decision === 'noop') {
-    // Only the `resting` noop (idle, no active session) stands in for the archive
-    // that would otherwise have stamped this marker. Every other noop — a `waiting`
-    // session, an unreadable runtime — leaves live context in place, and the
-    // watchdog would later read a stale marker as "a close just happened" and
-    // `/clear` a session nothing archived.
-    if (parsed.resting === true) writeClearRequestedMarker(hermitDir);
-    return { verdict: 'skip' };
-  }
-  return { verdict: 'error', detail: 'bad-verdict' };
-}
-
-/**
  * The gate decision for one due routine.
  *
  * `mark` is the cron minute this fire is for (the value `due` is about to write as
@@ -363,7 +319,7 @@ export function runGate(routine: Json, hermitDir: string, mark: string): GateVer
     if (resolved.name === BUILTIN_REFLECT) return runReflectGate(hermitDir, routine.id, timeoutMs, mark);
     if (resolved.name === BUILTIN_DOCTOR) return runDoctorGate(hermitDir, timeoutMs);
     if (resolved.name === BUILTIN_LATER) return runLaterGate(hermitDir, timeoutMs);
-    return runAutoCloseGate(hermitDir, timeoutMs);
+    return { verdict: 'error', detail: 'unknown-builtin' };
   }
 
   const lastFired = (() => {

@@ -1,5 +1,5 @@
 // `routines.ts due` — deterministic scheduler for monitor-mode routines. Polled every
-// interval by routine-monitor.sh. Owns all gating (pause/waiting/idle), all state writes
+// interval by routine-monitor.sh. Owns all gating (pause and operator turns), all state writes
 // (state/routine-schedule.json cursors, state/routine-monitor-liveness.json), and emits
 // a single ROUTINE_DUE line only for routines that should actually wake the session.
 //
@@ -9,7 +9,7 @@
 // The bracketed markers are load-bearing — cost-tracker.ts classifySource reads this
 // ROUTINE_DUE line to attribute the wake turn: one id → routine:<id>, ≥2 ids (a co-fire)
 // → the routine:multi bucket. Also load-bearing: record-operator-action.ts
-// isRoutinePrompt() drops this line; tests/auto-close.test.ts drift guard syncs it.
+// isRoutinePrompt() drops this line; tests/heartbeat-monitor-emissions.test.ts drift guard syncs it.
 //
 // State model (state/routine-schedule.json): { "<id>": { "last_consumed_mark": "<ISO minute>", "held_at"?: "<ISO minute>" } }
 // `held_at` is the last poll at which an occurrence was deferred for an open operator
@@ -17,7 +17,7 @@
 // does not count while a gap the monitor did not observe (downtime) still does. It is
 // re-stamped on every held poll and dropped by any consume, which rewrites the entry.
 // A routine is due when a cron-matching minute mark exists in (last_consumed_mark, now],
-// lower-bounded at now-24h. Gate order per due routine: paused → waiting(!rdw) →
+// lower-bounded at now-24h. Gate order per due routine: paused →
 // lateness (consume, no emit when expired) → operator-turn-open (defer, no consume) →
 // precheck (consume, no emit on SKIP) → emit
 // (consume). Missing entry inits to now, fires nothing — exact CronCreate-death parity,
@@ -38,12 +38,11 @@ import { readJson as readJSON } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { logRoutineEvent } from './event';
 import { runGate } from './gate';
-import { pendingCloseDrainDue, operatorTurnOpen, drainCooldownExpired, stampDrainCooldown } from '../auto-close';
+import { operatorTurnOpen } from '../operator-turn';
 
 type Json = any;
 
 const ANCHOR_ID = 'heartbeat-restart';
-const DRAIN_ID = 'daily-auto-close'; // routine the pending-close drain re-fires
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 
@@ -125,12 +124,6 @@ const routines: Json[] = Array.isArray(config.routines) ? config.routines : [];
 const eligible = routines.filter((r: Json) =>
   r && r.enabled === true && r.id && r.skill && r.schedule && r.id !== ANCHOR_ID);
 
-let runtime: Json = readJSON(path.join(stateDir, 'runtime.json'));
-const sessionState: string | null = runtime && typeof runtime.session_state === 'string' ? runtime.session_state : null;
-
-// Live-exchange signal: an operator-initiated turn is open. Shared with the
-// heartbeat drainer — see lib/auto-close.ts for the marker's lifecycle and why a
-// broken marker reads as no-open-turn.
 const turnOpen = operatorTurnOpen(hermitDir, nowDate.getTime());
 
 let paused = false;
@@ -194,18 +187,11 @@ for (const routine of eligible) {
     continue;
   }
 
-  const rdw = routine.run_during_waiting === true;
 
   if (paused) {
     schedule[id] = { last_consumed_mark: latestMatch.toISOString() };
     scheduleChanged = true;
     pendingStamps.push([id, 'skipped-paused']);
-    continue;
-  }
-  if (sessionState === 'waiting' && !rdw) {
-    schedule[id] = { last_consumed_mark: latestMatch.toISOString() };
-    scheduleChanged = true;
-    pendingStamps.push([id, 'skipped-waiting']);
     continue;
   }
   // Expire before deferring: a busy turn must not keep a stale occurrence pending
@@ -279,42 +265,6 @@ if (scheduleChanged) {
 // Persist succeeded (or nothing changed) — now flush the deferred skip stamps.
 for (const [id, event, detail] of pendingStamps) stamp(id, event, detail);
 
-// Pending-close drain. The daily-auto-close routine queues a close when the
-// operator is active at midnight; historically only the heartbeat tick drained
-// that flag, so a hermit with heartbeat.enabled=false stranded it indefinitely.
-// This poll is the second drainer — see lib/auto-close.ts for why two is correct.
-//
-// Placed after the persist block on purpose: the dedup gate needs dueIds in its
-// final state, and a failed schedule write has already finish([])ed above, so the
-// drain inherits that short-circuit for free rather than restating it.
-if (!paused && pendingCloseDrainDue(hermitDir, nowDate.getTime())) {
-  // NOT gated on the flag's own routine being `eligible`: an operator who
-  // disabled the daily-auto-close *schedule* did not thereby decline a close
-  // that is already queued. But it must exist in config at all — hermit-routines
-  // skips unknown ids silently, so emitting one would be a paid wake that can
-  // never clear the flag (hermit-doctor's auto-close check surfaces that case).
-  const configured = routines.some((r: Json) => r && r.id === DRAIN_ID);
-  // An open operator turn suppresses the drain even when the 10-min lull has
-  // passed: someone who typed 11 minutes ago and is now watching a long agent
-  // turn is present, and closing under them would destroy in-flight work. Both
-  // drainers apply this guard and share one cooldown marker — see lib/auto-close.ts.
-  if (configured && !turnOpen && drainCooldownExpired(hermitDir, nowDate.getTime())) {
-    // Write-before-emit, mirroring the persist-before-emit contract above: if the
-    // cooldown stamp fails we must not emit, or a read-only state dir turns a
-    // failing close into a wake every 60 seconds. Stamped unconditionally (even
-    // when the natural midnight fire already added DRAIN_ID this poll) because
-    // otherwise the same-poll dedup lasts exactly one poll, and with the flag
-    // still on disk mid-close the next poll would emit a second close into the
-    // one still running.
-    const stamped = stampDrainCooldown(hermitDir, nowDate.getTime());
-    if (stamped && !dueIds.includes(DRAIN_ID)) {
-      dueIds.push(DRAIN_ID);
-    }
-  }
-}
-
-// After the drain so its id is included; after persist-failure's finish([]) so a
-// rolled-back cursor never gets a phantom row. One row per emitted id.
 for (const id of dueIds) stamp(id, 'dispatched');
 
 finish(dueIds.length ? [`ROUTINE_DUE ${dueIds.map(id => `[hermit-routine:${id}]`).join(' ')}`] : []);

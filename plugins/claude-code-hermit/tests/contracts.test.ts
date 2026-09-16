@@ -125,7 +125,8 @@ describe('hook outputs', () => {
     expect(fs.existsSync(logPath)).toBe(true);
 
     const entry = JSON.parse(read(logPath).trim().split('\n')[0]);
-    expect(typeof entry.session_id).toBe('string');
+    expect(entry).not.toHaveProperty('session_id');
+    expect(typeof entry.cc_session_id).toBe('string');
     expect(typeof entry.estimated_cost_usd).toBe('number');
     expect(typeof entry.timestamp).toBe('string');
     expect(entry.estimated_cost_usd).toBeGreaterThan(0);
@@ -135,28 +136,7 @@ describe('hook outputs', () => {
     if (entry.context_usage !== null) { expect(typeof entry.context_usage).toBe('number'); }
   }), 15000);
 
-  test('standard profile produces structured JSON with criteria', withTmpdir(async (dir) => {
-    const r = await runScript('evaluate-session.ts', {
-      stdin: '{}', cwd: dir,
-      env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, AGENT_HOOK_PROFILE: 'standard' },
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).not.toBe('');
-    const data = JSON.parse(r.stdout);
-    expect(data).toContainKey('criteria');
-    expect(Array.isArray(data.criteria)).toBe(true);
-    expect(data.criteria.length).toBeGreaterThan(0);
-    expect(data).toContainKey('overall');
-  }), 15000);
 
-  test('minimal profile produces no stdout (silence is the contract)', withTmpdir(async (dir) => {
-    const r = await runScript('evaluate-session.ts', {
-      stdin: '{}', cwd: dir,
-      env: { CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, AGENT_HOOK_PROFILE: 'minimal' },
-    });
-    expect(r.exitCode).toBe(0);
-    expect(r.stdout.trim()).toBe('');
-  }), 15000);
 });
 
 // ============================================================
@@ -555,7 +535,7 @@ describe('routine precheck validation', () => {
   test('every builtin provider and a project-relative path are accepted', () => {
     expect(withPrecheck({ precheck: 'reflect' }).errors).toEqual([]);
     expect(withPrecheck({ precheck: 'doctor' }).errors).toEqual([]);
-    expect(withPrecheck({ precheck: 'auto-close' }).errors).toEqual([]);
+    expect(withPrecheck({ precheck: 'later' }).errors).toEqual([]);
     expect(withPrecheck({ precheck: 'tools/mail-gate.sh' }).errors).toEqual([]);
   });
 
@@ -606,7 +586,7 @@ describe('routine precheck validation', () => {
     expect(entry.schedule).toBe('5 9 * * *');
     expect(entry.skill).toBe('claude-code-hermit:later run');
     expect(entry.precheck).toBe('later');
-    expect(entry.run_during_waiting).toBe(true);
+    expect(entry).not.toHaveProperty('run_during_waiting');
     expect(entry.enabled).toBe(true);
     expect(entry.model).toBeUndefined();
     expect(runValidate({ routines: template.routines }).errors).toEqual([]);
@@ -699,7 +679,7 @@ describe('routine model validation', () => {
   };
   const HB_ROUTINE = {
     id: 'heartbeat-restart', schedule: '0 4 * * *',
-    skill: 'claude-code-hermit:heartbeat start', run_during_waiting: true, enabled: true,
+    skill: 'claude-code-hermit:heartbeat start', enabled: true,
   };
 
   test('each valid model value on a routine produces no errors', () => {
@@ -1122,12 +1102,11 @@ describe('channel resolver contract', () => {
 // Proposal ID scheme (TestProposalIdScheme)
 //
 // Guards against silent regressions: scripts narrowing the filename regex back
-// to the legacy-only form, or session-archive.ts losing the full-ID capture pattern.
+// to the legacy-only form.
 // ============================================================
 
 describe('proposal-id scheme', () => {
   const WIDENED_REGEX = String.raw`/^PROP-\d+(?:-.+)?\.md$/`;
-  const SESSION_ARCHIVE_REGEX = '/PROP-[a-z0-9][a-z0-9-]*/gi';
   const SCRIPTS_WITH_PROPOSAL_GLOB = ['reflect-precheck.ts', 'weekly-review.ts', 'doctor-check.ts'];
 
   test('all proposal-scanning scripts must contain the widened filename regex', () => {
@@ -1139,12 +1118,7 @@ describe('proposal-id scheme', () => {
     }
   });
 
-  test('session-archive.ts must use a regex that captures the full PROP-NNN-slug-HHMMSS form', () => {
-    const p = path.join(SCRIPTS, 'session-archive.ts');
-    expect(fs.existsSync(p)).toBe(true);
-    // missing → new-format IDs truncated to PROP-NNN in session reports
-    expect(read(p)).toContain(SESSION_ARCHIVE_REGEX);
-  });
+
 });
 
 // ============================================================
@@ -2088,7 +2062,7 @@ describe('template-manifest doctor contract', () => {
       const content = manifestContent !== undefined
         ? manifestContent
         : JSON.stringify({ version: 1, files: {
-            'templates/SHELL.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.0' },
+            'templates/HEARTBEAT.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.0' },
           }});
       fs.writeFileSync(path.join(stateDir, 'template-manifest.json'), content);
     }
@@ -2129,13 +2103,13 @@ describe('template-manifest doctor contract', () => {
   test('manifest entry with invalid sha256 → state check fails with key name', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     seedState(dir, JSON.stringify({ version: 1, files: {
-      'templates/SHELL.md.template': { sha256: 'not-a-hash', plugin_version: '1.2.0' },
+      'templates/HEARTBEAT.md.template': { sha256: 'not-a-hash', plugin_version: '1.2.0' },
     }}));
     const report = await runDoctorCheck(dir);
     const s = stateCheck(report);
     expect(s).toBeDefined();
     expect(s.status).toBe('fail');
-    expect(s.detail).toContain('templates/SHELL.md.template');
+    expect(s.detail).toContain('templates/HEARTBEAT.md.template');
   }), 20000);
 
   test('docker deployed but no template baselines → state warns', withTmpdir(async (dir) => {
@@ -2154,7 +2128,7 @@ describe('template-manifest doctor contract', () => {
     // Step 5c writes the entrypoint key independently of docker-setup; that alone must
     // NOT suppress the warn — the F2 compose/Dockerfile baselines are still missing.
     seedState(dir, JSON.stringify({ version: 1, files: {
-      'templates/SHELL.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.0' },
+      'templates/HEARTBEAT.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.0' },
       'docker/docker-entrypoint.hermit.sh': { sha256: 'b'.repeat(64), plugin_version: '1.2.0' },
     }}));
     fs.writeFileSync(path.join(dir, 'docker-compose.hermit.yml'), 'services: {}\n');
@@ -2167,7 +2141,7 @@ describe('template-manifest doctor contract', () => {
   test('docker deployed WITH compose/Dockerfile template baselines → state ok', withTmpdir(async (dir) => {
     writeConfig(dir, {});
     seedState(dir, JSON.stringify({ version: 1, files: {
-      'templates/SHELL.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.0' },
+      'templates/HEARTBEAT.md.template': { sha256: 'a'.repeat(64), plugin_version: '1.2.0' },
       'docker/docker-compose.hermit.yml.template': { sha256: 'b'.repeat(64), plugin_version: '1.2.0' },
       'docker/Dockerfile.hermit.template': { sha256: 'c'.repeat(64), plugin_version: '1.2.0' },
     }}));
@@ -2326,7 +2300,7 @@ describe('proposal-act dispatch contract', () => {
   });
 
   test('queued Skill Improvement task carries the same guards as the in-main path', () => {
-    // NEXT-TASK.md is consumed by a later /session-start as ordinary work, so step (e) never
+    // Queued work is consumed in a later turn, so step (e) never
     // runs again — the guards have to travel in the bullet or the queued path can resurrect a
     // target deleted after queueing, or rewrite one already fixed
     const queued = skill.slice(skill.indexOf('- **"Queue a task"**'), skill.indexOf('- **"I\'ll handle it manually"**'));
@@ -2414,7 +2388,7 @@ describe('reflect routine gating contract (token efficiency)', () => {
 
 const DOCTOR_CHECK_IDS = [
   'runtime', 'config', 'hooks', 'state', 'cost', 'proposals', 'dependencies', 'version-currency',
-  'permissions', 'permission-rules', 'docker-security', 'archive', 'auto-close', 'reflect', 'scheduler', 'watchdog', 'context-age',
+  'permissions', 'permission-rules', 'docker-security', 'reflect', 'scheduler', 'watchdog', 'context-age',
   'opus-wake', 'routine-cost', 'heartbeat', 'routine-monitor', 'routine-precheck', 'raw-size', 'credential-expiry', 'model-pricing-known',
   'memory-size', 'passive-chats', 'context-scan', 'voice-carrier', 'overlay-hooks', 'classifier-denials', 'channel-liveness', 'peer-inbox',
   'backup',
@@ -2593,10 +2567,10 @@ describe('doctor context-age check', () => {
   }
 
   // cc_session_id is the resident's harness id — what the check resolves on, matching the
-  // watchdog's hygiene tiers. session_id is the S-NNN arc label and identifies nothing.
-  function writeRuntime(dir: string, sessionState: string, sessionId: string) {
+  // watchdog's hygiene tiers.
+  function writeRuntime(dir: string, sessionId: string) {
     fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'runtime.json'), JSON.stringify({
-      session_state: sessionState, session_id: 'S-001', cc_session_id: sessionId,
+      cc_session_id: sessionId,
       updated_at: new Date().toISOString(),
     }));
   }
@@ -2633,7 +2607,7 @@ describe('doctor context-age check', () => {
 
   test('active session, context under threshold → ok', withTmpdir(async (dir) => {
     writeConfig(dir, HYGIENE_CONFIG);
-    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeRuntime(dir, 'sess-1');
     writeCostLogEntry(dir, 'sess-1', 500);
     const c = caCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('ok');
@@ -2642,7 +2616,7 @@ describe('doctor context-age check', () => {
 
   test('active session, context over threshold, recent hygiene event → ok', withTmpdir(async (dir) => {
     writeConfig(dir, HYGIENE_CONFIG);
-    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeRuntime(dir, 'sess-1');
     writeCostLogEntry(dir, 'sess-1', 2000);
     writeSurface(dir, 500); // compactible 1500 > 1000 threshold
     writeHygieneEvent(dir, 'context-compact', 1);
@@ -2653,7 +2627,7 @@ describe('doctor context-age check', () => {
 
   test('active session, context over threshold, no recent hygiene event → warn', withTmpdir(async (dir) => {
     writeConfig(dir, HYGIENE_CONFIG);
-    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeRuntime(dir, 'sess-1');
     writeCostLogEntry(dir, 'sess-1', 2000);
     writeSurface(dir, 500); // compactible 1500 > 1000 threshold
     writeHygieneEvent(dir, 'context-compact', 48);
@@ -2667,7 +2641,7 @@ describe('doctor context-age check', () => {
   // must still warn — regression guard for the clear-tier skip that used to short-circuit here.
   test('active session, estimate-only entry over threshold → warn (compact-tier parity)', withTmpdir(async (dir) => {
     writeConfig(dir, HYGIENE_CONFIG);
-    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeRuntime(dir, 'sess-1');
     fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
     const entry = {
       timestamp: new Date().toISOString(), session_id: 'S-001', cc_session_id: 'sess-1',
@@ -2689,7 +2663,7 @@ describe('doctor context-age check', () => {
   // the pre-gate absolute default).
   test('no surface recorded → 50k assumed surface subtracted', withTmpdir(async (dir) => {
     writeConfig(dir, HYGIENE_CONFIG);
-    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeRuntime(dir, 'sess-1');
     writeCostLogEntry(dir, 'sess-1', 45000); // compactible −5000 ≤ 1000 threshold
     const c = caCheck(await runDoctorCheck(dir));
     expect(c.status).toBe('ok');
@@ -2699,7 +2673,7 @@ describe('doctor context-age check', () => {
   // Malformed surface file degrades to the assumed-surface fallback, never throws.
   test('malformed context-surface.json → fallback, no failure', withTmpdir(async (dir) => {
     writeConfig(dir, HYGIENE_CONFIG);
-    writeRuntime(dir, 'in_progress', 'sess-1');
+    writeRuntime(dir, 'sess-1');
     writeCostLogEntry(dir, 'sess-1', 52000); // compactible 2000 > 1000 threshold via 50k fallback
     fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'context-surface.json'), '{ truncated');
     writeHygieneEvent(dir, 'context-compact', 1);
@@ -3491,7 +3465,7 @@ describe('chat voice contract', () => {
   test('CLAUDE-APPEND.md documents the channel voice rule', () => {
     const append = read(path.join(TEMPLATES, 'CLAUDE-APPEND.md'));
     expect(append).toContain('Channel voice.');
-    expect(append).toContain('No internal IDs (PROP-NNN, S-NNN, MP-…)');
+    expect(append).toContain('No internal IDs (PROP-NNN, T-..., MP-…)');
   });
 
   test('channel-responder/SKILL.md mirrors the channel voice rule', () => {
@@ -3510,7 +3484,7 @@ describe('chat voice contract', () => {
 // Voice-carrier contract
 //
 // The hermit's tone rides in the SYSTEM PROMPT via a native Claude Code output
-// style, not in session-start context. That only works if the file Claude Code
+// style, not in resident-start context. That only works if the file Claude Code
 // loads carries exact frontmatter — a wrong `name` or a missing
 // keep-coding-instructions silently changes what the operator gets (no style, or
 // a hermit stripped of its engineering instructions). Hence verbatim assertions.
@@ -3853,21 +3827,6 @@ describe('heartbeat eval-runner return contract', () => {
 // ============================================================
 
 describe('determinized lifecycle wiring contract', () => {
-  test('curated session archives route re-derived knowledge to a durable home', () => {
-    const close = read(path.join(SKILLS, 'session-close', 'SKILL.md'));
-    expect(close).toContain('For question 2');
-    const question2 = close.slice(close.indexOf('For question 2'), close.indexOf('For question 3'));
-    expect(question2).toContain('remember it');
-    expect(question2).toContain('compiled/topic-');
-    expect(close).not.toContain('Substantial re-derived knowledge');
-    expect(close).toContain('Lessons: none');
-  });
-
-  test('session-close SKILL.md routes the --scheduled branch through the auto-close-decision verb', () => {
-    const skill = read(path.join(SKILLS, 'session-close', 'SKILL.md'));
-    expect(skill).toContain('auto-close-decision');
-  });
-
   test('reflect SKILL.md applies resolution actions via apply-reflection-actions.ts', () => {
     const skill = read(path.join(SKILLS, 'reflect', 'SKILL.md'));
     expect(skill).toContain('apply-reflection-actions.ts');
@@ -3880,7 +3839,7 @@ describe('determinized lifecycle wiring contract', () => {
 // Proposal-lifecycle state writes are fully script-mediated — the harness
 // background-isolation guard blocks the Write/Edit tools on the main-rooted
 // `.claude-code-hermit/` state dir, so proposal-create and proposal-act must
-// never fall back to those tools for a proposal-file or SHELL.md mutation.
+// never fall back to those tools for a proposal-file or task-record mutation.
 // ============================================================
 
 describe('proposal lifecycle: no tool-mediated state writes', () => {
@@ -3959,7 +3918,7 @@ describe('stale plugin runtime header', () => {
   test('check-upgrade.sh emits the header without an evolve directive', () => {
     expect(emitter).toContain(HEADER);
     // The branch may NAME hermit-evolve (to say it cannot help) but must never carry
-    // the slash-command directive form that session-start acts on, nor REQUIRED.
+    // the slash-command directive form that resident-start acts on, nor REQUIRED.
     const staleBranch = emitter.slice(emitter.indexOf(`echo "${HEADER}"`), emitter.indexOf('echo "---Upgrade Available---"'));
     expect(staleBranch.length).toBeGreaterThan(0);
     expect(staleBranch).not.toContain('/claude-code-hermit:hermit-evolve');

@@ -15,7 +15,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { setupGitWorkdir } from './helpers/workdir';
 
 // -------------------------------------------------------------------------
 // Fixture
@@ -163,51 +162,5 @@ describe('generate-summary with drifted cwd', () => {
 
     const wrongSummary = path.join(driftedCwd, '.claude-code-hermit', 'state', 'state-summary.md');
     expect(fs.existsSync(wrongSummary)).toBe(false);
-  });
-});
-
-// -------------------------------------------------------------------------
-// Tier 2: session-diff (debounce reads state/runtime.json — driven via stop-pipeline)
-// -------------------------------------------------------------------------
-//
-// session-diff's run() debounce reads state/runtime.json to decide whether to
-// skip the sidecar rewrite. Before the fix that path resolved via cwd, so a
-// drifted cwd made the read ENOENT → forceRefresh=true → the sidecar was rewritten
-// even when the debounce should have skipped. run() is only reachable through
-// stop-pipeline (the import.meta.main entry bypasses the debounce), so we drive it
-// there with a git-backed workdir (setupGitWorkdir seeds an uncommitted file, so
-// the bug path's captureDiff is non-empty and the rewrite is observable).
-
-describe('session-diff debounce with drifted cwd (#384 regression)', () => {
-  it('skips the sidecar rewrite when cwd is inside .claude-code-hermit/ (runtime.json resolved via hermitDir)', async () => {
-    const wd = setupGitWorkdir();
-    try {
-      const cch = path.join(wd.dir, '.claude-code-hermit');
-      // walk-up anchor: hermitDir() recovers the root via config.json
-      fs.writeFileSync(path.join(cch, 'config.json'), '{}');
-      fs.writeFileSync(path.join(cch, 'state', 'runtime.json'), '{"session_state":"in_progress"}');
-      const sidecar = path.join(cch, 'state', 'session-diff.json');
-      fs.writeFileSync(sidecar, '{"changed_files":[],"captured_at":"2026-01-01T00:00:00Z"}');
-      // Backdate 5s — still inside the 60s debounce window, so a rewrite is detectable.
-      const past = new Date(Date.now() - 5000);
-      fs.utimesSync(sidecar, past, past);
-      const before = fs.statSync(sidecar).mtimeMs;
-
-      await runScript('stop-pipeline.ts', {
-        stdin: '{}',
-        cwd: path.join(cch, 'state'),              // drifted: inside .claude-code-hermit/
-        env: {
-          ...driftEnv(),                           // force walk-up (relative AGENT_DIR + nonexistent CLAUDE_PROJECT_DIR)
-          AGENT_HOOK_PROFILE: 'standard',
-          CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT,
-        },
-      });
-
-      // After fix: in_progress + fresh sidecar → debounce skip → mtime unchanged.
-      // Before fix: runtime.json unreadable → forceRefresh → captureDiff rewrites it.
-      expect(fs.statSync(sidecar).mtimeMs).toBe(before);
-    } finally {
-      wd.cleanup();
-    }
   });
 });

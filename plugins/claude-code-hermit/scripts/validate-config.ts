@@ -449,7 +449,7 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
   }
 
   // A non-technical profile with no maintainer channel silently diverts every
-  // technical alert to SHELL.md Findings — the failure mode a client install
+  // technical alert to state/watchdog-events.jsonl — the failure mode a client install
   // would hit unnoticed. Surface it as a warning (doctor's config check reads these).
   if (config.operator_profile === 'non-technical') {
     const channels = config.channels && typeof config.channels === 'object' ? config.channels : {};
@@ -458,7 +458,7 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       typeof ch.maintainer_channel_id === 'string' && ch.maintainer_channel_id.length > 0);
     if (!hasMaintainer) {
       warnings.push(
-        'operator_profile is "non-technical" but no enabled channel sets maintainer_channel_id — technical alerts will be diverted to SHELL.md Findings',
+        'operator_profile is "non-technical" but no enabled channel sets maintainer_channel_id — technical alerts will be diverted to state/watchdog-events.jsonl',
       );
     }
   }

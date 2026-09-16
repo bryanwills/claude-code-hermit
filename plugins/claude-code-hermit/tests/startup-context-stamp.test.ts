@@ -26,7 +26,7 @@ function runtimePath(dir: string): string {
 function seedRuntime(dir: string, patch: Record<string, unknown> = {}): void {
   fs.writeFileSync(
     runtimePath(dir),
-    JSON.stringify({ version: 1, session_state: 'idle', tmux_session: null, ...patch }),
+    JSON.stringify({ version: 1, tmux_session: null, ...patch }),
   );
 }
 
@@ -71,7 +71,7 @@ describe('startup-context.ts — session launch stamp', () => {
       expect(runtime.config_dir).toBe(configDir);
       expect(runtime.env_auth).toBe(true);
       // Lifecycle fields survive the read-modify-write.
-      expect(runtime.session_state).toBe('idle');
+      expect(runtime.version).toBe(1);
       expect(fs.readFileSync(runtimePath(wd.dir), 'utf-8')).not.toContain(API_KEY);
     } finally {
       wd.cleanup();
@@ -126,7 +126,7 @@ describe('startup-context.ts — session launch stamp', () => {
     try {
       fs.writeFileSync(
         runtimePath(wd.dir),
-        JSON.stringify({ version: 1, session_state: 'idle', tmux_session: 'hermit-x', peer_name: 'Atlas' }),
+        JSON.stringify({ version: 1, tmux_session: 'hermit-x', peer_name: 'Atlas' }),
       );
       const res = await run(wd.dir, {
         HERMIT_MANAGED: '1',
@@ -202,8 +202,7 @@ describe('startup-context.ts — session launch stamp', () => {
   });
 
   // Issue #916: the hygiene tiers had no way to tell the resident's own context from any
-  // other session's in the folder. runtime.session_id is the S-NNN arc label (null between
-  // arcs, shared while one is open) and sessions/.status.json follows whoever wrote last.
+  // other session's in the folder. The identity must survive context changes.
   // Under HERMIT_MANAGED this hook IS the resident, so its payload id is the exact answer.
   it('managed session records its own Claude Code session id', async () => {
     const wd = setupWorkdir();

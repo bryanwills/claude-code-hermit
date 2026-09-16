@@ -15,9 +15,17 @@
 - Briefs, reflection, weekly reviews, status and cost reports use task records. Existing installations without records see empty task summaries until new work is recorded.
 - Resident startup uses `/claude-code-hermit:resident-start`; TASKS.md is injected at startup.
 - Duty summaries show requested behavior alongside observed execution.
+- Stopping the resident (`hermit-stop`, `hermit-docker down`, container SIGTERM) waits for the running turn to end, then runs `shutdown_skill` when set
+- The chat status reply reports the resident's current task record
+- Heartbeat self-evaluation and observation graduation count distinct days instead of sessions
+- Undeliverable maintainer alerts are logged to `state/watchdog-events.jsonl`
+- Watchdog compaction always keeps unfinished work in its summary
+- Cost-log rows no longer carry `session_id`; session counts use `cc_session_id`
 
 ### Removed
 - Session-based task selection and report readers. Historical session files remain frozen and searchable by recall.
+- `/claude-code-hermit:session-close`, the SHELL.md plan surface, and the 2h, 12h and midnight closes
+- The `compact` branch of `/claude-code-hermit:hermit-settings` (SHELL.md compaction thresholds)
 
 ### Upgrade Instructions
 

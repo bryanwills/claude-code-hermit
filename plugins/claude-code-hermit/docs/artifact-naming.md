@@ -44,7 +44,7 @@ compliant path table.
   rather than rewritten as dated copies.
 - **Required frontmatter:** `title:`, `type:`, `created:`, `tags:`, and a `source:`
   line pointing to the raw artifact(s) the compiled was derived from. Topic pages add
-  `updated:` and a one-line `summary:` (shown in the session-start catalog).
+  `updated:` and a one-line `summary:` (shown in the startup catalog).
 - **Session injection:** surfaced at session start via `scripts/startup-context.ts`.
   `foundational`-tagged files inject full bodies; everything else gets a one-line
   catalog entry (stem, type, date, tags + summary). Shared budget —
@@ -54,7 +54,7 @@ compliant path table.
 - **Foundational pinning:** tag a compiled artifact `foundational` to pin it to every
   session regardless of age.
 - **Example:** `compiled/audit-kitchen-2026-04-17.md`
-- **Procedure briefs** are a special `compiled/` type (`type: procedure-brief`, filename `procedure-brief-<slug>-<YYYY-MM-DD>.md`). They are audit records written by `reflect` when a recurring procedure is detected — not domain outputs meant for session-start injection. Do not tag them `foundational`. See [frontmatter-contract.md](frontmatter-contract.md) for the required fields.
+- **Procedure briefs** are a special `compiled/` type (`type: procedure-brief`, filename `procedure-brief-<slug>-<YYYY-MM-DD>.md`). They are audit records written by `reflect` when a recurring procedure is detected; not domain outputs meant for startup injection. Do not tag them `foundational`. See [frontmatter-contract.md](frontmatter-contract.md) for the required fields.
 
 ## state/ — runtime ledgers
 

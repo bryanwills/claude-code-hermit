@@ -9,7 +9,7 @@ export function taskFixture() {
   const dir = path.join(wd.dir, '.claude-code-hermit');
   const put = (name: string, value: unknown) => fs.writeFileSync(path.join(dir, name), JSON.stringify(value));
   put('config.json', {});
-  put('state/runtime.json', { session_state: 'in_progress' });
+  put('state/runtime.json', {});
   const run = (verb: string, args: string[] = [], stdin = '') => runScript('task.ts', { cwd: wd.dir, env: { AGENT_DIR: dir }, args: [verb, dir, ...args], stdin });
   const ok = async (verb: string, args: string[] = [], stdin = '') => {
     const r = await run(verb, args, stdin);

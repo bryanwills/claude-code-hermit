@@ -13,6 +13,8 @@ import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { setPause } from '../scripts/lib/pause';
+
 import { runScript } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
 
@@ -40,15 +42,9 @@ const writeArtifact = (dir: string, rel: string, body: string) => {
 };
 
 const precheck = (dir: string, id: string) =>
-  runScript('routines.ts', { args: ['precheck', id, 'true'], cwd: dir });
+  runScript('routines.ts', { args: ['precheck', id], cwd: dir });
 const finish = (dir: string, id: string, stdin = '') =>
   runScript('routines.ts', { args: ['finish', id, '--outcome-stdin'], cwd: dir, stdin });
-
-const progressLog = (dir: string) => {
-  const shell = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
-  return (shell.split(/^## Progress Log$/m)[1] ?? '').split(/^## /m)[0]
-    .split('\n').map((l) => l.trim()).filter(Boolean);
-};
 
 function withDir(fn: (dir: string) => Promise<void> | void) {
   return async () => {
@@ -212,7 +208,7 @@ describe('routines.ts finish — outcome line on stdin', () => {
     expect(r.exitCode).toBe(0);
   }));
 
-  test('lands exactly one Progress Log row, and never a second on a replayed fire', withDir(async (dir) => {
+  test('outcome input preserves one terminal row on a replayed fire', withDir(async (dir) => {
     writeConfig(dir, [
       { id: 'cal', schedule: '0 6 * * *', skill: 'x', enabled: true, expect_artifact: 'raw/s-{date}.md' },
     ]);
@@ -220,15 +216,12 @@ describe('routines.ts finish — outcome line on stdin', () => {
     await precheck(dir, 'cal');
     writeArtifact(dir, `raw/s-${todayUTC()}.md`, 'fresh content\n');
 
-    const before = progressLog(dir);
     expect((await finish(dir, 'cal', 'calendar snapshot refreshed\n')).stdout.trim()).toBe('fired');
-    const after = progressLog(dir);
-    expect(after).toHaveLength(before.length + 1);
-    expect(after.at(-1)).toMatch(/^- \[\d{2}:\d{2}\] calendar snapshot refreshed$/);
 
     // The re-triggered fire replays the recorded outcome; it is not a second fire.
     expect((await finish(dir, 'cal', 'calendar snapshot refreshed\n')).stdout.trim()).toBe('fired');
-    expect(progressLog(dir)).toEqual(after);
+    expect(events(dir, 'cal')).toEqual(['started', 'fired']);
+    expect(fs.existsSync(hermit(dir, 'sessions', 'SHELL.md'))).toBe(false);
   }));
 
   // Most routines declare no contract and so never get a run record, which is what the
@@ -238,40 +231,34 @@ describe('routines.ts finish — outcome line on stdin', () => {
     writeConfig(dir, [{ id: 'plain', schedule: '0 9 * * *', skill: 'x', enabled: true }]);
     await precheck(dir, 'plain');
 
-    const before = progressLog(dir);
     expect((await finish(dir, 'plain', 'plain routine did the thing\n')).stdout.trim()).toBe('fired');
-    const after = progressLog(dir);
-    expect(after).toHaveLength(before.length + 1);
-    expect(after.at(-1)).toMatch(/^- \[\d{2}:\d{2}\] plain routine did the thing$/);
 
     expect((await finish(dir, 'plain', 'plain routine did the thing\n')).stdout.trim()).toBe('fired');
-    expect(progressLog(dir)).toEqual(after);
     expect(events(dir, 'plain').filter((e) => e === 'fired')).toHaveLength(1);
 
     // A genuine next fire still lands its own row: precheck's `started` clears the replay.
     await precheck(dir, 'plain');
     expect((await finish(dir, 'plain', 'plain routine ran again\n')).stdout.trim()).toBe('fired');
-    expect(progressLog(dir)).toHaveLength(after.length + 1);
+    expect(events(dir, 'plain').filter((e) => e === 'fired')).toHaveLength(2);
   }));
 
-  test('empty stdin leaves SHELL.md untouched and stdout unchanged', withDir(async (dir) => {
+  test('empty stdin leaves retired journal absent and stdout unchanged', withDir(async (dir) => {
     writeConfig(dir, [{ id: 'plain', schedule: '0 9 * * *', skill: 'x', enabled: true }]);
     await precheck(dir, 'plain');
-    const before = fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8');
 
     const r = await finish(dir, 'plain', '   \n');
     expect(r.stdout).toBe('fired\n');
-    expect(fs.readFileSync(hermit(dir, 'sessions', 'SHELL.md'), 'utf-8')).toBe(before);
+    expect(fs.existsSync(hermit(dir, 'sessions', 'SHELL.md'))).toBe(false);
   }));
 
-  test('a failed contract still records its outcome line', withDir(async (dir) => {
+  test('a failed contract with outcome input still records failure', withDir(async (dir) => {
     writeConfig(dir, [
       { id: 'cal', schedule: '0 6 * * *', skill: 'x', enabled: true, expect_artifact: 'raw/s-{date}.md' },
     ]);
     await precheck(dir, 'cal');
     const r = await finish(dir, 'cal', 'calendar fetch produced nothing\n');
     expect(r.stdout.trim()).toMatch(/^failed\|artifact-missing\|/);
-    expect(progressLog(dir).at(-1)).toContain('calendar fetch produced nothing');
+    expect(events(dir, 'cal')).toEqual(['started', 'failed-artifact-missing']);
   }));
 });
 
@@ -303,8 +290,8 @@ describe('routines.ts finish — run record', () => {
     writeConfig(dir, [
       { id: 'cal', schedule: '0 6 * * *', skill: 'x', enabled: true, expect_artifact: 'raw/s-{date}.md' },
     ]);
-    fs.writeFileSync(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ session_state: 'waiting' }));
-    const r = await runScript('routines.ts', { args: ['precheck', 'cal', 'false'], cwd: dir });
+    setPause(hermit(dir), { reason: 'operator', by: 'test' });
+    const r = await runScript('routines.ts', { args: ['precheck', 'cal'], cwd: dir });
     expect(r.stdout.trim()).toBe('SKIP');
     expect(fs.existsSync(hermit(dir, 'state', 'routine-run.json'))).toBe(false);
   }));

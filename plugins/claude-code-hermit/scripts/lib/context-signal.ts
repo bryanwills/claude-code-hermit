@@ -67,8 +67,7 @@ export function compactibleTokens(entry: Json, surfaceUpperBound: number | null)
  * True when a cost-log entry is this session's own main turn.
  *
  * Three clauses, each load-bearing: `cc_session_id` is the harness id of the session that
- * produced the turn (`session_id` is the shared S-NNN arc label and matches every session
- * in the folder), subagent lines carry their own small token count rather than the main
+ * produced the turn, subagent lines carry their own small token count rather than the main
  * turn's context size, and a guest row can only carry the resident's id if it IS the
  * resident, which the marker denies. Rows predating `cc_session_id` never match, which
  * ages out as soon as the session logs a turn under the new cost-row shape.

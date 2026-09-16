@@ -27,7 +27,7 @@ Declare such dirs in `config.json`:
 
 The entry must be the **bare directory name** (`"forge-runtime"`, `"scripts"`), not a path (`".claude-code-hermit/scripts/"` or `"scripts/"`) — the check matches against `entry.name` from a directory listing, so a path-form entry silently fails to match and the drift warning keeps recurring.
 
-When a domain plugin calls hatch, its config rewrite appends each intentional directory name to `storage_drift.ignore` idempotently. The drift check (`scripts/lib/drift.ts`) reads this list at runtime and skips declared dirs — in both the session-start Storage Drift block and the reflect observations ledger.
+When a domain plugin calls hatch, its config rewrite appends each intentional directory name to `storage_drift.ignore` idempotently. The drift check (`scripts/lib/drift.ts`) reads this list at runtime and skips declared dirs; in both the startup Storage Drift block and the reflect observations ledger.
 
 Rules for a compliant plugin-owned dir:
 - One per domain plugin (keep it scoped).
@@ -71,7 +71,7 @@ tags: [home, sensors]
 ---
 ```
 
-Inside a session add `session: S-NNN`, and cite the artifact from the session report's `## Artifacts` section so the next session's `startup-context.ts` injection surfaces it. For compiled artifacts, add a `source:` citation pointing to the raw artifact(s) they were derived from:
+Inside an open record's turn add `task: T-...` and cite the artifact through `task.ts note`; omit the task field otherwise. `startup-context.ts` surfaces eligible compiled artifacts at startup. For compiled artifacts, add a `source:` citation pointing to the raw artifact(s) they were derived from:
 
 ```yaml
 source: raw/snapshot-home-2026-04-17.md

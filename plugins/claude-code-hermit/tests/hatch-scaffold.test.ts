@@ -88,7 +88,7 @@ describe('hatch-scaffold.ts', () => {
     expect(JSON.parse(fs.readFileSync(path.join(hermit, 'state', 'reflection-state.json'), 'utf8')).counters.since).toBe('CUSTOM');
     expect(fs.readFileSync(path.join(hermit, 'sessions', 'SHELL.md'), 'utf8')).toBe('live session\n');
 
-    // refreshed to pristine upstream content
+    // Retired operator copies remain frozen.
     const pristine = 'OLD STALE TEMPLATE\n';
     expect(fs.readFileSync(path.join(hermit, 'templates', 'SHELL.md.template'), 'utf8')).toBe(pristine);
 

@@ -6,7 +6,7 @@
 
 import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { compileCron } from '../scripts/lib/cron-match';
 import { validate } from '../scripts/validate-config';
@@ -106,12 +106,12 @@ describe('evaluateBackupDue', () => {
     }
   });
 
-  test('a dead lock holder does not block the window', async () => {
+  test('a dead lock holder does not block the window', () => {
     const h = hermitAt(freshDir());
     evaluateBackupDue(CONF(), h, new Date('2026-09-01T02:50:00Z'));
-    const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
-    const deadPid = dead.pid!;
-    await new Promise<void>(resolve => dead.on('exit', () => resolve()));
+    // spawnSync returns once the child has exited, so the pid is dead without
+    // waiting on an exit event (which never arrived on a loaded macOS runner).
+    const deadPid = spawnSync('true', { stdio: 'ignore' }).pid;
     fs.writeFileSync(path.join(h, 'state', '.backup.lock'), String(deadPid));
     expect(evaluateBackupDue(CONF(), h, new Date('2026-09-01T03:05:00Z'))).toBe(true);
   });
