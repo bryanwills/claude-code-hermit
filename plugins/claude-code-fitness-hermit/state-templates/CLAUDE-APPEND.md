@@ -16,7 +16,7 @@ Fitness skills and subagents self-advertise through their own SKILL.md / agent d
 
 ### Routines
 
-Routines `morning-brief`, `evening-brief`, `weekly-load-review`, and `monday-planning` run on their cron schedules; their prompts live at `.claude-code-hermit/compiled/routine-*.md` and their schedules and `enabled` state in `config.json` (edit via `/claude-code-hermit:hermit-settings`). The `weekly-coaching-patterns` routine gates the wake on a reported trend and routes findings through reflection gates into the proposal pipeline.
+Routines `morning-brief`, `evening-brief`, `weekly-load-review`, and `monday-planning` run on their cron schedules; they invoke domain skills directly, with schedules and `enabled` state in `config.json` (edit via `/claude-code-hermit:hermit-settings`). The `weekly-coaching-patterns` routine gates the wake on a reported trend and routes findings through reflection gates into the proposal pipeline.
 
 ### Conventions
 

@@ -37,8 +37,8 @@ orientation — a custom `--slot` follows whichever branch matches its resolved 
    - **Evening only:** call `mcp__strava__get-recent-activities` (`perPage: 5`), compare
      against `state/strava-last-activity-id.txt` (treat missing as "none"), and for any
      new activity whose Strava `type` is `Run`, invoke
-     `/claude-code-fitness-hermit:activity-deep-dive <id>` (cap 3 — log skipped IDs to
-     SHELL.md Progress Log past the cap). Advance the cursor file to the highest new ID.
+     `/claude-code-fitness-hermit:activity-deep-dive <id>` (cap 3; inside an open record's turn, pipe skipped IDs into
+     `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <task-id>`, otherwise skip the note). Advance the cursor file to the highest new ID.
      Hold the newest new activity's id/name/sport for step 4 — do **not** write
      `state/strava-pending-rpe.json` here. That file's writer contract (see `docs/knowledge-schema.md`
      and `CLAUDE.md` § Memory Conventions) is
@@ -83,8 +83,7 @@ orientation — a custom `--slot` follows whichever branch matches its resolved 
      glob-read the whole `brief-*.md` set.
 
 4. **Deliver** per the Operator Notification protocol in CLAUDE.md (core resolves the
-   channel and falls back to push / SHELL.md logging when no channel is reachable). Never
-   gate delivery on `session_state` — routines can fire while the terminal is unmonitored.
+   channel and falls back to push when no channel is reachable). Routines can fire while the terminal is unmonitored.
    Push-fallback: a single line per § Operator Notification push format, leading with
    the thing most worth knowing.
    - **Evening only, after a confirmed successful channel send** (not a push fallback, not
@@ -102,14 +101,12 @@ orientation — a custom `--slot` follows whichever branch matches its resolved 
    title: "<Morning|Evening> Brief — <YYYY-MM-DD>"
    type: brief
    created: <ISO 8601 with offset>
-   session: <current session ID from SHELL.md, or null>
+   task: <T-... for the open record in this turn; omit this field otherwise>
    tags: [<slot>-brief, fitness]
    ---
    ```
-   Body: the brief as delivered. Then append `- [[compiled/brief-<slot>-<date>]]` to
-   `.claude-code-hermit/sessions/SHELL.md` under `### Artifacts produced this session` in
-   `## Monitoring` (create the subsection if absent). Lifted into `## Artifacts` when
-   `/claude-code-hermit:session-close` archives the session.
+   Body: the brief as delivered. Inside an open record's turn, pipe the artifact citation
+   `[[compiled/brief-<slot>-<date>]]` into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <task-id>`. Otherwise skip the note.
 
 ## Security
 

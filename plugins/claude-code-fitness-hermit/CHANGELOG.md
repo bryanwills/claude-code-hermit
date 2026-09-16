@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Core 1.4.0 is required for task records and resident startup.
+- Scheduled routines invoke domain skills directly.
+
+### Upgrade Instructions
+
+In `.claude-code-hermit/config.json`, inspect each routine id below. Only when its `skill` is still `claude-code-hermit:session-start`, set `skill` to the mapped value and remove `prompt_file`. Preserve every other field. Leave entries with any other skill untouched.
+
+| Routine id | Skill |
+|---|---|
+| `morning-brief` | `claude-code-fitness-hermit:fitness-brief --morning` |
+| `evening-brief` | `claude-code-fitness-hermit:fitness-brief --evening` |
+| `weekly-load-review` | `claude-code-fitness-hermit:weekly-load-review` |
+| `monday-planning` | `claude-code-fitness-hermit:monday-planning` |
+
+Leave installed `compiled/routine-*.md` copies on disk. Run `/claude-code-hermit:hermit-routines load` after updating the registrations.
+
 ## [0.1.4] - 2026-09-12
 
 ### Changed

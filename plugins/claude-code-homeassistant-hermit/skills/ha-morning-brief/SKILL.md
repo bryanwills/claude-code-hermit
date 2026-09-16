@@ -21,7 +21,7 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
 
 1. **Time & context** — Call `GetDateTime` for current time. Read `.claude-code-hermit/OPERATOR.md` for priorities and language preferences.
 
-2. **Fetch overnight history**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha fetch-history --window-days 1`. On non-zero exit, log a single line to SHELL.md `## Monitoring` (`history fetch failed: <stderr first line>`) and skip the `Overnight:` section entirely — no fallback wording in the brief. On success, read `.claude-code-hermit/raw/snapshot-ha-history-1d-latest.json`.
+2. **Fetch overnight history**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha fetch-history --window-days 1`. On non-zero exit, pipe one line into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` only inside an open record's turn (otherwise skip the note) (`history fetch failed: <stderr first line>`) and skip the `Overnight:` section entirely: no fallback wording in the brief. On success, read `.claude-code-hermit/raw/snapshot-ha-history-1d-latest.json`.
 
 3. **Live house snapshot** — Call `GetLiveContext`. Extract and organize:
    - Presence (who is home/away)
@@ -40,18 +40,18 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
 
 6. **Context freshness** — Check `.claude-code-hermit/raw/snapshot-ha-context-latest.json` modification time. If older than 24h, note it as stale.
 
-7. **Overnight activity** — Read `.claude-code-hermit/sessions/SHELL.md`. Scan both the **Monitoring** section and the **Findings** section (last 20 lines combined). In newborn-phase hermits (< 3 days old), pattern observations land in Findings as `Noticed: <pattern>` entries — include those. Surface any alerts or notable patterns found overnight.
+7. **Overnight activity**: Read the latest HA pattern-analysis artifact, if present, and surface any alerts or notable overnight patterns alongside the history digest.
 
 8. **Cost-spike check** — Read `.claude-code-hermit/state/reflection-state.json` if it exists. Look for any `cost_spike` entry with a timestamp within the last 24 hours. If found, include a "Cost alert" bullet in the brief with the flagged amount.
 
 8a. **Pending updates**: Run `${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab ha updates --digest` and capture stdout. Branch on its content (the command always exits 0 — never branch on exit code):
-   - Contains `(skipped:` — log a single line to SHELL.md `## Monitoring` (`updates fetch failed: <detail after "skipped:">`) and omit the `Updates:` section entirely.
+   - Contains `(skipped:`: pipe one line into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` only inside an open record's turn (otherwise skip the note) (`updates fetch failed: <detail after "skipped:">`) and omit the `Updates:` section entirely.
    - Contains `(no updates pending)` — omit the `Updates:` section entirely.
    - Otherwise — render the digest lines as the `Updates:` section, translating tier labels into the operator's language. For each `[tier] Title: installed → latest` line (skip the `+ N more …` collapse line and the `[hacs]` aggregate line), `Glob` `.claude-code-hermit/proposals/PROP-*.md` for a `[ha-update]` proposal whose title carries the same tier and target version (e.g. `[ha-update] HA Core → 2026.7.1`) and append `(PROP-NNN)`; if none matches yet, render the line without an id. Step 9 reuses this glob result when this branch ran it.
 
 9. **Pending work** — Scan for:
    - `Glob` `.claude-code-hermit/proposals/PROP-*.md` (reuse step 8a's glob result if its `Otherwise` branch already ran it; otherwise run the `Glob` here) — read status from each, list any `pending` proposals. Exclude a `pending` proposal whose title starts with `[ha-update]` **only when the `Updates:` section is present** (it surfaces there instead); when step 8a omitted the `Updates:` section (skipped fetch or no updates pending), keep `[ha-update]` proposals in this list so they are not lost
-   - Check if `.claude-code-hermit/sessions/NEXT-TASK.md` exists (queued task)
+   - Run `.claude-code-hermit/bin/hermit-run task list .claude-code-hermit --open --owner resident` for open and queued commitments
 
 <!-- keep in sync with plugins/claude-code-hermit/skills/brief/SKILL.md — same MP lifecycle protocol -->
 9a. **Micro-proposals lifecycle** — age the queue in one call: `.claude-code-hermit/bin/hermit-run proposal micro .claude-code-hermit brief-cycle`. This runs core's writer through the project-resident `bin/hermit-run`, which resolves core's plugin root (a static `../claude-code-hermit/…` path can't — HA's `${CLAUDE_PLUGIN_ROOT}` is `<cache>/<marketplace>/claude-code-homeassistant-hermit/<version>/` and the version segment isn't knowable from skill text). It performs the whole `follow_up_count` 0/1/2+ lifecycle atomically (re-nudges count-1 entries, expires count-2+ entries, records each expiry, prunes any entry whose `status` isn't `"pending"`) and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…],"dropped":[…]}`. Never hand-edit `state/micro-proposals.json`. Render from that verdict:
@@ -68,14 +68,11 @@ When both `claude-code-hermit` and `claude-code-homeassistant-hermit` are instal
    title: "Morning Brief — <YYYY-MM-DD>"
    type: brief
    created: <ISO8601>
-   session: <session_id from runtime.json, or null if absent>
+   task: <T-... for the open record in this turn; omit this field otherwise>
    tags: [morning-brief, ha]
    ```
-   Then append the following line to `.claude-code-hermit/sessions/SHELL.md` under a `### Artifacts produced this session` subsection in `## Monitoring` (create the subsection if absent):
-   ```
-   - [[compiled/brief-morning-<YYYY-MM-DD>]]
-   ```
-   This citation is lifted into `## Artifacts` when `/claude-code-hermit:session-close` archives the session.
+   Inside an open record's turn, pipe `[[compiled/brief-morning-<YYYY-MM-DD>]]` into
+   `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`. Otherwise skip the note.
 
 ## Output Format
 
@@ -119,6 +116,6 @@ Adapt the greeting and section headers to the operator's configured language. Ke
 
 ## Delivery
 
-- If invoked as a routine, or `config.always_on` is `true` in `.claude-code-hermit/config.json`: deliver the composed brief via the Operator Notification protocol in CLAUDE.md (core resolves the channel and falls back to push / SHELL.md logging when no channel is reachable). The terminal is unmonitored in always-on mode — never gate delivery on `session_state`. For the push-fallback branch, condense to a single line (per § Operator Notification push format): lead with any overnight anomaly or open `Awaiting decision:` count, then energy/cost if flagged. Example: `House OK overnight, 2 awaiting decision, 14kWh — open CC to view`.
+- If invoked as a routine, or `config.always_on` is `true` in `.claude-code-hermit/config.json`: deliver the composed brief via the Operator Notification protocol in CLAUDE.md (core resolves the channel and falls back to push when no channel is reachable). The terminal is unmonitored in always-on mode. For the push-fallback branch, condense to a single line (per § Operator Notification push format): lead with any overnight anomaly or open `Awaiting decision:` count, then energy/cost if flagged. Example: `House OK overnight, 2 awaiting decision, 14kWh: open CC to view`.
 - Otherwise (invoked on demand in an interactive session): output to terminal.
 - Never include secrets, tokens, or internal file paths in the brief.

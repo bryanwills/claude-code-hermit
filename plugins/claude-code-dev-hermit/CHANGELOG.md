@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Core 1.4.0 is required for task records and resident startup.
+- Development progress notes attach to the open task record for the current turn.
+
 ## [0.4.16] - 2026-09-14
 
 ### Removed

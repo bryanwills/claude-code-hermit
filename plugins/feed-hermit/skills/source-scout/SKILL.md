@@ -31,7 +31,7 @@ Proactively discover and add new RSS/web sources to `feed-sources.md`. Complemen
 2. **Identify gaps:**
    - Any P1 or P2 category with fewer than 3 active sources is a **gap category**.
    - Active story arcs with Watch keywords that no current source covers by name/domain are **arc gaps**.
-   - No gaps → log `source-scout: no gaps found` to SHELL.md Findings and stop.
+   - No gaps → pipe `source-scout: no gaps found` into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` only inside an open record's turn (otherwise skip the note) and stop.
 
 3. **Discover candidates** (up to 3 total across all gaps). Use WebSearch to find RSS feeds — for a
    category gap, search for RSS feeds / newsletters covering that category; for an arc gap, search for
@@ -45,7 +45,7 @@ Proactively discover and add new RSS/web sources to `feed-sources.md`. Complemen
 
 4. **Filter against existing sources:**
    - Skip any candidate whose domain already appears in `feed-sources.md`.
-   - Skip any candidate previously removed (check SHELL.md Monitoring/Findings for removal entries).
+   - Skip any candidate previously removed (check the source registry and operator policy for removal decisions).
    - Cap at 3 net-new candidates total.
 
 5. **Add / queue — branch on invocation context:**
@@ -68,8 +68,8 @@ Proactively discover and add new RSS/web sources to `feed-sources.md`. Complemen
    `feed-sources.md` manually) so verification happens with them present.
 
 6. **Log and report:**
-   - **No flag:** append to SHELL.md Findings: `source-scout: added N source(s): [name1, name2, ...]` (or `source-scout: 0 viable candidates found` if none survived). Additions are mentioned in the next brief.
-   - **`--scheduled`:** append to SHELL.md Findings: `source-scout (scheduled): queued N unverified candidate(s) for operator review` (or `source-scout (scheduled): 0 candidates found`).
+   - **No flag:** only inside an open record's turn, pipe the following into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` (otherwise skip the note): `source-scout: added N source(s): [name1, name2, ...]` (or `source-scout: 0 viable candidates found` if none survived). Additions are mentioned in the next brief.
+   - **`--scheduled`:** only inside an open record's turn, pipe the following into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` (otherwise skip the note): `source-scout (scheduled): queued N unverified candidate(s) for operator review` (or `source-scout (scheduled): 0 candidates found`).
 
 ## Notes
 

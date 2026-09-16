@@ -37,6 +37,6 @@ Add a new entry to `feed-sources.md`, enforcing the correct table format and sou
 
 4. **Confirm** — show the operator the new row before writing. Write only after confirmation.
 
-5. **Note in session** — append to SHELL.md Progress Log: `[HH:MM] Added source: {Name} ({Type}) to {Category}`.
+5. **Note in task**: inside an open record's turn, pipe the following into `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>`; otherwise skip the note: `[HH:MM] Added source: {Name} ({Type}) to {Category}`.
 
 6. **Mention in next brief** — new source additions are mentioned automatically in the next brief (no action needed here).

@@ -6,7 +6,7 @@ A fitness/training domain layer for `claude-code-hermit`: skills, a Strava data 
 
 - `skills/`: `hatch`, `fitness-brief` (`--morning|--evening|--slot <name>`; owns Strava connectivity, activity sync, RPE binding, and the Run deep-dive), `activity-deep-dive`, `capture-activity-rpe` (auto-triggered from channel replies), `set-rpe`, `weekly-coaching-patterns`, `domain-brainstorm` (operator-invoked only)
 - `agents/strava-data-cruncher.md`: Haiku bulk-aggregation subagent; owns the per-invocation API-call cap
-- `state-templates/compiled/routine-*.md`: routine prompt files `hatch` drops into the consumer's `compiled/`; `state-templates/CLAUDE-APPEND.md`: the Fitness Workflow block
+- `state-templates/CLAUDE-APPEND.md`: the Fitness Workflow block
 - `settings.json`: pre-approved permissions for read-class Strava MCP tools and hermit state writes
 - `docs/knowledge-schema.md`: work-product types, state-file owners and shapes, retention
 
@@ -21,7 +21,7 @@ A fitness/training domain layer for `claude-code-hermit`: skills, a Strava data 
 
 The `weekly-coaching-patterns` routine invokes `reflect --check-id weekly-coaching-patterns --check claude-code-fitness-hermit:weekly-coaching-patterns`. Hatch installs its pre-wake gate from `state-templates/bin/fitness-weekly-patterns-gate`.
 
-- The routine prompt files in `state-templates/compiled/` are not invokable skills; `hatch` registers them as `prompt_file:` entries in `config.json.routines` and core's `hermit-routines load` activates them. Renaming a prompt file means updating the registered path.
+- Routines invoke domain skills directly through `config.json.routines[].skill`; keep the registered skill names and arguments aligned with `skills/`.
 - Routine entries use the no-leading-slash form `"claude-code-fitness-hermit:<skill>"`; `boot_skill` in `hermit-meta.json` uses the leading-slash form. This plugin ships no `boot_skill`.
 - `raw/` holds ephemeral Strava pulls (aged out by `knowledge.raw_retention_days`), `compiled/` durable outputs (weekly plans and summaries, activity notes; injected at session start within `compiled_budget_chars`), `state/` machine files. Both `raw/` and `compiled/` are flat, per core's storage contract. Owners, shapes, and retention of `strava-last-activity-id.txt`, `strava-weekly-baselines.json`, `activity-notes.json` (durable, keyed by Strava activity ID), and `strava-pending-rpe.json` (written by the evening brief only after a confirmed channel send; consumed once by `capture-activity-rpe` within 24h) are in `docs/knowledge-schema.md`.
 - `MEMORY.md` (auto-memory) carries the athlete profile, training preferences, and notes.
