@@ -128,6 +128,8 @@ Run `/claude-code-hermit:hermit-evolve`. The evolve skill handles:
 
 1. **Imperative step title** — what to do, in one sentence.
 
+**Operator action required:** `.claude-code-hermit/bin/hermit-docker restart` (or `hermit-stop && hermit-start`).
+
 No `config.json` changes required.
 ```
 
@@ -147,6 +149,7 @@ No `config.json` changes required.
 3. **What belongs where:**
    - Why it changed → Changed/Fixed bullet.
    - What evolve executes → Upgrade Instructions (imperative, numbered).
+   - An action only the operator's environment can perform (restart, rebuild, host-side command) → one line after the numbered list, prefixed `**Operator action required:**` (canonical example: `.claude-code-hermit/bin/hermit-docker restart`). Never a numbered step and never a `**Note:**`.
    - Behavior deltas that need no action but operators should know → one final line after the numbered list, prefixed `**Note:**`. Not a step.
 
 **The Upgrade Instructions section is the most important part.** The evolve skill reads this to know what actions to take for each hermit. Non-imperative steps cause evolve to misparse or skip them.

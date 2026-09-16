@@ -93,7 +93,7 @@ Within `changelog_slice` (already ordered oldest-first), each version entry may 
 1. Find the `### Upgrade Instructions` section within each version's entry
 2. If found, execute every instruction in that section — these are the authoritative migration steps
 3. Collect any version-specific operator notes for the step-10 report (delegated mode has no operator to present to live)
-4. **Delegated mode:** if a step is interactive (poses an either/or), do not ask. Apply the non-destructive default (e.g. a delete/cleanup offer → keep the file; a single command such as `deny ask-only`) and note the outcome for step 10. If the step has **no safe default**, **defer** — skip it and record a verbatim deferred-migration block per the Delegated mode rules.
+4. **Delegated mode:** if a step is interactive (poses an either/or), do not ask. Apply the non-destructive default (e.g. a delete/cleanup offer → keep the file; a single command such as `deny ask-only`) and note the outcome for step 10. If the step has **no safe default**, **defer** — skip it and record a verbatim deferred-migration block per the Delegated mode rules. A step or line whose text begins with `**Operator action required:**` (numbered or not) is a third category: never execute it and never record it as a deferred-migration block; copy its text verbatim, marker included, into the Operator notes collected for step 10.
 
 The CHANGELOG.md `### Upgrade Instructions` sections are the single source of truth for migrations — do not skip or merely display them. The same pattern applies to sibling-hermit upgrades in Step 7.
 
@@ -263,7 +263,7 @@ For each entry in `plan.siblings`:
 
 - **Version gap (`up_to_date == false`):**
   - Read the sibling's `changelog_slice` (already bounded to the gap range, oldest-first).
-  - **Execute migrations** — within `changelog_slice`, find each version's `### Upgrade Instructions` section and execute every instruction in version order. Same rules as Step 2b: non-interactive default on ambiguous steps; defer if no safe default.
+  - **Execute migrations** — within `changelog_slice`, find each version's `### Upgrade Instructions` section and execute every instruction in version order. Same rules as Step 2b: non-interactive default on ambiguous steps; defer if no safe default; a step or line whose text begins with `**Operator action required:**` is copied verbatim into Operator notes, never executed and never deferred.
   - **Sync CLAUDE-APPEND block** — apply the Edit **only here, on a version gap**, branching on the sibling's flags first:
     - `sibling.claude_append_needs_render` → report `<name> block refresh deferred to /<name>:hatch (template requires rendering)`; apply no Edit. Core cannot render a template carrying `mode:` markers — that is the owning plugin's own hatch's job.
     - `sibling.resident_missing` → report `<name> resident-missing, run /<name>:hatch to install it`; apply nothing.

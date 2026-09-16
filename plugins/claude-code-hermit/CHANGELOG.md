@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `hermit-evolve` never executes an Upgrade Instructions line marked `**Operator action required:**` and relays it as its own bold line in every delivery mode
+- `hermit-evolve` reports a pending resident restart when `arm check` returns `RESTART_REQUIRED|command-drift` instead of saying nothing
+
 ## [1.4.0] - 2026-09-16
 
 ### Fixed

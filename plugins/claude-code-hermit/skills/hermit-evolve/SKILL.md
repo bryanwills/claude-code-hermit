@@ -75,7 +75,7 @@ Deferred for operator: <none | one or more verbatim blocks, each:>
 
 **Audit scope.** `whole-run` needs no mention — say nothing. On `version-only`, tell the operator once that this upgrade's config changes were not recorded in the settings history (the upgrade itself succeeded; only the attribution is missing), so a later "why did this setting change?" gets an honest answer instead of a confident wrong one.
 
-**Operator notes.** If `Operator notes` is non-empty, relay each line verbatim in the summary (and in the channel notice, in every delivery mode); these are the CHANGELOG's version-specific notes for the operator and the report is their only route out of the subagent. Omit the section when `none`.
+**Operator notes.** If `Operator notes` is not `none`, append every line to the delivered result as its own line, in every delivery mode (inline, direct-channel-reply, automated-maintainer). These are the CHANGELOG's version-specific notes for the operator and the report is their only route out of the subagent. Relay each line verbatim: a line starting with `**Operator action required:**` keeps that marker so it renders bold. Never fold these lines into the one-line summary and never merge them with deferred-migration text. Omit the section when `none`.
 
 **Sibling report integrity:** parse the finalizer JSON `siblings_confirmed` and `siblings_skipped`. Only names in `siblings_confirmed` may be reported as `vOLD->vNEW`. Any name in `siblings_skipped` must be reported as `SKIPPED-by-finalizer` — never as upgraded, even if Step 7 said it ran.
 
@@ -120,6 +120,7 @@ costs one Bash call instead of loading the routines skill. Route on its single l
   that changed routines shows up here as `fallback-drift`) and re-arms the heartbeat leg with it.
 - `ARM|heartbeat|…` alone — invoke `/claude-code-hermit:heartbeat start`.
 - `SKIP|paused` — the hermit is paused and fires nothing until resumed. Log the line; invoke nothing.
+- `RESTART_REQUIRED|command-drift`: arm nothing, then continue to delivery. Append this as its own line, delivered through the same route as Operator notes: **Operator action required:** the resident must be restarted to pick up the new plugin path (`.claude-code-hermit/bin/hermit-docker restart` or `hermit-stop && hermit-start`).
 - `ARM|…|check-error:<reason>` — state was unreadable, so nothing is safe to re-arm. Append that
   line and the manual `hermit-routines load` next action to the report.
 
@@ -130,7 +131,8 @@ the report.
 N settings added, M templates refreshed."` Omit segments where nothing changed. **Append the
 deferred/auto-applied segments**: settings set to defaults (Step 4), permission entries added (Step
 8), template conflicts parked as `.new` (Step 5), any deferred migrations, and the project-context
-reload notice when required — so the operator can follow up via `/hermit-settings`.
+reload notice when required — so the operator can follow up via `/hermit-settings`. **Append each
+non-`none` Operator notes line after that list**, one line each.
 
 - **Automated-maintainer:** deliver through `channel-send.ts --notice` with
   `{"maintainer":"<complete condensed result>"}` on stdin and no `client` leg. Follow CLAUDE-APPEND.md

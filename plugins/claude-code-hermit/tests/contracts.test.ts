@@ -1850,6 +1850,18 @@ describe('hermit-evolve delegation contract', () => {
     expect(skill).toContain('skills/hermit-evolve/SKILL.md');
     expect(skill).toContain('skills/hermit-evolve/reference.md');
   });
+
+  test('operator-action-required steps are notes, never executed or deferred', () => {
+    expect(reference).toContain('A step or line whose text begins with `**Operator action required:**` (numbered or not) is a third category');
+    expect(reference).toContain('never execute it and never record it as a deferred-migration block');
+    expect(reference).toContain('Same rules as Step 2b');
+    expect(skill).toContain('append every line to the delivered result as its own line');
+    expect(skill).toContain('Never fold these lines into the one-line summary');
+    expect(skill).toContain('never merge them with deferred-migration text');
+    expect(skill).toContain('keeps that marker so it renders bold');
+    expect(skill).toContain('RESTART_REQUIRED|command-drift');
+    expect(skill).toContain('arm nothing, then continue to delivery');
+  });
 });
 
 // ============================================================
