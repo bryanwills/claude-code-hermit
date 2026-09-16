@@ -447,7 +447,7 @@ Once the session exists, tell the operator:
 > - If `bypassPermissions`: you'll see the `--dangerously-skip-permissions` acknowledgement. Use the **arrow keys** to select **"Yes, I accept"**, then press **Enter**.
 > - If `auto`: you'll see "Enable auto mode?" with three options. Press **1** then **Enter** ("Yes, and make it my default mode") so the acknowledgement persists in the named volume and won't re-prompt on future restarts.
 >
-> After accepting, you'll see a **blank claude prompt** — that's expected during setup. The skill will send pair commands from here; don't type `/session` yourself.
+> After accepting, you'll see a **blank claude prompt** — that's expected during setup. The skill will send pair commands from here; don't type a command yourself.
 >
 > Then press **Ctrl+B, D** to detach.
 

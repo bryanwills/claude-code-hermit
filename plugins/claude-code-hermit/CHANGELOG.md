@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Interactive hatch, the `boot-skill` setting hint, and hatch and docker-setup guidance point at `/claude-code-hermit:resident-start` instead of the removed `/claude-code-hermit:session`
+
 ## [1.4.0] - 2026-09-16
 
 ### Fixed
