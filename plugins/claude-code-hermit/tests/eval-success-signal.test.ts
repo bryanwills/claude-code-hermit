@@ -14,6 +14,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { runScript, runProposal, SCRIPTS_DIR } from './helpers/run';
+import { costLogPath } from '../scripts/lib/cc-compat';
+import { costIndexPath, updateCostIndex } from '../scripts/lib/cost-log';
 
 // ---------- helpers ----------
 
@@ -63,10 +65,13 @@ globalThis.Date = class extends RealDate {
   let ids = recordIds.get(sdir);
   if (!ids) { ids = new Map(); recordIds.set(sdir, ids); }
   ids.set(label, record.id);
-  const indexPath = path.join(sdir, 'state', 'cost-index.json');
-  const index = fs.existsSync(indexPath) ? JSON.parse(fs.readFileSync(indexPath, 'utf8')) : { version: 4, by_task: {} };
-  index.by_task[record.id] = { [date.slice(0, 10)]: { cost: Number(cost), tokens: 10000 } };
-  fs.writeFileSync(indexPath, JSON.stringify(index));
+  const log = costLogPath(sdir);
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  fs.appendFileSync(log, JSON.stringify({
+    timestamp: date, bucket: 'tasks', task_id: record.id,
+    estimated_cost_usd: Number(cost), total_tokens: 10000,
+  }) + '\n');
+  updateCostIndex(log, costIndexPath(sdir));
 }
 
 /** Evaluate-mode run; asserts exit 0 and returns the parsed JSON verdict line. */

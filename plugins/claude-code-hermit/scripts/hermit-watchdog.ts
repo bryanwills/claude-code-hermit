@@ -34,7 +34,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
 import { readExecution, passesExecutionBoundary } from './lib/tasks';
-import { sha256 } from './lib/hash';
+import { contextPolicyHash } from './lib/context-policy';
 import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, friendlyBoundary, parseDuration as parseDurationMs } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
@@ -1389,28 +1389,6 @@ async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive
   const targets = [doHeartbeat ? 'heartbeat' : null, doRoutines ? 'routine-monitor' : null].filter(Boolean).join('+');
   appendEvent('monitor-rearm', `${targets} liveness stale`);
   process.stderr.write(`[watchdog] monitor re-arm "${sessionName}" (${targets})\n`);
-}
-
-export function contextPolicyHash(dir: string): string {
-  const read = (file: string) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
-  const configText = read(path.join(dir, 'config.json'));
-  // A malformed config settles to defaults elsewhere in the watchdog; hash its raw text
-  // rather than throwing out of main() ahead of the dead-session tiers.
-  let config: Json;
-  try { config = configText ? JSON.parse(configText) : {}; } catch { config = null; }
-  if (!config || typeof config !== 'object') config = { raw: configText };
-  delete config._hermit_versions;
-  for (const channel of Object.values(config.channels ?? {})) {
-    if (channel && typeof channel === 'object') {
-      delete (channel as Json).dm_channel_id;
-      delete (channel as Json).default_chat_id;
-    }
-  }
-  return sha256(JSON.stringify([
-    read(path.join(dir, 'OPERATOR.md')), read(path.join(dir, 'TASKS.md')),
-    read(path.join(path.dirname(dir), 'CLAUDE.local.md')),
-    read(path.join(path.dirname(dir), '.claude/settings.json')), config,
-  ]));
 }
 
 export function maybeStandaloneClear(config: Json, world: World = REAL_WORLD): string | null {

@@ -47,6 +47,19 @@ reply; the reason is in §2's Harness command bullet. A `[harness-command] refus
 line is the opposite case: nothing was recorded and the operator is owed the reason,
 so reply as usual.
 
+### Complete a task turn
+
+For a task assignment or update, follow this order after the authorization and routing checks below:
+
+1. **Accept an assignment.** Send the short "On it" acknowledgement through the channel, then create its record using the selected intake route in §2. Do this before reading task inputs or doing substantive work.
+2. **Do the work.** Use `/claude-code-hermit:task` for progress and result operations on the selected record.
+3. **Deliver and record the outcome.** Send the outcome through the channel. When it needs human acceptance, pipe that same outcome into `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts block .claude-code-hermit <id> --result-stdin` before ending the turn. Require the returned digest to say `listing: "unconfirmed"` with a positive `result_rev`; this saves the result and waits on the named approver or requester.
+4. **Acknowledge updates.** After a requested record change succeeds, acknowledge it through the channel, including short bookkeeping-only turns. A terminal summary does not complete this step. Confirmed results close through §2's existing revision and actor checks.
+
+Finished recommendations, drafts and reviews awaiting acceptance require `--result-stdin`. The `--waiting-on` / `--status-line` / `--next` form records a stall in unfinished work; it does not save a result. A stall digest after posting a finished outcome means result recording is still incomplete: run the result form before ending the turn.
+
+Inspect each command's result. If delivery or recording fails, report what remains incomplete through the available channel; do not claim the failed step succeeded.
+
 ### Message formatting
 
 When preparing a channel send, preserve the intended message content when encoding the tool

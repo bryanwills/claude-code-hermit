@@ -27,6 +27,7 @@ import { findResident, ownsResidentIdentity } from './lib/session-registry';
 import { defaultConfigDir, envAuthPresent } from './lib/setup-token';
 import { seedOperatorActivity } from './record-operator-action';
 import { clearGuest, markGuest, pruneGuestMarkers } from './lib/guest-marker';
+import { recordContextPolicy } from './lib/context-policy';
 
 type Json = any;
 
@@ -313,6 +314,7 @@ function main(source: string | null, sessionId: string | null) {
     emitCompactCapsule();
   } else {
     emitFullContext(source);
+    recordContextPolicy(AGENT_DIR);
   }
   // Always — a full-path clean scan clears a prior warning; the compact path
   // merges (it only scanned the capsule) so it can't clear a real warning.

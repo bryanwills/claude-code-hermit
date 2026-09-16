@@ -3,6 +3,9 @@
 ## [1.4.0] - 2026-09-16
 
 ### Fixed
+- Task reports retain lifetime cost and token totals beyond the 90-day index window.
+- Policy-change clearing has a baseline from the first full resident context load.
+- Channel task turns create records before substantive work, save posted results, and acknowledge record updates through the channel.
 - The channel reply reminder names the responder skill so a chat turn runs its intake (the first prompt after a boot or compaction loads it unconditionally)
 - A chat assignment opens its task record right after the "On it" reply, before the progress-card line
 
@@ -13,6 +16,8 @@
 
 ### Changed
 - Briefs, reflection, weekly reviews, status and cost reports use task records. Existing installations without records see empty task summaries until new work is recorded.
+- MCP `get_status` and `get_brief` expose task-backed status; `get_brief` falls back to the latest task report when no brief is saved.
+- `cost-report.ts session <task_id>` reports that task's attributed cost and tokens; retired session-window flags no longer select a reporting window.
 - Resident startup uses `/claude-code-hermit:resident-start`; TASKS.md is injected at startup.
 - Duty summaries show requested behavior alongside observed execution.
 - Stopping the resident (`hermit-stop`, `hermit-docker down`, container SIGTERM) waits for the running turn to end, then runs `shutdown_skill` when set
@@ -31,9 +36,9 @@
 
 Run `/claude-code-hermit:hermit-evolve`.
 - Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json migrate 1.4.0`. It removes `post_close_clear`, writes `context_hygiene.clear` with its defaults, drops the `daily-auto-close` routine, strips `run_during_waiting` from every routine, and rewrites a `boot_skill` of `/claude-code-hermit:session` or `/claude-code-hermit:session-start` to `/claude-code-hermit:resident-start` (a domain boot skill is left as is). Each edit is ledgered; the verb is idempotent.
-- Delete, if present: `.claude-code-hermit/state/pending-close.json`, `state/pending-close-drain.json`, `state/auto-idle-attempt.json`, `state/clear-requested.json`.
+- Delete, if present: `.claude-code-hermit/state/pending-close.json`, `.claude-code-hermit/state/pending-close-drain.json`, `.claude-code-hermit/state/auto-idle-attempt.json`, `.claude-code-hermit/state/clear-requested.json`.
 - Remove `session_state`, `waiting_reason`, `session_id`, `opened_at` and `closed_at` from `.claude-code-hermit/state/runtime.json` if present, preserving every other key.
-- If `.claude-code-hermit/sessions/NEXT-TASK.md` exists, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts open .claude-code-hermit --owner resident --requester operator --title "<its ## Task line>" --note-stdin < NEXT-TASK.md` so the queued work becomes a record, then delete the file; report the new record id.
+- If `.claude-code-hermit/sessions/NEXT-TASK.md` exists, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts open .claude-code-hermit --owner resident --requester operator --title "<its ## Task line>" --note-stdin < .claude-code-hermit/sessions/NEXT-TASK.md` from the project root. Only after it succeeds and returns the new record id, delete `.claude-code-hermit/sessions/NEXT-TASK.md` and report that id. On failure, leave the source file intact.
 - Remove `SHELL.md.template` and `SESSION-REPORT.md.template` entries from `.claude-code-hermit/state/template-manifest.json`. Leave `.claude-code-hermit/sessions/` and any `SHELL.md` on disk: they are frozen, not migrated.
 - Restart the resident with `hermit-docker update` or the operator's usual restart procedure; native monitors switch to the new plugin path only on restart.
 
