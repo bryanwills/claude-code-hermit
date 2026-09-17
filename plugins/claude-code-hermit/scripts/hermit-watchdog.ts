@@ -234,10 +234,9 @@ export function composeRestartMessage(reason: string, timezone: string, locale: 
   return WATCHDOG[locale].restart(hhmm, cause);
 }
 
-/** Operator-language message for a wedge episode: waking on the first notice, unresponsive after a failed wake. */
-export function composeWedgeMessage(timezone: string, locale: Locale = OPERATOR_LOCALE, escalated = false): string {
-  const hhmm = nowHHMM(timezone);
-  return escalated ? WATCHDOG[locale].wedge(hhmm) : WATCHDOG[locale].wedgeWaking(hhmm);
+/** Operator-language message for a wedge episode after a failed wake. */
+export function composeWedgeMessage(timezone: string, locale: Locale = OPERATOR_LOCALE): string {
+  return WATCHDOG[locale].wedge(nowHHMM(timezone));
 }
 
 /** Operator-language all-clear after a wedge episode that reached the notice stage. */
@@ -1182,29 +1181,23 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
     watchdogState.last_nudge_transport = 'typed';
     sendKeys(sessionName, '/claude-code-hermit:heartbeat run');
   }
-  // First notice of an episode is the waking wording. The stronger "isn't
-  // responding" string fires at most once, and only after the wake has failed
-  // (socket undelivered, or a second stale cycle). Keying on `consecutive === 1`
-  // alone re-fires when the operator-recency guard resets consecutive_stale to 0
-  // mid-episode (an operator poke isn't a heartbeat recovery); sticky flags,
-  // cleared only when the heartbeat actually recovers (the fresh-heartbeat
-  // branch in main), fix that.
-  const wakeFailed = socketUndelivered || consecutive >= 2;
-  let notify: 'waking' | 'escalated' | null = null;
-  if (!watchdogState.wedge_notified) {
-    watchdogState.wedge_notified = true;
-    notify = 'waking';
-  } else if (wakeFailed && !watchdogState.wedge_escalated) {
-    watchdogState.wedge_escalated = true;
-    notify = 'escalated';
-  }
+  // The first due nudge of an episode is silent: wake, log, push nothing. The
+  // "hasn't responded" string fires at most once, and only after the wake has
+  // failed (socket undelivered, a second stale cycle, or an earlier nudge this
+  // episode, since recovery clears last_nudge_at). The operator-recency guard
+  // resets consecutive_stale to 0 mid-episode (an operator poke isn't a heartbeat
+  // recovery), so the cycle count alone would miss a failed wake; the sticky
+  // flag, cleared only when the heartbeat actually recovers (the fresh-heartbeat
+  // branch in main), keeps the push to one.
+  const wakeFailed = socketUndelivered || consecutive >= 2 || nudgeAge !== null;
+  const notify = wakeFailed && !watchdogState.wedge_escalated;
+  if (notify) watchdogState.wedge_escalated = true;
   watchdogState.last_nudge_at = utcStamp();
   writeWatchdogState(watchdogState);
   const via = watchdogState.last_nudge_transport === 'socket' ? 'nudge-socket' : 'nudge';
   appendEvent(via, socketUndelivered ? `stale cycle ${consecutive} — socket undelivered` : `stale cycle ${consecutive}`);
   process.stderr.write(`[watchdog] nudged "${sessionName}" via ${watchdogState.last_nudge_transport} (stale cycle ${consecutive})\n`);
-  if (notify === 'waking') pushMaintainerOnly(composeWedgeMessage(timezone));
-  else if (notify === 'escalated') pushOperatorMessage(composeWedgeMessage(timezone, OPERATOR_LOCALE, true));
+  if (notify) pushOperatorMessage(composeWedgeMessage(timezone));
 }
 
 // --- Monitor-liveness re-arm (step 5) ---
@@ -2317,9 +2310,9 @@ async function main(): Promise<void> {
           // genuinely new wedge later can notify again. Clearing last_nudge_at re-arms
           // the nudge throttle for the same reason: a new episode's first probe should
           // fire immediately, not wait out the previous episode's window.
-          const recovered = watchdogState.wedge_notified === true;
+          const hadNudge = typeof watchdogState.last_nudge_at === 'string';
+          const recovered = watchdogState.wedge_escalated === true;
           watchdogState.consecutive_stale = 0;
-          watchdogState.wedge_notified = false;
           watchdogState.wedge_escalated = false;
           watchdogState.last_nudge_at = null;
           // Same re-arm, for the transport alternation: the next episode's first
@@ -2327,11 +2320,13 @@ async function main(): Promise<void> {
           watchdogState.last_nudge_transport = null;
           watchdogState.last_pane_hash = currentPaneHash;
           writeWatchdogState(watchdogState);
-          // Flag cleared before the send, as doNudge does: pushOperatorMessage blocks
+          // Flag cleared before the send, as doNudge does: the all-clear push blocks
           // for up to 12s, and a tick killed inside that window would otherwise leave
-          // wedge_notified set and repeat the all-clear on the next tick.
+          // wedge_escalated set and repeat the all-clear on the next tick.
           if (recovered) {
             pushMaintainerOnly(composeWedgeRecoveredMessage(timezone));
+          }
+          if (hadNudge) {
             appendEvent('wedge-recovered', 'heartbeat fresh');
           }
         }
