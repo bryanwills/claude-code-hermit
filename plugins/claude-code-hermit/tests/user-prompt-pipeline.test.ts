@@ -742,4 +742,18 @@ describe('resident task thread admission', () => {
       expect(result.stdout).toContain('[channel reply reminder]');
     }
   });
+
+  test('guild text channel with resident record is not labeled a task thread', async () => {
+    const wd = trackedWorkdir();
+    const dir = hermit(wd.dir);
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
+    fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { home: { type: 0, parent_id: null, guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
+    const opened = await runScript('task.ts', { args: ['open', dir, '--owner', 'resident', '--requester', 'discord:u1', '--conversation', 'discord:home', '--title', 'Channel work', '--done', 'Verified'], cwd: wd.dir });
+    expect(opened.exitCode).toBe(0);
+    const result = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: '<channel source="discord" chat_id="home" user="u1">continue</channel>' }), cwd: wd.dir,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain('[resident task thread');
+  });
 });
