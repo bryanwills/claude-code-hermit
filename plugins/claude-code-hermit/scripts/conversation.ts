@@ -1,9 +1,11 @@
+import path from 'node:path';
 import { isTrustedController } from './lib/channel-auth';
 import { pinStateDirOrExit } from './lib/cc-compat';
 import { createThread, isThreadType, lookupChat } from './lib/channel-chats';
 import { conversationHistory } from './lib/channel-log';
 import { readSettledConfig } from './lib/config-read';
-import { awaitAgent, bind, list, lookup, prune, unbind, update, type ConversationPatch } from './lib/conversations';
+import { awaitAgent, bind, helperStatus, list, lookup, prune, unbind, update, type ConversationPatch } from './lib/conversations';
+import { defaultConfigDir } from './lib/setup-token';
 
 function options(args: string[]): Record<string, string> {
   const result: Record<string, string> = {};
@@ -35,6 +37,12 @@ async function main(): Promise<void> {
   if (verb === 'list') {
     if (key) throw new Error('invalid-options');
     console.log(JSON.stringify(list(dir)));
+    return;
+  }
+  if (verb === 'helper-status') {
+    if (key) throw new Error('invalid-options');
+    const agentsText = Bun.spawnSync(['claude', 'agents', '--json', '--cwd', path.dirname(dir)], { env: process.env, timeout: 30_000 }).stdout.toString();
+    console.log(JSON.stringify(helperStatus(agentsText, path.join(defaultConfigDir(), 'jobs'), Date.now())));
     return;
   }
   if (verb === 'await-agent') {
