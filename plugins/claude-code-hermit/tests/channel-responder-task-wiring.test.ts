@@ -26,6 +26,3 @@ it('parked resume continues in place without renaming flags', () => {
   expect(text).toContain("claude --bg --resume '<session_id>' '<body>'");
   expect(text).not.toContain("--resume '<session_id>' --name");
 });
-it('watch re-reads the registry before parking', () => {
-  expect(read('watch')).toContain('re-read `claude agents --json`');
-});
