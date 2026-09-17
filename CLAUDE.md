@@ -6,6 +6,7 @@ Always launch Claude Code from this repo's root. A plugin dir's own `.claude-plu
 
 ## Conventions
 
+- **Model-facing prose:** Keep instructions concise. Assume the model already understands general concepts, and include explanations only when they add needed context. Use precise instructions for fragile operations and allow flexibility where multiple approaches are valid. Put conditional detail in supporting files linked directly from `SKILL.md`. Evaluate skills on every model intended to use them.
 - **Repository-wide tests:** use `bun run test` from the root with Bun 1.4 or newer. It handles plugin working directories, bounded parallelism, and shared root tests. For narrower changes, run the documented suite inside the plugin dir (`bun test` for core, HA, and Feed; `bash tests/run-all.sh` for Dev, Fitness, Forge, and Scribe).
 - **Independent versioning, tag `<slug>--v<X.Y.Z>`.** Domain plugins declare core compat as `required_core_version: ">=X.Y.Z"` in `.claude-plugin/hermit-meta.json`, mirrored by `requires` there and `dependencies` in `plugin.json`; `required_core_version` is what `doctor-check.ts` reads. Update all three together. All hermit-internal manifest extensions (`hermit.*`) live in hermit-meta.json.
 - **CC-version-gated work bumps the floor, never shims around it.** When a change depends on Claude Code behavior introduced at a version, raise that plugin's `min_claude_code_version` in hermit-meta.json; no feature detection or fallback paths for older CC.
