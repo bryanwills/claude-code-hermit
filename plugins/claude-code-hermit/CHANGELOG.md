@@ -4,6 +4,7 @@
 
 ### Changed
 - Bound helpers are no longer stopped after a report and are left to Claude Code's idle reclamation; follow-ups reach a still-alive helper directly
+
 ### Added
 - A status question in chat now reports what each background helper is doing and how recently it was active, including helpers without a thread
 
