@@ -3,6 +3,17 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": ".*reply$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/helper-report-relay.ts"],
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write",
         "hooks": [
           {
@@ -37,6 +48,17 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": ".*reply$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/helper-report-relay.ts"],
+            "timeout": 3
+          }
+        ]
+      },
       {
         "matcher": "(discord|telegram|imessage).*reply",
         "hooks": [

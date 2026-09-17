@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { Database } from 'bun:sqlite';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, test, expect, afterEach } from 'bun:test';
@@ -295,3 +296,27 @@ describe('channel-hook intake ack (PostToolUse)', () => {
     expect(fs.existsSync(hermit(dir, 'state', 'intake-ack.json'))).toBe(false);
   }));
 });
+
+
+test('recall captures a full 8192-character helper report with multi-byte unicode', withDir(async (dir) => {
+  const text = '界'.repeat(8192);
+  const stdin = JSON.stringify({
+    hook_event_name: 'PostToolUse',
+    tool_name: 'mcp__discord__reply',
+    tool_input: { chat_id: '123', text },
+  });
+  expect(text.length).toBe(8192);
+  const result = await runScript('channel-hook.ts', {
+    stdin, cwd: dir, env: { AGENT_DIR: hermit(dir) },
+  });
+  expect(result.exitCode).toBe(0);
+  expect(result.stderr).toBe('');
+  const db = new Database(hermit(dir, 'state', 'channel-log.sqlite'), { readonly: true });
+  try {
+    const rows = db.query("SELECT text FROM messages WHERE source = 'discord' AND chat_id = '123' AND direction = 'out'").all() as { text: string }[];
+    expect(rows).toHaveLength(1);
+    expect(Buffer.from(rows[0].text)).toEqual(Buffer.from(text));
+  } finally {
+    db.close();
+  }
+}));

@@ -99,7 +99,7 @@ Skills are namespaced `/claude-code-hermit:*`; the full set is listed in the plu
 
 ### Hooks
 
-The plugin manifest registers 13 shared hooks. The four resident-only hooks (`pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify`) ride the resident's launch overlay with absolute script paths. Claude Code reads this overlay at launch only, so a rewritten overlay needs a resident restart. Guest and helper sessions launched without it never load the four hooks. `hermit-start` seeds workspace trust before launch and refuses to boot without a written overlay; `hermit-doctor` checks the overlay and trust configuration with `overlay-hooks`.
+The plugin manifest registers 14 shared hooks. The four resident-only hooks (`pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify`) ride the resident's launch overlay with absolute script paths. Claude Code reads this overlay at launch only, so a rewritten overlay needs a resident restart. Guest and helper sessions launched without it never load the four hooks. `hermit-start` seeds workspace trust before launch and refuses to boot without a written overlay; `hermit-doctor` checks the overlay and trust configuration with `overlay-hooks`.
 
 | Hook                | Trigger      | Profile   | What it does                                           |
 | ------------------- | ------------ | --------- | ------------------------------------------------------ |

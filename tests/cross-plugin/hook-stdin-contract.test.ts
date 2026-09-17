@@ -72,6 +72,14 @@ const SPECS: Spec[] = [
     failExit: 0,
   },
   {
+    name: 'core/helper-report-relay',
+    script: 'plugins/claude-code-hermit/scripts/helper-report-relay.ts',
+    // Refuses (exit 2) only a readable placeholder it cannot resolve; a reply
+    // payload it cannot read passes through for the PostToolUse alarm.
+    benign: { hook_event_name: 'PreToolUse', tool_name: 'mcp__discord__reply', tool_input: { chat_id: '1', text: 'hello' } },
+    failExit: 0,
+  },
+  {
     name: 'core/settings-gate',
     script: 'plugins/claude-code-hermit/scripts/settings-gate.ts',
     benign: BASH_LS,

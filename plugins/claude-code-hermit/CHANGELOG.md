@@ -3,10 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- A bound helper's results and questions now reach the chat exactly as the helper wrote them instead of being retold by the agent
 - Bound helpers are no longer stopped after a report and are left to Claude Code's idle reclamation; follow-ups reach a still-alive helper directly
 
 ### Added
 - A status question in chat now reports what each background helper is doing and how recently it was active, including helpers without a thread
+- Stop hook holds a channel turn open once when "On it" went out with no task record, or with a resident record opened in a guild channel instead of a thread
 
 ### Fixed
 - `hermit-evolve` never executes an Upgrade Instructions line marked `**Operator action required:**` and relays it as its own bold line in every delivery mode
@@ -14,8 +16,9 @@
 - Interactive hatch, the `boot-skill` setting hint, and hatch and docker-setup guidance point at `/claude-code-hermit:resident-start` instead of the removed `/claude-code-hermit:session`
 - Discord guild text and announcement channels no longer get the resident task thread label
 
-### Added
-- Stop hook holds a channel turn open once when "On it" went out with no task record, or with a resident record opened in a guild channel instead of a thread
+### Upgrade Instructions
+- Run `/claude-code-hermit:hermit-evolve`.
+- Read the project `.gitignore`. Skip this edit if it contains `# .claude-code-hermit state is tracked here (backup: workspace mode)`; otherwise append `.claude-code-hermit/helper-reports/` if absent.
 
 ## [1.4.0] - 2026-09-16
 
