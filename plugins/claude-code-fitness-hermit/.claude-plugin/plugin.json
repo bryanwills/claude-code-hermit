@@ -7,13 +7,13 @@
       "version": "^1.4.0"
     }
   ],
-  "description": "Fitness/training layer for claude-code-hermit — Strava MCP integration, activity analysis skills, and routine templates for an autonomous training assistant",
+  "description": "Fitness coaching for Hermit, with read-only Strava access, activity analysis, training plans, and recovery flags.",
   "author": {
     "name": "gtapps",
     "url": "https://github.com/gtapps"
   },
   "repository": "https://github.com/gtapps/claude-code-hermit",
-  "homepage": "https://github.com/gtapps/claude-code-hermit",
+  "homepage": "https://github.com/gtapps/claude-code-hermit/tree/main/plugins/claude-code-fitness-hermit",
   "license": "MIT",
   "keywords": [
     "fitness",

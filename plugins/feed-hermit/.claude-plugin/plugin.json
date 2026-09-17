@@ -7,7 +7,7 @@
       "version": "^1.4.0"
     }
   ],
-  "description": "Feed-to-brief pipeline for claude-code-hermit — curated source registry, fetch/score/write/deliver/archive pipeline, weekly synthesis, and source-health analytics for an autonomous feed-reading assistant",
+  "description": "Scheduled briefs for Hermit from sources you choose, with story tracking, weekly summaries, and source-quality checks.",
   "author": {
     "name": "gtapps",
     "url": "https://github.com/gtapps"

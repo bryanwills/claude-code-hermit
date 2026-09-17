@@ -7,13 +7,13 @@
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
 </p>
 
-# Keep Claude Code working for you.
+# Your own local Claude Tag.
 
-If you know [Claude Tag](https://claude.com/docs/claude-tag/overview), the idea will feel familiar: hand Claude work through a [channel](https://code.claude.com/docs/en/channels), such as Discord, Telegram, or your custom integration, and get results back there.
+Run an always-on Claude Code agent on your machine or server, for you or your team. Use it from your terminal or the Claude app via [Remote Control](https://code.claude.com/docs/en/remote-control), or connect Discord, Telegram, or a custom Claude Code [channel](https://code.claude.com/docs/en/channels).
 
-Hermit is a Claude Code plugin that runs an always-on agent on your machine or server, for you or your team. Give it ongoing responsibilities: maintain research, monitor systems, run routines, and follow up on unfinished work. Between requests, it checks those responsibilities, carries progress across sessions, and reaches you when something needs attention.
+Give it ongoing responsibilities: maintain research, monitor systems, run routines, and follow up on unfinished work. Between requests, it checks those responsibilities, carries progress across sessions, and reaches you when something needs attention.
 
-Hermit is a **Claude Code always-on instance**, that means you can run on your **subscription**, connect your own MCP servers, add custom skills, and install other plugins to give your agent the tools and workflows it needs.
+Run it on your Claude subscription and extend it with your own MCP servers, skills, and plugins.
 
 <p align="center">
   <img src="plugins/claude-code-hermit/assets/cover.png" alt="Always-on Claude Code agent" />
