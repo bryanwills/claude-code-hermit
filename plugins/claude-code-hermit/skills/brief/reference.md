@@ -14,7 +14,9 @@ For morning, run `bun <plugin_root>/scripts/proposal.ts index .claude-code-hermi
 
 For evening and daily, select records whose `closed_at` date matches `today`, and open records whose `opened_at` date matches `today`. Populate `sessions_today` with task source paths as the compatibility `session` identifier and one-line title/outcome summaries. Populate `findings` from lessons and `tomorrow` from open work and waiting reasons. Do not count `cancelled` or `unconfirmed` as done.
 
-For default-no-session, summarize the most recent normalized record. Map `done` to `completed`, waiting work to `blocked`, and other outcomes to `partial`, naming the actual outcome in the summary. Use `opened_at` for date, empty tags, title for working_on, and waiting reason or open work for next_start_point. No records means null summary, never an archive fallback.
+For morning, evening and daily, populate `decisions` from report rows' decision lines stamped within the last day as `<task title>: <what changed, why>`, dropping timestamp and actor; otherwise an empty array.
+
+For default-no-session, summarize the most recent normalized record. Map `done` to `completed`, waiting work to `blocked`, and other outcomes to `partial`, naming the actual outcome in the summary. Use `opened_at` for date, empty tags, title for working_on, and waiting reason or open work for next_start_point. No records means null summary, never an archive fallback. Return an empty `decisions` array.
 
 ## Return value
 
@@ -27,6 +29,7 @@ Keep the existing compatibility keys below; `sessions_today` contains task recor
                        "status": "<completed|partial|blocked>", "next_start_point": "<text>" }|null,
   "sessions_today": [ { "session": "T-...", "summary": "<one-line>" } ],
   "findings": ["<text>"],
+  "decisions": ["<text>"],
   "tomorrow": ["<text>"],
   "pending_proposals": ["<PROP-NNN: title>"],
   "operator_priorities": ["<text>"],

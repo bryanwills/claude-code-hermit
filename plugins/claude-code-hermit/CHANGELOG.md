@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Morning, evening and daily briefs include decisions recorded on tasks, with what changed and why
+
 ### Changed
 - Shorter channel responder instructions and bounded formatting reads for routine messages
 

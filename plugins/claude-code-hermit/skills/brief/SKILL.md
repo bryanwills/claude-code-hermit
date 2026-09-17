@@ -31,6 +31,7 @@ Readers use `task-report.ts` for normalized task outcomes. Never open frozen ses
                        "status": "<completed|partial|blocked>", "next_start_point": "<text>" }|null,
   "sessions_today": [ { "session": "T-...", "summary": "<one-line>" } ],
   "findings": ["<text>"],
+  "decisions": ["<text>"],
   "tomorrow": ["<text>"],
   "pending_proposals": ["<PROP-NNN: title>"],
   "operator_priorities": ["<text>"],
@@ -52,6 +53,7 @@ Emphasize forward-looking content. Compose from runner JSON (see Dispatch above)
 - **Context recovery:** if `runner.report_summary` is non-null, use it for task context
 - If `config.always_on` is `true`: frame as "what happened overnight (activity since evening routine)"
 - If `config.always_on` is `false`: frame as "here's where things stand"
+- **Decisions:** use `runner.decisions` for what changed and why; omit the line when the array is empty
 - If `config.always_on` is `true`: run `bash "${CLAUDE_PLUGIN_ROOT}/scripts/check-upgrade.sh" "${CLAUDE_PLUGIN_ROOT}"` from the project root. If it emits an `---Upgrade Available---` section, append a final line to the brief: `⚠ Plugin update available: <the version line>` (pass the directive verbatim). If it emits `---Stale Plugin Runtime---` instead, append `⚠ Stale plugin install: <the notice>` — never label it an update, and never turn it into an evolve instruction (evolve cannot fix a stale install). Output nothing if the script is silent. (Interactive operators already see this notice at resident startup; the gate avoids double-notification.)
 
 After composing the morning brief, age the micro-proposal queue in one pass: run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts micro .claude-code-hermit brief-cycle`. It reads `state/micro-proposals.json`, runs the whole lifecycle atomically (re-nudges `follow_up_count` 1 entries, expires `follow_up_count` ≥2 entries and records each expiry, prunes any entry whose `status` isn't `"pending"`), and prints one JSON line `{"new":[…],"renudged":[…],"expired":[…],"dropped":[…]}` — never hand-edit the file or read it separately. Render straight from that verdict:
@@ -68,6 +70,7 @@ After composing the morning brief, age the micro-proposal queue in one pass: run
 Emphasize backward-looking content. Compose from runner JSON (see Dispatch above) and live main-session data:
 - **Tasks today:** use `runner.sessions_today` (the compatibility key contains task IDs and outcomes).
 - **Key findings:** use `runner.findings` from record lessons.
+- **Decisions:** use `runner.decisions` for what changed and why; omit the line when the array is empty.
 - **Tomorrow:** use `runner.tomorrow` from open records and waiting reasons.
 - **Duties:** append the requested and observed duty digest. Unconfirmed results remain open until checked, confirmed, or cancelled; report them without prompting for a session close.
 
@@ -95,7 +98,7 @@ Next: description of next action (or "No next action" if all done)
 
 ## Rules
 
-- One line per field; a reader on a phone should get the whole brief without scrolling. Extra lines only for the alert count and the proposal count
+- One line per field; a reader on a phone should get the whole brief without scrolling. Extra lines only for the alert count, the proposal count, and the decisions line in routine briefs
 - When delivered over a channel, replace every slash-command pointer in the template with the plain reply the operator can send (e.g. 'reply "start" to begin', 'ask me for a health check'); command names stay in terminal output
 - Use the record's date, not today's date
 - Include tags in the header only if they exist
@@ -107,4 +110,4 @@ Next: description of next action (or "No next action" if all done)
 
 When invoked with "brief today", "daily summary", or "what happened today":
 
-Compose from runner JSON (mode: `daily`). Use `runner.sessions_today`, `runner.findings`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done and proposals created/resolved.
+Compose from runner JSON (mode: `daily`). Use `runner.sessions_today`, `runner.findings`, `runner.decisions`, and `runner.tomorrow` for the day narrative. Format as a day-level summary covering: work done, decisions (what changed and why; omit the line when the array is empty), and proposals created/resolved.
