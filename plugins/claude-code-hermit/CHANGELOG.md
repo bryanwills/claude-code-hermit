@@ -8,6 +8,9 @@
 ### Changed
 - Shorter channel responder instructions and bounded formatting reads for routine messages
 
+### Fixed
+- A bound helper that ends a turn without a report no longer loops on repeating idle notices or drops silently out of its watch
+
 ## [1.4.1] - 2026-09-17
 
 ### Changed

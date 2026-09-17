@@ -117,8 +117,10 @@ alternate invocation, or weaker permission mode.
 4. Invoke `/claude-code-hermit:watch session <n> "<first 40 chars of the operator prompt>"`.
    That skill owns the subscription (`### Starting a session watch`) and the
    idle-notice relay (`### Handling idle notices`); do not re-implement either.
-   When it declines the subscription, the helper is still running: say so, and
-   give the `claude logs <id>` id as the way to check on it.
+   When it declines the subscription, pass on the reason it gives rather than
+   asserting one: the helper may still be running, or it may have finished its
+   first turn before the subscription landed. Either way, give the
+   `claude logs <id>` id as the way to check on it.
 
 ## Stuck helper
 
