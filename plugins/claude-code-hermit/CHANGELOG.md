@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Shorter channel responder instructions and bounded formatting reads for routine messages
+
 ## [1.4.1] - 2026-09-17
 
 ### Changed
