@@ -10,6 +10,7 @@ test('normalizes done, cancelled, unconfirmed and open while ignoring frozen rep
     const done = await f.open();
     await f.ok('block', [done.id, '--result-stdin'], 'Ready');
     await f.ok('lesson', [done.id], 'Useful lesson');
+    await f.ok('note', [done.id, '--decision'], 'Dropped the export, vendor API is read-only');
     await f.ok('close', [done.id, '--by', 'confirmed', '--actor', 'operator', '--result-rev', '1', '--reason-stdin'], 'Accepted');
     const cancelled = await f.open();
     await f.ok('cancel', [cancelled.id, '--actor', 'operator', '--reason-stdin'], 'Withdrawn');
@@ -21,6 +22,8 @@ test('normalizes done, cancelled, unconfirmed and open while ignoring frozen rep
     const records = readTaskReports(f.dir);
     expect(records.map(r => r.outcome)).toEqual(['done', 'cancelled', 'unconfirmed', 'open']);
     expect(records[0].lessons[0]).toContain('Useful lesson');
+    expect(records[0].decisions[0]).toContain('Dropped the export, vendor API is read-only');
+    expect(records[3].decisions).toEqual([]);
     expect(records[2].closed_at).toBeNull();
   } finally { f.cleanup(); }
 });

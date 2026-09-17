@@ -17,6 +17,7 @@ export interface TaskReport {
   waiting_on: string | null;
   cost: number;
   lessons: string[];
+  decisions: string[];
 }
 
 export function taskReport(dir: string, record: Task, cost = 0): TaskReport {
@@ -27,6 +28,7 @@ export function taskReport(dir: string, record: Task, cost = 0): TaskReport {
     requester: record.requester, due: record.due, waiting_on: record.waiting_on,
     cost,
     lessons: (extractSection(record.body, 'Lessons') ?? '').split('\n').map(line => line.trim()).filter(line => line.startsWith('- ')).map(line => line.slice(2)),
+    decisions: (extractSection(record.body, 'Decisions') ?? '').split('\n').map(line => line.trim()).filter(line => line.startsWith('- ')).map(line => line.slice(2)),
   };
 }
 

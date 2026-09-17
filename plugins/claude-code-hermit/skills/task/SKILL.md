@@ -15,7 +15,7 @@ Use `open --title ... --requester <sourceKey>:<user_id> --done ...` for assignme
 For work requested after the current work, open a resident record and state its queue position from the open-task ordering. After a close or cancel, continue with `next_queued` in the same turn when the digest names a record. Show the handle in cards and replies only when at least two tasks are open in that conversation; in DMs also require `config.tasks.handle_in_dm`.
 
 ## Progress and results
-Pipe one progress line into `note <id>`, pairing it with milestone card edits. Metadata flags include `--due`, `--card`, `--clear-waiting`, `--decision`, and `--approval "<actor>: <what>"`. A changed definition uses `note <id> --done ... --actor <human identity>`: it increments result_rev and clears the old result.
+Pipe one progress line into `note <id>`, pairing it with milestone card edits. Metadata flags include `--due`, `--card`, `--clear-waiting`, `--decision`, and `--approval "<actor>: <what>"`. When the operator or the work changes direction on an open record (scope dropped, date moved, approach swapped), pipe `<what changed>, <why>` into `note <id> --decision`. Ordinary progress stays a plain note. A changed definition uses `note <id> --done ... --actor <human identity>`: it increments result_rev and clears the old result.
 
 Post an outcome through the originating channel's reply tool, then pipe that same outcome into `block <id> --result-stdin` before ending the turn. For terminal-origin work, post it in the terminal. Require `listing: "unconfirmed"` and a positive `result_rev` in the digest before claiming the result is recorded. Finished recommendations, drafts and reviews awaiting acceptance use this result form.
 
