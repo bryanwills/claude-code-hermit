@@ -103,23 +103,29 @@ Start/stop decisions read from the runtime registry.
    case-sensitive, matching only the name that opens the row and not its
    trailing `[ref]`, kind, status, or tmux address. `ListAgents` omits this
    session from its own listing, so no self-exclusion is needed. Skip a match
-   that already has a live `peer-idle` entry for that target, and say which ones
-   you skipped. No match: answer
+   with a live `peer-idle` entry for that target, or one step 2 rules out because
+   its turn has already ended; say which ones you skipped and why. No match:
+   answer
    `No session matching <name> is reachable from here.` and do not write the
-   registry. One or more matches: show the operator each matched name with the
-   live status its row reports (`idle`, `busy`, `waiting`, `shell`; some rows
-   carry none, so show the name alone there) and wait for confirmation before
-   doing anything else — an already-idle match fires its notice as soon as it is
-   subscribed. On confirmation, run steps 2–5 below once per matched name, each
-   producing its own registry entry; do step 3's relay check on the first match
-   before subscribing to the rest, and if it comes back operator-only, stop
-   there and decline the whole set rather than subscribing the others.
+   registry. One or more remaining matches: show the operator each matched name
+   with the live status its row reports (`idle`, `busy`, `waiting`, `shell`; some
+   rows carry none, so show the name alone there) and wait for confirmation
+   before doing anything else. On confirmation, run steps 2–5 below once per
+   matched name, each producing its own registry entry; do step 3's relay check
+   on the first match before subscribing to the rest, and if it comes back
+   operator-only, stop there and decline the whole set rather than subscribing
+   the others.
 2. Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
    `message`: this is a pure subscription and costs the watched session nothing.
-   An already-idle target fires its notice at once for the turn that already
-   ended, so subscribe this way only to a target whose row shows it busy,
-   re-reading the row once when work was just sent to it. Arm a target you are
-   sending work to by passing `notify_when_idle: true` on that same `SendMessage`.
+   A target whose turn has already ended fires its notice at once for that same
+   turn, so never send a bodyless subscription to a row showing `idle` or
+   `waiting`, nor to a target you are sending work to: arm that one by passing
+   `notify_when_idle: true` on the same `SendMessage`, then record the entry with
+   steps 3 to 5. A session just launched or resumed with a prompt can take a
+   moment to show busy, so re-read its row once before deciding. When it still
+   shows `idle` or `waiting`, answer `<name> is not working on anything right
+   now, so there is no turn to watch; the next message sent to it arms the
+   watch.` and do not write the registry.
 3. Read the tool result: it says whether the notice will be shown to you or only
    to the operator. When it is operator-only (this session holds peer messages
    for approval, e.g. under `bypassPermissions`), no relay is possible — say so
@@ -225,7 +231,7 @@ Check conversation ownership before the unbound-helper relay below. Use `bun ${C
 - For matching progress, edit the recorded card with the supplied progress line using `edit_message`. For `PROGRESS <key> <gen> <id>: needs input`, also call the channel's `reply` tool into the binding's chat with text `[[helper-report <id>]]`; card edits do not notify. Use the report delivery-failure handling below if the reply is refused or the PostToolUse alarm fires. After successful delivery, run `update '<key>' --status idle`. Plain status lines only edit the card. With no editable card, omit the edit; do not create a new resident task or stop the helper.
 - On any bound lookup triggered by a chat message, read `claude agents --json` and match `name` to the record's `session_name`. If its `state` is `blocked`, edit the card with its needs-input status and run `update '<key>' --status idle`. Never stop a blocked helper. For a listed helper that is not `blocked`, read `bun ${CLAUDE_PLUGIN_ROOT}/scripts/conversation.ts .claude-code-hermit helper-status` and answer a pure liveness question from that row without forwarding it to the helper. When the row has a detail and the channel has an edit tool, edit the recorded card with that detail. Steering messages are still forwarded.
 - For a matching report, call the channel's `reply` tool into the binding's chat id with text `[[helper-report <id>]]` and the listed existing absolute files. After successful delivery, find the matching open helper task with `task.ts list .claude-code-hermit --conversation <key>` and record the result with `task.ts block .claude-code-hermit <task-id> --result-stdin < <binding.worktree>/.claude-code-hermit/helper-reports/<id>.md`, or use `task.ts close .claude-code-hermit <task-id> --by check --actor hermit --claim <linked-held-claim>` when held. Then edit the card to `Done: <one-line outcome>`. On a channel with no edit tool, use a short reply instead. After successful delivery, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/conversation.ts .claude-code-hermit update '<key>' --status parked` and remove its consumed `peer-idle` watch entry. If the reply is refused, say in the chat that the helper finished but its result could not be delivered (for a needs-input relay: that the helper has a question that could not be delivered). If the PostToolUse alarm fires, say the same and that the line above can be ignored, then retry the relay once. In both failure cases, keep the binding unparked and the task open without claiming completion. Anything the resident adds or corrects goes in a separate reply.
-- For an idle notice naming a bound helper with no report delivered for this generation, edit its card with the notice's status line, run `update '<key>' --status idle`, and remove the consumed watch entry. Re-arm nothing here: subscribing to an idle target refires at once, and the next message forwarded to the helper arms it. Never stop it or call the task complete just because a turn ended. A bound subscription-expiry notice renews the watch without claiming completion. A parked binding has already completed, so a late idle/expiry notice does nothing.
+- For an idle notice naming a bound helper with no report delivered for this generation, edit its card with the notice's status line, run `update '<key>' --status idle`, and remove the consumed watch entry. Re-arm nothing here: subscribing to an idle target refires at once, and the next message forwarded to the helper arms it. With that entry already gone, a repeat notice for the same turn changes nothing: edit no card and run no update. Never stop it or call the task complete just because a turn ended. A bound subscription-expiry notice renews the watch without claiming completion, but only while the helper's row still shows it working; otherwise leave arming to the next forwarded message. A parked binding has already completed, so a late idle/expiry notice does nothing.
 
 Return after handling a bound helper. Unbound helpers retain the following relay:
 
