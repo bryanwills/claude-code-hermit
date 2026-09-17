@@ -2,6 +2,7 @@ import { readTasks } from '../tasks';
 import { lookup } from '../conversations';
 import { resolveSlashCommand } from '../channel-slash-address';
 import { channelBotIdentity, isAllowedSender, isSelfMentioned } from '../channel-auth';
+import { cachedChat } from '../channel-chats';
 import { safeForLLM } from '../sanitize';
 import { capture } from './channel-reply-reminder';
 import type { StageContext, StageResult } from './types';
@@ -27,8 +28,10 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
   );
   const safeArgs = safeForLLM(args.slice(0, MAX_ARGS_LEN));
   if (!record) {
-    const residentTask = !conversationCommand && readTasks(ctx.dir).find(task => task.status === 'open'
-      && task.owner === 'resident' && task.conversation === key);
+    const residentTask = !conversationCommand
+      && (env.sourceKey !== 'discord' || ![0, 5].includes(cachedChat(ctx.dir, env.chatId)?.type ?? -1))
+      && readTasks(ctx.dir).find(task => task.status === 'open'
+        && task.owner === 'resident' && task.conversation === key);
     if (residentTask) {
       ctx.conversation = { key, owner: 'resident' };
       return { context: `[resident task thread ${safeForLLM(key)}]` };
