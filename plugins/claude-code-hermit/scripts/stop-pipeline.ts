@@ -2,12 +2,13 @@ import { observeExecution } from './lib/tasks';
 // stop-pipeline.ts — unified Stop hook
 // Reads stdin once, runs all stop stages in sequence, touches heartbeat.
 // Stages, in order: cost tracking, harness commands, heartbeat.
-// All stage output goes to stderr; nothing is emitted on stdout.
+// Stage output goes to stderr. A channel-intake checkpoint may emit a Stop block on stdout.
 
 import { run as costTracker } from './cost-tracker';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir, sessionId } from './lib/cc-compat';
 import { drainHarnessCommand } from './lib/harness-drain';
 import { isGuest } from './lib/guest-marker';
+import { intakeBlockReason } from './lib/intake-checkpoint';
 import { resolveHermitNowMs } from './lib/time';
 import { recordOperatorTurnEnd } from './record-operator-action';
 import fs from 'node:fs';
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
   }
 
   const guest = isGuest(STATE_DIR, sessionId(payload));
+  let blocked = false;
 
   // Operator-turn marker: whichever turn opened it is over — routines may fire.
   // Cleared before the stages, not after: this hook has a 15s timeout and the
@@ -51,10 +53,21 @@ async function main(): Promise<void> {
   // the starvation class issue #617 fixed, just time-bounded.
   if (!guest) {
     observeExecution(HERMIT_DIR, 'idle', sessionId(payload), null, null);
+    try {
+      if (payload.stop_hook_active !== true) {
+        const reason = intakeBlockReason(HERMIT_DIR, sessionId(payload));
+        if (reason) {
+          console.log(JSON.stringify({ decision: 'block', reason }));
+          blocked = true;
+        }
+      }
+    } catch (e: any) { console.error(`[stop-pipeline] intake-checkpoint: ${e.message}`); }
     let closedOperatorTurn = false;
-    try { fs.unlinkSync(TURN_FILE); closedOperatorTurn = true; } catch {}
-    // Quiet time runs from the operator turn's end.
-    if (closedOperatorTurn) recordOperatorTurnEnd(resolveHermitNowMs());
+    if (!blocked) {
+      try { fs.unlinkSync(TURN_FILE); closedOperatorTurn = true; } catch {}
+      // Quiet time runs from the operator turn's end.
+      if (closedOperatorTurn) recordOperatorTurnEnd(resolveHermitNowMs());
+    }
     // A Stop at all means the turn produced an assistant reply, so any stamp
     // stop-failure-stamp.ts left behind describes an episode that is over. Cleared
     // here, ahead of the stages, for the same reason the marker above is: a stage
@@ -73,7 +86,8 @@ async function main(): Promise<void> {
   // the hook that recorded it deliberately did NOT type, because it runs at turn START.
   // Runs before the heartbeat touch but after the accounting stages, so a /clear can
   // never race cost-tracker still reading the outgoing transcript.
-  if (!guest) {
+  // A blocked Stop continues the turn, so the pane is not idle yet.
+  if (!guest && !blocked) {
     try { drainHarnessCommand(HERMIT_DIR); }
     catch (e: any) { console.error(`[stop-pipeline] harness-command: ${e.message}`); }
   }

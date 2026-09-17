@@ -4,6 +4,8 @@ import path from 'node:path';
 import { describe, test, expect, afterEach } from 'bun:test';
 import { persistDmChannelId, isEligibleInboundReply } from '../scripts/channel-hook';
 import { validate } from '../scripts/validate-config';
+import { withDir } from './helpers/workdir';
+import { runScript } from './helpers/run';
 
 // The sender allow-list gate (channel-reply-reminder.ts isAllowedSender) and
 // validate-config both require channel IDs to be strings. If a channel plugin
@@ -241,4 +243,55 @@ describe('isEligibleInboundReply — transcript-derived eligibility', () => {
   test('a nonexistent transcript_path fails closed (not eligible)', () => {
     expect(isEligibleInboundReply({ transcript_path: '/nonexistent/path/transcript.jsonl' }, 'telegram', '123')).toBe(false);
   });
+});
+
+const hermit = (dir: string, ...p: string[]) => path.join(dir, '.claude-code-hermit', ...p);
+
+describe('channel-hook intake ack (PostToolUse)', () => {
+  const envFor = (dir: string) => ({ AGENT_DIR: hermit(dir) });
+
+  test('ack written with the payload session id', withDir(async (dir) => {
+    const r = await runScript('channel-hook.ts', {
+      stdin: JSON.stringify({
+        tool_name: 'mcp__discord__reply',
+        tool_input: { chat_id: '123', text: 'On it: the label.' },
+        session_id: 'sess-from-payload',
+      }),
+      cwd: dir,
+      env: envFor(dir),
+    });
+    expect(r.exitCode).toBe(0);
+    const ack = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'intake-ack.json'), 'utf8'));
+    expect(ack.session_id).toBe('sess-from-payload');
+    expect(ack.channel).toBe('discord');
+    expect(ack.chat_id).toBe('123');
+  }));
+
+  test('ack written with null when the payload has none', withDir(async (dir) => {
+    const r = await runScript('channel-hook.ts', {
+      stdin: JSON.stringify({
+        tool_name: 'mcp__telegram__reply',
+        tool_input: { chat_id: '456', text: 'On it' },
+      }),
+      cwd: dir,
+      env: envFor(dir),
+    });
+    expect(r.exitCode).toBe(0);
+    const ack = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'intake-ack.json'), 'utf8'));
+    expect(ack.session_id).toBeNull();
+  }));
+
+  test('plain reply is not written', withDir(async (dir) => {
+    const r = await runScript('channel-hook.ts', {
+      stdin: JSON.stringify({
+        tool_name: 'mcp__discord__reply',
+        tool_input: { chat_id: '123', text: 'All done.' },
+        session_id: 'sess-from-payload',
+      }),
+      cwd: dir,
+      env: envFor(dir),
+    });
+    expect(r.exitCode).toBe(0);
+    expect(fs.existsSync(hermit(dir, 'state', 'intake-ack.json'))).toBe(false);
+  }));
 });
