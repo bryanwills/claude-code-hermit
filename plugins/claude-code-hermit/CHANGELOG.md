@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.1] - 2026-09-17
 
 ### Changed
 - A bound helper's results and questions now reach the chat exactly as the helper wrote them instead of being retold by the agent
