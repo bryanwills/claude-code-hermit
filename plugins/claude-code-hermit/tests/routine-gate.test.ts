@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { runScript } from './helpers/run';
+import { verdictLine } from '../scripts/doctor-check';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
 import { validatePrecheckValue, validatePrecheckTimeout, resolveGate } from '../scripts/lib/routines/gate';
 
@@ -403,6 +404,20 @@ describe('routine gate — doctor builtin', () => {
     const r = await runDoctor(dir, ['--gate']);
     expect(['SKIP', 'WAKE']).toContain(r.stdout.trim());
   }), 30000);
+
+  test('--verdict prints failing check ids on one line and exits 1', withDir(async (dir) => {
+    writeConfig(dir, [ROUTINE({ id: 'doctor', precheck: 'doctor' })]);
+    const r = await runDoctor(dir, ['--verdict']);
+    expect(r.stdout).toMatch(/^FAIL [^\n]+\n$/);
+    expect(r.stdout.trim().slice('FAIL '.length).split(', ')).toContain('config');
+    expect(r.exitCode).toBe(1);
+  }), 30000);
+
+  test('verdictLine counts only failures', () => {
+    const checks = [{ id: 'runtime', status: 'ok' }, { id: 'cost', status: 'warn' }];
+    expect(verdictLine(checks)).toBe('OK');
+    expect(verdictLine([...checks, { id: 'config', status: 'fail' }])).toBe('FAIL config');
+  });
 });
 
 describe('precheck validation (pure)', () => {

@@ -2607,7 +2607,13 @@ function writeReport(checks: Json[], escalation?: DoctorEscalation, p: DoctorPat
   }
 }
 
+function verdictLine(checks: Json[]): string {
+  const failures = checks.filter((check) => check.status === 'fail').map((check) => check.id);
+  return failures.length === 0 ? 'OK' : `FAIL ${failures.join(', ')}`;
+}
+
 export {
+  verdictLine,
   checkPassiveChats,
   checkPermissionRules,
   checkRuntime, checkConfig, checkHooks, checkStateFiles,
@@ -2645,6 +2651,11 @@ if (import.meta.main) {
       const skip = escalation.new.length === 0 && escalation.persisted && escalation.prior_state_known;
       process.stdout.write((skip ? 'SKIP' : 'WAKE') + '\n');
       process.exit(0);
+    }
+    if (process.argv[3] === '--verdict') {
+      const line = verdictLine(checks);
+      process.stdout.write(line + '\n');
+      process.exit(line === 'OK' ? 0 : 1);
     }
     // Print the report JSON so skills/tests can capture it without re-reading.
     process.stdout.write(JSON.stringify(report, null, 2) + '\n');
