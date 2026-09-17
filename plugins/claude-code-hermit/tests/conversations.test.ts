@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { logMessage } from '../scripts/lib/channel-log';
-import { awaitAgent, bind, list, lookup, prune, unbind, update } from '../scripts/lib/conversations';
+import { awaitAgent, bind, helperStatus, list, lookup, prune, unbind, update } from '../scripts/lib/conversations';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('conversations-');
@@ -61,6 +61,79 @@ test('awaitAgent returns the listing once it appears and treats unparsable outpu
   expect(await awaitAgent('abcd1234', { timeoutMs: 300, readRegistry: () => 'broken' })).toBeNull();
 });
 
+function writeJob(jobsDir: string, id: string, body: string | object): void {
+  const dir = path.join(jobsDir, id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'state.json'), typeof body === 'string' ? body : JSON.stringify(body));
+}
+
+test('helperStatus joins a full job file and skips interactive registry entries', () => {
+  const jobsDir = freshDir();
+  writeJob(jobsDir, 'abcd1234', {
+    state: 'running',
+    detail: 'Reading foo.ts',
+    tempo: 'working',
+    needs: 'login required: run /login',
+    updatedAt: '2026-09-17T12:00:00.000Z',
+  });
+  const agents = JSON.stringify([
+    { id: 'abcd1234', kind: 'background', name: 'conv-x', sessionId: 'sess-1', state: 'running' },
+    { id: 'ffff0000', kind: 'interactive', name: 'resident', sessionId: 'sess-0', state: 'idle' },
+  ]);
+  expect(helperStatus(agents, jobsDir, Date.parse('2026-09-17T12:00:10.000Z'))).toEqual([{
+    name: 'conv-x',
+    sessionId: 'sess-1',
+    state: 'running',
+    detail: 'Reading foo.ts',
+    tempo: 'working',
+    needs: 'login required: run /login',
+    age_s: 10,
+  }]);
+});
+
+test('helperStatus degrades to registry fields when the job file is missing, malformed, or the id is invalid', () => {
+  const jobsDir = freshDir();
+  writeJob(jobsDir, '22222222', '{broken');
+  writeJob(jobsDir, '33333333', { state: 'running', tempo: 'working', updatedAt: 'not-a-date' });
+  const agents = JSON.stringify([
+    { id: '11111111', kind: 'background', name: 'a', sessionId: 'sa', state: 'running' },
+    { id: '22222222', kind: 'background', name: 'b', sessionId: 'sb', state: 'idle' },
+    { id: '33333333', kind: 'background', name: 'c', sessionId: 'sc', state: 'running' },
+    { id: 'not-hex', kind: 'background', name: 'd', sessionId: 'sd', state: 'running' },
+  ]);
+  expect(helperStatus(agents, jobsDir, Date.now())).toEqual([
+    { name: 'a', sessionId: 'sa', state: 'running' },
+    { name: 'b', sessionId: 'sb', state: 'idle' },
+    { name: 'c', sessionId: 'sc', state: 'running', tempo: 'working' },
+    { name: 'd', sessionId: 'sd', state: 'running' },
+  ]);
+});
+
+test('helperStatus omits empty detail and truncates long job fields', () => {
+  const jobsDir = freshDir();
+  writeJob(jobsDir, 'abcd1234', {
+    state: 'blocked',
+    detail: '',
+    tempo: 'blocked',
+    needs: 'n'.repeat(121),
+    updatedAt: '2026-09-17T12:00:00.000Z',
+  });
+  const row = helperStatus(JSON.stringify([
+    { id: 'abcd1234', kind: 'background', name: 'h', sessionId: 's', state: 'blocked' },
+  ]), jobsDir, Date.parse('2026-09-17T12:00:00.000Z'))[0];
+  expect(row).not.toHaveProperty('detail');
+  expect(row.needs).toBe('n'.repeat(120));
+  expect(row.tempo).toBe('blocked');
+  expect(row.age_s).toBe(0);
+});
+
+test('helperStatus returns an empty list for unparsable or non-array registry text', () => {
+  const jobsDir = freshDir();
+  expect(helperStatus('broken', jobsDir, 0)).toEqual([]);
+  expect(helperStatus('{}', jobsDir, 0)).toEqual([]);
+  expect(helperStatus('', jobsDir, 0)).toEqual([]);
+});
+
 // AGENT_DIR is applied last so an ambient one from the shell running the suite can
 // never outrank the fixture dir and trip the state-dir pin; a caller that wants a
 // mismatch sets AGENT_DIR in `env` explicitly.
@@ -102,6 +175,26 @@ if [ "$n" = 1 ]; then echo '[]'; else echo '[{"id":"abcd1234","sessionId":"abcd1
     stdout: 'ERROR|invalid-bg-id\n',
     code: 1,
   });
+});
+
+test('helper-status reads job detail from CLAUDE_CONFIG_DIR, not ~/.claude', async () => {
+  const dir = freshDir();
+  const configDir = freshDir();
+  writeJob(path.join(configDir, 'jobs'), 'abcd1234', {
+    state: 'running',
+    detail: 'Reading foo.ts',
+    tempo: 'working',
+    updatedAt: '2026-09-17T12:00:00.000Z',
+  });
+  const stub = fakeClaudePath(`#!/bin/sh
+echo '[{"id":"abcd1234","kind":"background","name":"conv-x","sessionId":"sess-1","state":"running"}]'
+`);
+  const result = await cli(dir, ['helper-status'], { ...stub, CLAUDE_CONFIG_DIR: configDir });
+  expect(result.code).toBe(0);
+  const rows = JSON.parse(result.stdout);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ name: 'conv-x', sessionId: 'sess-1', state: 'running', detail: 'Reading foo.ts', tempo: 'working' });
+  expect(await cli(dir, ['helper-status', 'x'])).toEqual({ stdout: 'ERROR|invalid-options\n', code: 1 });
 });
 
 test('CLI output and two concurrent updates both land', async () => {

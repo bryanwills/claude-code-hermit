@@ -81,11 +81,60 @@ export function unbind(dir: string, key: string): void {
   withStore(dir, true, store => { delete store[key]; });
 }
 
+const JOB_ID = /^[0-9a-f]{8}$/;
+const JOB_FIELD_CAP = 120;
+
+export type HelperStatusRow = {
+  name: unknown;
+  sessionId: unknown;
+  state: unknown;
+  detail?: string;
+  tempo?: string;
+  needs?: string;
+  age_s?: number;
+};
+
+function cappedField(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value === '') return undefined;
+  return value.slice(0, JOB_FIELD_CAP);
+}
+
+export function helperStatus(agentsText: string, jobsDir: string, nowMs: number): HelperStatusRow[] {
+  let agents: unknown;
+  try { agents = JSON.parse(agentsText); } catch { return []; }
+  if (!Array.isArray(agents)) return [];
+  const rows: HelperStatusRow[] = [];
+  for (const agent of agents) {
+    if (agent?.kind !== 'background') continue;
+    const row: HelperStatusRow = { name: agent.name, sessionId: agent.sessionId, state: agent.state };
+    const id = agent.id;
+    if (typeof id === 'string' && JOB_ID.test(id)) {
+      try {
+        const job = JSON.parse(fs.readFileSync(path.join(jobsDir, id, 'state.json'), 'utf8'));
+        if (job && typeof job === 'object' && !Array.isArray(job)) {
+          const rec = job as Record<string, unknown>;
+          const detail = cappedField(rec.detail);
+          if (detail) row.detail = detail;
+          if (typeof rec.tempo === 'string') row.tempo = rec.tempo;
+          const needs = cappedField(rec.needs);
+          if (needs) row.needs = needs;
+          if (typeof rec.updatedAt === 'string') {
+            const updated = Date.parse(rec.updatedAt);
+            if (Number.isFinite(updated)) row.age_s = Math.floor((nowMs - updated) / 1000);
+          }
+        }
+      } catch {}
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 export async function awaitAgent(
   bgId: string,
   opts: { timeoutMs: number; readRegistry: () => unknown },
 ): Promise<{ sessionId: string; cwd: string } | null> {
-  if (!/^[0-9a-f]{8}$/.test(bgId)) throw new Error('invalid-bg-id');
+  if (!JOB_ID.test(bgId)) throw new Error('invalid-bg-id');
   const deadline = Date.now() + opts.timeoutMs;
   while (true) {
     let agents: unknown = opts.readRegistry();
