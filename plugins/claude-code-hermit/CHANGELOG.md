@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- Bound helpers are no longer stopped after a report and are left to Claude Code's idle reclamation; follow-ups reach a still-alive helper directly
+
 ### Fixed
 - `hermit-evolve` never executes an Upgrade Instructions line marked `**Operator action required:**` and relays it as its own bold line in every delivery mode
 - `hermit-evolve` reports a pending resident restart when `arm check` returns `RESTART_REQUIRED|command-drift` instead of saying nothing
