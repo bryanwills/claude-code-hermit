@@ -7,17 +7,16 @@
 
 ### Added
 - A status question in chat now reports what each background helper is doing and how recently it was active, including helpers without a thread
+- Stop hook holds a channel turn open once when "On it" went out with no task record, or with a resident record opened in a guild channel instead of a thread
 
 ### Fixed
+- Stop hook holds a channel turn open once when it is ending without a reply sent through the channel
 - Watchdog no longer announces a liveness wake that succeeds, and notifies only when the agent does not respond
 - `hermit-evolve` never executes an Upgrade Instructions line marked `**Operator action required:**` and relays it as its own bold line in every delivery mode
 - `hermit-evolve` reports a pending resident restart when `arm check` returns `RESTART_REQUIRED|command-drift` instead of saying nothing
 - Interactive hatch, the `boot-skill` setting hint, and hatch and docker-setup guidance point at `/claude-code-hermit:resident-start` instead of the removed `/claude-code-hermit:session`
 - The post-upgrade doctor claim resolves held or did not hold instead of could not be checked with `doctor-check --verdict`
 - Discord guild text and announcement channels no longer get the resident task thread label
-
-### Added
-- Stop hook holds a channel turn open once when "On it" went out with no task record, or with a resident record opened in a guild channel instead of a thread
 
 ## [1.4.0] - 2026-09-16
 

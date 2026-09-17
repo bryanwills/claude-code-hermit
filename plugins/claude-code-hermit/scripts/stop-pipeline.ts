@@ -2,13 +2,14 @@ import { observeExecution } from './lib/tasks';
 // stop-pipeline.ts — unified Stop hook
 // Reads stdin once, runs all stop stages in sequence, touches heartbeat.
 // Stages, in order: cost tracking, harness commands, heartbeat.
-// Stage output goes to stderr. A channel-intake checkpoint may emit a Stop block on stdout.
+// Stage output goes to stderr. A channel checkpoint (intake or reply) may emit a Stop block on stdout.
 
 import { run as costTracker } from './cost-tracker';
 import { sessionCrons, backgroundTasks, ccVersion, hermitDir, sessionId } from './lib/cc-compat';
 import { drainHarnessCommand } from './lib/harness-drain';
 import { isGuest } from './lib/guest-marker';
 import { intakeBlockReason } from './lib/intake-checkpoint';
+import { replyBlockReason } from './lib/reply-checkpoint';
 import { resolveHermitNowMs } from './lib/time';
 import { recordOperatorTurnEnd } from './record-operator-action';
 import fs from 'node:fs';
@@ -55,7 +56,7 @@ async function main(): Promise<void> {
     observeExecution(HERMIT_DIR, 'idle', sessionId(payload), null, null);
     try {
       if (payload.stop_hook_active !== true) {
-        const reason = intakeBlockReason(HERMIT_DIR, sessionId(payload));
+        const reason = intakeBlockReason(HERMIT_DIR, sessionId(payload)) ?? replyBlockReason(HERMIT_DIR, payload);
         if (reason) {
           console.log(JSON.stringify({ decision: 'block', reason }));
           blocked = true;
