@@ -254,7 +254,6 @@ export interface WatchdogMessages {
   restart(hhmm: string, cause: string): string;
   restartCauseNotRunning(): string;
   restartCauseFrozen(): string;
-  wedgeWaking(hhmm: string): string;
   wedge(hhmm: string): string;
   wedgeRecovered(hhmm: string): string;
   pauseUntilResume(label: string): string;
@@ -276,7 +275,6 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
     restart: (hhmm, cause) => `Attempting to restart your agent at ${hhmm}: ${cause}.`,
     restartCauseNotRunning: () => "it wasn't running",
     restartCauseFrozen: () => 'it had frozen',
-    wedgeWaking: (hhmm) => `Your agent's heartbeat hasn't checked in, waking it (${hhmm}).`,
     wedge: (hhmm) => `Your agent hasn't responded in a while — checking on it now (${hhmm}).`,
     wedgeRecovered: (hhmm) => `Your agent is responding again, nothing to do (${hhmm}).`,
     pauseUntilResume: (label) => `Your agent is paused (${label}) until you resume it.`,
@@ -306,7 +304,6 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
     restart: (hhmm, cause) => `A tentar reiniciar o seu agente às ${hhmm}: ${cause}.`,
     restartCauseNotRunning: () => 'não estava a correr',
     restartCauseFrozen: () => 'tinha bloqueado',
-    wedgeWaking: (hhmm) => `O heartbeat do seu agente não fez check-in, estou a acordá-lo (${hhmm}).`,
     wedge: (hhmm) => `O seu agente não responde há algum tempo — estou a verificá-lo agora (${hhmm}).`,
     wedgeRecovered: (hhmm) => `O seu agente já está a responder, não precisa de fazer nada (${hhmm}).`,
     pauseUntilResume: (label) => `O seu agente está em pausa (${label}) até que a retome.`,
