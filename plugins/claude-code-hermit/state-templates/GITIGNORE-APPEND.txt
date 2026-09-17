@@ -23,6 +23,7 @@
 .claude-code-hermit/RESIDENT.md
 .claude-code-hermit/claude-settings.json
 .claude-code-hermit/dashboard-render.ts
+.claude-code-hermit/helper-reports/
 .claude/output-styles/hermit-voice.md
 .claude.local/
 CLAUDE.local.md

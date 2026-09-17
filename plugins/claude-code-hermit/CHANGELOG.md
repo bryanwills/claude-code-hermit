@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- A bound helper's results and questions now reach the chat exactly as the helper wrote them instead of being retold by the agent
 - Bound helpers are no longer stopped after a report and are left to Claude Code's idle reclamation; follow-ups reach a still-alive helper directly
 
 ### Added
@@ -17,6 +18,10 @@
 - Interactive hatch, the `boot-skill` setting hint, and hatch and docker-setup guidance point at `/claude-code-hermit:resident-start` instead of the removed `/claude-code-hermit:session`
 - The post-upgrade doctor claim resolves held or did not hold instead of could not be checked with `doctor-check --verdict`
 - Discord guild text and announcement channels no longer get the resident task thread label
+
+### Upgrade Instructions
+- Run `/claude-code-hermit:hermit-evolve`.
+- Read the project `.gitignore`. Skip this edit if it contains `# .claude-code-hermit state is tracked here (backup: workspace mode)`; otherwise append `.claude-code-hermit/helper-reports/` if absent.
 
 ## [1.4.0] - 2026-09-16
 

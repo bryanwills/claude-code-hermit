@@ -20,7 +20,13 @@ it('resident guild threads bypass helper binding', () => {
   expect(text).toContain('Never call `conversation.ts bind`');
   expect(text).not.toContain('/claude-code-hermit:session-start');
 });
-it('REPORT handling records result and validates sender as before', () => { const text = read('watch'); expect(text).toContain('task.ts block'); expect(text).toContain('generation'); });
+it('REPORT handling records result and validates sender as before', () => {
+  const text = read('watch');
+  expect(text).toContain('task.ts block');
+  expect(text).toContain('generation');
+  expect(text).toContain('[[helper-report <id>]]');
+  expect(text).toContain('--result-stdin <');
+});
 it('parked resume continues in place without renaming flags', () => {
   const text = read('channel-responder');
   expect(text).toContain("claude --bg --resume '<session_id>' '<body>'");
