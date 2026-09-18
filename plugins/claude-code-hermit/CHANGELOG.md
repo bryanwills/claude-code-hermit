@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.2] - 2026-09-18
 
 ### Added
 - Morning, evening and daily briefs include decisions recorded on tasks, with what changed and why
