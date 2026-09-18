@@ -7,7 +7,7 @@ import path from 'node:path';
 import { parseFrontmatter, globDirRecursive } from './frontmatter';
 import { serializeValue, writeFileAtomic } from './md-write';
 import { acquireLockWithWait, releaseLock } from './lockfile';
-import { checkKey, list as listConversations } from './conversations';
+import { checkKey } from './conversation-key';
 import { findResident } from './session-registry';
 import { compactibleTokens, isOwnTurn } from './context-signal';
 import { readContextSurface } from './context-surface';
@@ -20,7 +20,18 @@ const SLUG = /^[\w.:~+@;=-]+$/;
 const HOUR = 3600000;
 const requiredStrings = ['id', 'type', 'title', 'created', 'summary', 'audience', 'status', 'opened_at', 'requester', 'handle', 'owner'] as const;
 const nullableStrings = ['closed_at', 'closed_by', 'closed_actor', 'closed_reason', 'requester_name', 'origin_message_id', 'approver', 'due', 'conversation', 'card_chat_id', 'card_message_id', 'waiting_on', 'waiting_since', 'result', 'result_at', 'stall_at', 'stall_status', 'stall_next', 'dedupe_key', 'check'] as const;
-export type Task = Record<typeof requiredStrings[number], string> & Record<typeof nullableStrings[number], string | null> & { tags: string[]; claims: string[]; result_rev: number; body: string };
+const booleans = ['muted'] as const;
+export type Task = Record<typeof requiredStrings[number], string> & Record<typeof nullableStrings[number], string | null> & Record<typeof booleans[number], boolean> & { tags: string[]; claims: string[]; result_rev: number; body: string };
+// A worker owner is `worker:<agentId>`; the id is the harness's, not a conversation key.
+// An agent id is lowercase hex (probed shape: `a5670124e38fb50cb`); the charset keeps
+// the `worker:*` list wildcard, or any other non-id string, from being stored as an owner.
+const WORKER_OWNER = /^worker:[0-9a-f]{8,}$/;
+const validOwner = (value: string) => value === 'resident' || WORKER_OWNER.test(value);
+// The records that own a chat thread: one open record per conversation key, held by
+// the resident or by the worker it was handed to. The three hook paths that resolve a
+// thread from a chat id all read it from here.
+export const threadRecords = (dir: string): Task[] =>
+  readTasks(dir).filter(record => record.status === 'open' && record.conversation !== null && validOwner(record.owner));
 const clean = (value: string) => value.replace(/[\r\n]+/g, ' ');
 const iso = (value: string) => /^\d{4}-\d\d-\d\dT/.test(value) && Number.isFinite(Date.parse(value));
 
@@ -31,16 +42,13 @@ export function validateTask(record: Task): void {
   if (!TASK_ID.test(record.id) || record.type !== 'task' || !['open', 'closed'].includes(record.status)) fail();
   if (![null, 'check', 'confirmed', 'cancelled'].includes(record.closed_by)) fail();
   if (!Number.isInteger(record.result_rev) || record.result_rev < 0) fail();
+  for (const key of booleans) if (typeof record[key] !== 'boolean') fail();
   for (const key of ['tags', 'claims'] as const) if (!Array.isArray(record[key]) || record[key].some(x => typeof x !== 'string' || !SLUG.test(x))) fail();
   for (const key of ['created', 'opened_at', 'closed_at', 'due', 'waiting_since', 'result_at', 'stall_at'] as const) if (record[key] !== null && !iso(record[key]!)) fail();
   if (record.created !== record.opened_at || (record.status === 'closed') !== (record.closed_by !== null && record.closed_at !== null)) fail();
   if (!validRequester(record.requester) || !SLUG.test(record.handle)) fail();
   try { if (record.conversation !== null) checkKey(record.conversation); if (record.audience !== 'operator') checkKey(record.audience); } catch { fail(); }
-  if (record.owner !== 'resident') {
-    if (!record.owner.startsWith('helper:')) fail();
-    try { checkKey(record.owner.slice(7)); } catch { fail(); }
-    if (record.card_chat_id !== null || record.card_message_id !== null) fail();
-  }
+  if (!validOwner(record.owner)) fail();
 }
 
 export function decodeTask(text: string): Task {
@@ -56,6 +64,10 @@ export function decodeTask(text: string): Task {
     }
     if (!/^\d+$/.test(String(fm.result_rev))) throw new Error();
     fm.result_rev = Number(fm.result_rev);
+    for (const key of booleans) {
+      if (fm[key] !== undefined && fm[key] !== 'true' && fm[key] !== 'false') throw new Error();
+      fm[key] = fm[key] === 'true';
+    }
     const record = { ...fm, body: text.slice(end + 4).replace(/^\n/, '') } as Task;
     for (const key of nullableStrings) if (!(key in record)) record[key] = null;
     validateTask(record);
@@ -65,7 +77,7 @@ export function decodeTask(text: string): Task {
 
 export function encodeTask(record: Task): string {
   validateTask(record);
-  const keys = [...requiredStrings, ...nullableStrings, 'tags', 'claims', 'result_rev'] as const;
+  const keys = [...requiredStrings, ...nullableStrings, ...booleans, 'tags', 'claims', 'result_rev'] as const;
   // A bare `null` reads back as the null literal, so the string "null" must stay quoted.
   const encode = (value: unknown) => typeof value === 'string' ? (clean(value) === 'null' ? '"null"' : serializeValue(clean(value))) : serializeValue(value);
   return '---\n' + keys.map(key => `${key}: ${encode(record[key])}`).join('\n') + '\n---\n' + record.body;
@@ -112,9 +124,21 @@ function dateFlag(flags: TaskFlags, name: string): string | null {
   if (!iso(value)) throw new Error(`invalid-${name}`);
   return new Date(value).toISOString();
 }
+function ownerFlag(flags: TaskFlags): string {
+  // resident → worker:*, worker:* → worker:*, worker:* → resident. Re-stating the
+  // owner a record already has is a no-op, so only the shape is checked.
+  const value = flag(flags, 'owner') ?? '';
+  if (!validOwner(value)) throw new Error('invalid-owner');
+  return value;
+}
+function mutedFlag(flags: TaskFlags): boolean {
+  const value = flag(flags, 'muted');
+  if (value !== 'true' && value !== 'false') throw new Error('invalid-muted');
+  return value === 'true';
+}
 function card(record: Task, value: string | undefined): void {
   if (value === undefined) return;
-  if (record.owner !== 'resident') throw new Error('card-on-helper-task');
+  if (record.owner !== 'resident') throw new Error('card-on-worker-task');
   let input;
   try { input = JSON.parse(value); } catch { throw new Error('invalid-card'); }
   if (!input || typeof input.chat_id !== 'string' || !input.chat_id || typeof input.message_id !== 'string' || !input.message_id || Object.keys(input).some(key => !['chat_id', 'message_id'].includes(key))) throw new Error('invalid-card');
@@ -160,10 +184,7 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
       if (!validRequester(requester)) throw new Error('invalid-requester');
       const conversation = flag(flags, 'conversation') ?? null;
       try { if (conversation !== null) checkKey(conversation); } catch { throw new Error('invalid-conversation'); }
-      const owner = flag(flags, 'owner') ?? 'resident';
-      if (owner !== 'resident') {
-        try { if (!owner.startsWith('helper:')) throw new Error(); checkKey(owner.slice(7)); } catch { throw new Error('invalid-owner'); }
-      }
+      const owner = 'owner' in flags ? ownerFlag(flags) : 'resident';
       const dedupe = flag(flags, 'dedupe-key') ?? null;
       const existing = dedupe && records.find(r => r.status === 'open' && r.dedupe_key === dedupe);
       if (existing) return openDigest(existing, records, false);
@@ -178,6 +199,7 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
         requester, requester_name: flag(flags, 'requester-name') ?? null, origin_message_id: flag(flags, 'origin-message-id') ?? null,
         approver: flag(flags, 'approver') ?? null, due: dateFlag(flags, 'due'), conversation, handle, owner,
         dedupe_key: dedupe, claims: (flags.claim as string[] | undefined) ?? [], result_rev: 0,
+        muted: 'muted' in flags ? mutedFlag(flags) : false,
         body: '## Progress\n\n## Decisions\n\n## Approvals\n\n## Lessons\n\n## Outcome\n',
       } as Task;
       record.check = checkFlag(flags);
@@ -196,13 +218,15 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
       const actor = flag(flags, 'actor') ?? 'hermit';
       const line = clean(input.trim());
       if (verb === 'note') {
-        const metadata = ['due', 'card', 'check', 'decision', 'approval', 'done', 'clear-waiting'].some(key => key in flags);
+        const metadata = ['due', 'card', 'check', 'decision', 'approval', 'done', 'clear-waiting', 'owner', 'muted'].some(key => key in flags);
         if (!line && !metadata) throw new Error('empty');
         progress = !!line;
         if (line) append(record, flags.decision ? 'Decisions' : 'Progress', actor, line, now);
         if ('check' in flags && record.check !== checkFlag(flags)) { record.check = checkFlag(flags); record.result_rev++; }
         if ('due' in flags) record.due = dateFlag(flags, 'due');
         card(record, flag(flags, 'card'));
+        if ('owner' in flags) record.owner = ownerFlag(flags);
+        if ('muted' in flags) record.muted = mutedFlag(flags);
         if (flags['clear-waiting']) { record.waiting_on = null; record.waiting_since = null; }
         if ('done' in flags) {
           record.summary = required(flags, 'done');
@@ -306,14 +330,11 @@ function checkFlag(flags: TaskFlags): string | null {
 export function listTasks(dir: string, flags: TaskFlags = {}) {
   const records = readTasks(dir);
   const owner = flag(flags, 'owner');
-  if (owner && owner !== 'resident') {
-    if (!owner.startsWith('helper:')) throw new Error('invalid-owner');
-    if (owner !== 'helper:*') checkKey(owner.slice(7));
-  }
+  if (owner && owner !== 'worker:*' && !validOwner(owner)) throw new Error('invalid-owner');
   const limit = flags.limit === undefined ? 20 : Number(flags.limit);
   if (!Number.isInteger(limit) || limit < 1) throw new Error('invalid-limit');
   const selected = records.filter(r => (!flags.all || flags.open ? r.status === 'open' : true)
-    && (!owner || (owner === 'helper:*' ? r.owner.startsWith('helper:') : r.owner === owner))
+    && (!owner || (owner === 'worker:*' ? r.owner.startsWith('worker:') : r.owner === owner))
     && (!flags['with-check'] || !!r.check)
     && ['conversation', 'requester', 'handle', 'id', 'dedupe-key'].every(key => !flag(flags, key) || r[key === 'dedupe-key' ? 'dedupe_key' : key as 'id'] === flag(flags, key)));
   const rows = selected.slice(0, limit).map(r => ({ id: r.id, handle: r.handle, listing: taskListing(r, records), requester: r.requester, title: r.title, due: r.due, result_rev: r.result_rev, owner: r.owner, result: r.result, waiting_on: r.waiting_on, closed_by: r.closed_by, check: r.check }));
@@ -341,7 +362,9 @@ export function passesExecutionBoundary(dir: string, options: { minTokens?: numb
   const runtime = readJson(path.join(dir, 'state/runtime.json'));
   if (!execution.cc_session_id || execution.cc_session_id !== runtime?.cc_session_id) return { ok: false, reason: 'stale-identity' };
   if (!execution.at || Date.now() - Date.parse(execution.at) < 60000) return { ok: false, reason: 'idle-too-fresh' };
-  if (Object.values(listConversations(dir)).some(entry => entry.status === 'running')) return { ok: false, reason: 'helper-running' };
+  // The resident takes a record back (`note --owner resident`) before it posts a
+  // result or parks it, so ownership alone says whether a worker still holds it.
+  if (readTasks(dir).some(r => r.status === 'open' && r.owner.startsWith('worker:'))) return { ok: false, reason: 'worker-running' };
   const resident = findResident(runtime, runtime?.config_dir);
   if (resident && !['idle', 'shell'].includes(resident.status)) return { ok: false, reason: 'registry-busy' };
   if (options.minTokens !== undefined) {
@@ -373,7 +396,7 @@ export function bindTaskTurn(dir: string, id: string): void {
   writeFileAtomic(path.join(dir, 'state/task-turn.json'), JSON.stringify({ cc_session_id: execution.cc_session_id, task_ids: taskIds, at: keep ? previous.at : new Date().toISOString(), turn_id: execution.turn_id }) + '\n');
 }
 export type Bucket = 'tasks' | 'conversation' | 'duties';
-export interface TaskAttribution { task_id: string | null; task_ids?: string[]; bucket: Bucket; attribution: 'binding' | 'helper-conversation' | 'dispatch' | 'source'; binding_at?: string }
+export interface TaskAttribution { task_id: string | null; task_ids?: string[]; bucket: Bucket; attribution: 'binding' | 'dispatch' | 'source'; binding_at?: string }
 export const costBucket = (row: { bucket?: Bucket }): Bucket => row.bucket ?? 'conversation';
 export function resolveTaskAttribution(dir: string, session: string, source: string, lastObserved: string | null): TaskAttribution {
   const binding = readBinding(dir);
@@ -381,15 +404,6 @@ export function resolveTaskAttribution(dir: string, session: string, source: str
     try { fs.unlinkSync(path.join(dir, 'state/task-turn.json')); } catch {}
   } else if (binding && binding.cc_session_id === session && (!lastObserved || binding.at > lastObserved)) {
     return { task_id: binding.task_ids[0], ...(binding.task_ids.length > 1 ? { task_ids: binding.task_ids } : {}), bucket: 'tasks', attribution: 'binding', binding_at: binding.at };
-  }
-  const conversations = readJson(path.join(dir, 'state/conversations.json'));
-  const key = conversations && Object.keys(conversations).find(key => conversations[key]?.session_id === session);
-  if (key) {
-    let tasks: Task[] = [];
-    try { tasks = readTasks(dir); } catch { /* malformed record: fall back to source bucket, keep the cost row */ }
-    const owned = tasks.filter(r => r.owner === `helper:${key}`);
-    const record = owned.find(r => r.status === 'open') ?? owned.sort((a, b) => (b.closed_at ?? '').localeCompare(a.closed_at ?? ''))[0];
-    if (record) return { task_id: record.id, bucket: 'tasks', attribution: 'helper-conversation' };
   }
   return { task_id: null, bucket: source === 'heartbeat' || source.startsWith('routine:') ? 'duties' : 'conversation', attribution: 'source' };
 }

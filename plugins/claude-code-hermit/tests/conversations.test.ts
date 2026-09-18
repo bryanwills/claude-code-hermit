@@ -2,225 +2,18 @@ import { afterAll, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { logMessage } from '../scripts/lib/channel-log';
-import { awaitAgent, bind, helperStatus, list, lookup, prune, unbind, update } from '../scripts/lib/conversations';
 import { freshDirFactory } from './helpers/workdir';
 
 const { freshDir, cleanup } = freshDirFactory('conversations-');
 afterAll(cleanup);
-const key = 'discord:123';
-const input = { session_name: 'conv-discord-123', session_id: 'stable-session', worktree: '/tmp/task-worktree' };
 
-test('binding lifecycle and generation', () => {
-  const dir = freshDir();
-  expect(lookup(dir, key)).toBeNull();
-  bind(dir, key, input);
-  expect(lookup(dir, key)).toMatchObject({ ...input, generation: 1, card: null, muted: false, status: 'running' });
-  expect(lookup(dir, key)).not.toHaveProperty('bg_id');
-  for (const status of ['running', 'idle', 'parked', 'unknown'] as const) {
-    update(dir, key, { status });
-    expect(lookup(dir, key)?.status).toBe(status);
-  }
-  update(dir, key, { generation: '+1', muted: true, card: { chat_id: '123', message_id: '456' } });
-  expect(lookup(dir, key)).toMatchObject({ generation: 2, muted: true, card: { chat_id: '123', message_id: '456' } });
-  expect(Object.keys(list(dir))).toEqual([key]);
-  unbind(dir, key);
-  expect(lookup(dir, key)).toBeNull();
-});
-
-test('prune preserves empty or unparsable input and matches stable session ids only', () => {
-  const dir = freshDir();
-  bind(dir, key, input);
-  for (const text of ['', 'broken', '[]']) {
-    prune(dir, text);
-    expect(lookup(dir, key)?.status).toBe('running');
-  }
-  prune(dir, JSON.stringify([{ id: 'new-bg-id', sessionId: input.session_id }]));
-  expect(lookup(dir, key)?.status).toBe('running');
-  prune(dir, JSON.stringify([{ id: input.session_id, sessionId: 'different' }]));
-  expect(lookup(dir, key)?.status).toBe('unknown');
-  update(dir, key, { status: 'idle' });
-  prune(dir, '[{"sessionId":"other"}]');
-  expect(lookup(dir, key)?.status).toBe('unknown');
-  update(dir, key, { status: 'parked' });
-  prune(dir, '[{"sessionId":"other"}]');
-  expect(lookup(dir, key)?.status).toBe('parked');
-});
-
-test('awaitAgent returns the listing once it appears and treats unparsable output as unlisted', async () => {
-  let n = 0;
-  const found = await awaitAgent('abcd1234', {
-    timeoutMs: 3000,
-    readRegistry: () => {
-      n += 1;
-      return n === 1 ? [] : [{ id: 'abcd1234', sessionId: 'abcd1234-sess', cwd: '/w' }];
-    },
-  });
-  expect(found).toEqual({ sessionId: 'abcd1234-sess', cwd: '/w' });
-  expect(n).toBe(2);
-  expect(await awaitAgent('abcd1234', { timeoutMs: 300, readRegistry: () => [] })).toBeNull();
-  expect(await awaitAgent('abcd1234', { timeoutMs: 300, readRegistry: () => 'broken' })).toBeNull();
-});
-
-function writeJob(jobsDir: string, id: string, body: string | object): void {
-  const dir = path.join(jobsDir, id);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'state.json'), typeof body === 'string' ? body : JSON.stringify(body));
-}
-
-test('helperStatus joins a full job file and skips interactive registry entries', () => {
-  const jobsDir = freshDir();
-  writeJob(jobsDir, 'abcd1234', {
-    state: 'running',
-    detail: 'Reading foo.ts',
-    tempo: 'working',
-    needs: 'login required: run /login',
-    updatedAt: '2026-09-17T12:00:00.000Z',
-  });
-  const agents = JSON.stringify([
-    { id: 'abcd1234', kind: 'background', name: 'conv-x', sessionId: 'sess-1', state: 'running' },
-    { id: 'ffff0000', kind: 'interactive', name: 'resident', sessionId: 'sess-0', state: 'idle' },
-  ]);
-  expect(helperStatus(agents, jobsDir, Date.parse('2026-09-17T12:00:10.000Z'))).toEqual([{
-    name: 'conv-x',
-    sessionId: 'sess-1',
-    state: 'running',
-    detail: 'Reading foo.ts',
-    tempo: 'working',
-    needs: 'login required: run /login',
-    age_s: 10,
-  }]);
-});
-
-test('helperStatus degrades to registry fields when the job file is missing, malformed, or the id is invalid', () => {
-  const jobsDir = freshDir();
-  writeJob(jobsDir, '22222222', '{broken');
-  writeJob(jobsDir, '33333333', { state: 'running', tempo: 'working', updatedAt: 'not-a-date' });
-  const agents = JSON.stringify([
-    { id: '11111111', kind: 'background', name: 'a', sessionId: 'sa', state: 'running' },
-    { id: '22222222', kind: 'background', name: 'b', sessionId: 'sb', state: 'idle' },
-    { id: '33333333', kind: 'background', name: 'c', sessionId: 'sc', state: 'running' },
-    { id: 'not-hex', kind: 'background', name: 'd', sessionId: 'sd', state: 'running' },
-  ]);
-  expect(helperStatus(agents, jobsDir, Date.now())).toEqual([
-    { name: 'a', sessionId: 'sa', state: 'running' },
-    { name: 'b', sessionId: 'sb', state: 'idle' },
-    { name: 'c', sessionId: 'sc', state: 'running', tempo: 'working' },
-    { name: 'd', sessionId: 'sd', state: 'running' },
-  ]);
-});
-
-test('helperStatus omits empty detail and truncates long job fields', () => {
-  const jobsDir = freshDir();
-  writeJob(jobsDir, 'abcd1234', {
-    state: 'blocked',
-    detail: '',
-    tempo: 'blocked',
-    needs: 'n'.repeat(121),
-    updatedAt: '2026-09-17T12:00:00.000Z',
-  });
-  const row = helperStatus(JSON.stringify([
-    { id: 'abcd1234', kind: 'background', name: 'h', sessionId: 's', state: 'blocked' },
-  ]), jobsDir, Date.parse('2026-09-17T12:00:00.000Z'))[0];
-  expect(row).not.toHaveProperty('detail');
-  expect(row.needs).toBe('n'.repeat(120));
-  expect(row.tempo).toBe('blocked');
-  expect(row.age_s).toBe(0);
-});
-
-test('helperStatus returns an empty list for unparsable or non-array registry text', () => {
-  const jobsDir = freshDir();
-  expect(helperStatus('broken', jobsDir, 0)).toEqual([]);
-  expect(helperStatus('{}', jobsDir, 0)).toEqual([]);
-  expect(helperStatus('', jobsDir, 0)).toEqual([]);
-});
-
-// AGENT_DIR is applied last so an ambient one from the shell running the suite can
-// never outrank the fixture dir and trip the state-dir pin; a caller that wants a
-// mismatch sets AGENT_DIR in `env` explicitly.
 async function cli(dir: string, args: string[], env?: typeof process.env) {
   const child = Bun.spawn([process.execPath, path.resolve(import.meta.dir, '../scripts/conversation.ts'), dir, ...args], { stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...env, AGENT_DIR: env?.AGENT_DIR ?? dir } });
   const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
   return { stdout, code };
 }
 
-function fakeClaudePath(script: string): { PATH: string } {
-  const shimDir = freshDir();
-  const binDir = path.join(shimDir, 'bin');
-  fs.mkdirSync(binDir);
-  const claude = path.join(binDir, 'claude');
-  fs.writeFileSync(claude, script);
-  fs.chmodSync(claude, 0o755);
-  return { PATH: `${binDir}${path.delimiter}${process.env.PATH}` };
-}
-
-test('await-agent lists on the second registry read and times out when never listed', async () => {
-  const dir = freshDir();
-  const countFile = path.join(freshDir(), 'count');
-  fs.writeFileSync(countFile, '0');
-  const listed = fakeClaudePath(`#!/bin/sh
-n=$(($(cat '${countFile}') + 1))
-echo "$n" > '${countFile}'
-if [ "$n" = 1 ]; then echo '[]'; else echo '[{"id":"abcd1234","sessionId":"abcd1234-sess","cwd":"/w"}]'; fi
-`);
-  expect(await cli(dir, ['await-agent', '--bg-id', 'abcd1234', '--timeout', '5'], listed)).toEqual({
-    stdout: 'OK|abcd1234-sess|/w\n',
-    code: 0,
-  });
-  const empty = fakeClaudePath('#!/bin/sh\necho \'[]\'\n');
-  expect(await cli(dir, ['await-agent', '--bg-id', 'abcd1234', '--timeout', '1'], empty)).toEqual({
-    stdout: 'TIMEOUT|abcd1234\n',
-    code: 1,
-  });
-  expect(await cli(dir, ['await-agent', '--bg-id', 'nope'])).toEqual({
-    stdout: 'ERROR|invalid-bg-id\n',
-    code: 1,
-  });
-});
-
-test('helper-status reads job detail from CLAUDE_CONFIG_DIR, not ~/.claude', async () => {
-  const dir = freshDir();
-  const configDir = freshDir();
-  writeJob(path.join(configDir, 'jobs'), 'abcd1234', {
-    state: 'running',
-    detail: 'Reading foo.ts',
-    tempo: 'working',
-    updatedAt: '2026-09-17T12:00:00.000Z',
-  });
-  const stub = fakeClaudePath(`#!/bin/sh
-echo '[{"id":"abcd1234","kind":"background","name":"conv-x","sessionId":"sess-1","state":"running"}]'
-`);
-  const result = await cli(dir, ['helper-status'], { ...stub, CLAUDE_CONFIG_DIR: configDir });
-  expect(result.code).toBe(0);
-  const rows = JSON.parse(result.stdout);
-  expect(rows).toHaveLength(1);
-  expect(rows[0]).toMatchObject({ name: 'conv-x', sessionId: 'sess-1', state: 'running', detail: 'Reading foo.ts', tempo: 'working' });
-  expect(await cli(dir, ['helper-status', 'x'])).toEqual({ stdout: 'ERROR|invalid-options\n', code: 1 });
-});
-
-test('CLI output and two concurrent updates both land', async () => {
-  const dir = freshDir();
-  expect(await cli(dir, ['bind', key, '--session-name', input.session_name, '--session-id', input.session_id, '--worktree', input.worktree])).toEqual({ stdout: `OK|${key}\n`, code: 0 });
-  const results = await Promise.all([
-    cli(dir, ['update', key, '--generation', '+1', '--muted', 'true']),
-    cli(dir, ['update', key, '--generation', '+1', '--status', 'idle']),
-  ]);
-  expect(results.every(r => r.code === 0)).toBe(true);
-  expect(JSON.parse((await cli(dir, ['lookup', key])).stdout)).toMatchObject({ generation: 3, muted: true, status: 'idle' });
-  expect(await cli(dir, ['lookup', 'discord:missing'])).toEqual({ stdout: 'ERROR|not-found\n', code: 1 });
-  expect(await cli(dir, ['update', key, '--status', 'invalid'])).toEqual({ stdout: 'ERROR|invalid-status\n', code: 1 });
-  expect(fs.existsSync(path.join(dir, 'state', 'conversations.json.lock'))).toBe(false);
-});
-
-test('CLI session id refresh preserves generation, muted flag and card', async () => {
-  const dir = freshDir();
-  bind(dir, key, input);
-  const card = { chat_id: '123', message_id: '456' };
-  update(dir, key, { generation: '+1', muted: true, card });
-  expect(await cli(dir, ['update', key, '--session-id', 'resumed-session'])).toEqual({ stdout: `OK|${key}\n`, code: 0 });
-  expect(lookup(dir, key)).toMatchObject({ session_id: 'resumed-session', generation: 2, muted: true, card });
-});
-
-test('keyless verbs wrap the channel library calls', async () => {
+test('the channel library wrappers answer history, chat-lookup, thread-create and is-trusted', async () => {
   const dir = freshDir();
   const tokenDir = path.join(dir, 'discord');
   fs.mkdirSync(tokenDir, { recursive: true });
@@ -255,6 +48,9 @@ test('keyless verbs wrap the channel library calls', async () => {
     expect(await run('is-trusted', '--source', 'discord', '--user-id', 'u1', '--chat-id', '123')).toEqual({ stdout: 'OK|trusted\n', code: 0 });
     expect(await run('is-trusted', '--source', 'discord', '--user-id', 'u2', '--chat-id', '123')).toEqual({ stdout: 'ERROR|untrusted\n', code: 1 });
     expect(await run('is-trusted', '--source', 'discord', '--user-id', 'u1', '--chat-id', '123', '--name', 'x')).toEqual({ stdout: 'ERROR|invalid-options\n', code: 1 });
+    for (const verb of ['bind', 'update', 'unbind', 'lookup', 'list', 'prune', 'helper-status', 'await-agent']) {
+      expect(await run(verb, '--chat-id', '123')).toEqual({ stdout: 'ERROR|unknown-verb\n', code: 1 });
+    }
   } finally {
     server.stop(true);
   }
@@ -281,7 +77,7 @@ test("state dir must be this project's before reads or Discord requests", async 
   } });
   const env = { AGENT_DIR: ownDir, HERMIT_DISCORD_API_URL: server.url.toString().replace(/\/$/, ''), DISCORD_STATE_DIR: tokenDir };
   try {
-    expect(await cli(foreignDir, ['list'], env)).toEqual({ stdout: '', code: 1 });
+    expect(await cli(foreignDir, ['history', '--source', 'discord', '--chat-id', '123'], env)).toEqual({ stdout: '', code: 1 });
     expect(await cli(foreignDir, ['thread-create', '--chat-id', '123', '--message-id', '9', '--name', 'x'], env)).toEqual({ stdout: '', code: 1 });
     expect(requests).toBe(0);
   } finally {
@@ -299,7 +95,7 @@ test('the literal .claude-code-hermit from the project root passes the pin', asy
   const env = { ...process.env };
   delete env.AGENT_DIR;
   delete env.CLAUDE_PROJECT_DIR;
-  const child = Bun.spawn([process.execPath, path.resolve(import.meta.dir, '../scripts/conversation.ts'), '.claude-code-hermit', 'list'], { cwd: root, stdout: 'pipe', stderr: 'pipe', env });
+  const child = Bun.spawn([process.execPath, path.resolve(import.meta.dir, '../scripts/conversation.ts'), '.claude-code-hermit', 'history', '--source', 'discord', '--chat-id', '123'], { cwd: root, stdout: 'pipe', stderr: 'pipe', env });
   const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-  expect({ stdout, code }).toEqual({ stdout: '{}\n', code: 0 });
+  expect({ stdout, code }).toEqual({ stdout: '[]\n', code: 0 });
 });

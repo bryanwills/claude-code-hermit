@@ -7,7 +7,7 @@
   <a href="https://discord.gg/54sJqAxhUh"><img src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Join" /></a>
 </p>
 
-# Your own local Claude Tag.
+# Your own always-on agent, on your own box.
 
 Run an always-on Claude Code agent on your machine or server, for you or your team. Use it from your terminal or the Claude app via [Remote Control](https://code.claude.com/docs/en/remote-control), or connect Discord, Telegram, or a custom Claude Code [channel](https://code.claude.com/docs/en/channels).
 
@@ -89,7 +89,7 @@ Optional [Docker security controls](docs/docker-security.md) cover local-network
 
 - **Proactive work.** Heartbeats regularly check the responsibilities you give the agent. Routines run scheduled work, and watches surface changes. Together, they let the agent follow up without waiting for another request.
 
-- **Work through chat.** Assign work and receive results in your connected chat. Longer assignments get threaded progress updates, with a separate reply when the agent needs a decision. Assignments can also carry a persistent task record with requester, due date, result confirmation, and a dashboard view by person.
+- **Work through chat.** Assign work and receive results in your connected chat. Each assignment gets its own thread and runs as an internal worker with its own context, so several can run at once; the worker keeps the thread's progress message current and replies separately when it needs a decision. Assignments can also carry a persistent task record with requester, due date, result confirmation, and a dashboard view by person.
 
 - **Token efficiency.** With Claude Code’s [Monitor](https://code.claude.com/docs/en/tools-reference#monitor-tool), heartbeat checks and optional routine prechecks run outside the model. Quiet checks and skipped routines use no model tokens; eligible routines due together can share a wake.
 

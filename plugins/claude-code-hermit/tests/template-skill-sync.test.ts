@@ -94,11 +94,11 @@ describe('nested artifacts.* keys are referenced in operator-facing docs', () =>
 
 describe('channel settings stay referenced in operator skills', () => {
   const VALIDATED_CHANNEL_KEYS = [
-    'allowed_users', 'bind_home_chat', 'passive_chats', 'isolate_chats', 'log_chats',
+    'allowed_users', 'passive_chats', 'isolate_chats', 'log_chats',
     'shared_chats', 'operators', 'maintainer_channel_id', 'default_chat_id', 'dm_channel_id',
   ];
   const WIZARD_CHANNEL_KEYS = [
-    'allowed_users', 'bind_home_chat', 'isolate_chats', 'log_chats', 'shared_chats',
+    'allowed_users', 'isolate_chats', 'log_chats', 'shared_chats',
     'passive_chats', 'operators', 'channels.primary',
   ];
   const validator = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'validate-config.ts'), 'utf8');

@@ -7,8 +7,8 @@ async function main(): Promise<void> {
   if (!dirArg || !assertStateDir(dirArg)) throw new Error('invalid-state-dir');
   const dir = pinStateDirOrExit(dirArg, 'task');
   const allowed: Record<string, string[]> = {
-    open: ['note-stdin', 'title', 'requester', 'done', 'requester-name', 'origin-message-id', 'due', 'conversation', 'card', 'owner', 'approver', 'dedupe-key', 'claim', 'check'],
-    note: ['actor', 'due', 'card', 'decision', 'approval', 'done', 'clear-waiting', 'check'],
+    open: ['note-stdin', 'title', 'requester', 'done', 'requester-name', 'origin-message-id', 'due', 'conversation', 'card', 'owner', 'muted', 'approver', 'dedupe-key', 'claim', 'check'],
+    note: ['actor', 'due', 'card', 'decision', 'approval', 'done', 'clear-waiting', 'check', 'owner', 'muted'],
     lesson: ['actor'], 'check-snapshot': [],
     block: ['waiting-on', 'result-stdin', 'status-line', 'next'],
     close: ['by', 'actor', 'result-rev', 'reason-stdin', 'claim'], cancel: ['actor', 'reason-stdin'],

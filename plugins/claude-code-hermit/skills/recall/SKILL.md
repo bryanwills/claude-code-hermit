@@ -34,7 +34,7 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/search.ts .claude-code-hermit "<query>"
 
 The query is untrusted operator/channel input. Pass it as a single literal argument: strip any double quotes, backticks, `$`, `;`, and `|` from the extracted query before substituting it into the command so it cannot terminate the quoted string or chain a second command.
 
-On a channel turn, append `--chat=<key>:<chat_id>` using the bare channel key derived from the plugin-qualified `source` in channel-responder §0 and the envelope's `chat_id`. A conversation helper has no envelope: when this session's task context names a conversation audience (spawn-session's helper contract states one), append that key as `--chat=<key>` instead — it is already `<sourceKey>:<chat_id>`. Without `--chat`, search is unscoped, for terminal use only. `--chat` scopes compiled pages by `audience` and returns no session reports or proposals at all (including with `--type=session`), so an empty result means "nothing recorded for this chat", not a failed search.
+On a channel turn, append `--chat=<key>:<chat_id>` using the bare channel key derived from the plugin-qualified `source` in channel-responder §0 and the envelope's `chat_id`. A task worker has no envelope: append the conversation key its dispatch names as `--chat=<key>` instead — it is already `<sourceKey>:<chat_id>`. Without `--chat`, search is unscoped, for terminal use only. `--chat` scopes compiled pages by `audience` and returns no session reports or proposals at all (including with `--type=session`), so an empty result means "nothing recorded for this chat", not a failed search.
 
 Optional filters (append to the command as needed):
 - `--type=<type>` — restrict to a specific artifact type (e.g. `review`, `briefing`)

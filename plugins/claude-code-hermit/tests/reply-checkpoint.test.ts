@@ -126,17 +126,30 @@ describe('stop-pipeline — channel reply checkpoint', () => {
     expect(r.stdout.trim()).toBe('');
   }));
 
-  test('envelope whose sourceKey:chatId is bound: stdout empty', withDir(async (dir) => {
+  test('envelope whose sourceKey:chatId owns an open task thread: stdout empty', withDir(async (dir) => {
     writeTranscript(dir, [envelope(), assistantText()]);
-    const bound = await runScript('conversation.ts', {
-      args: [hermit(dir), 'bind', 'discord:123', '--session-name', 'helper', '--session-id', 'sess-1', '--worktree', dir],
+    const opened = await runScript('task.ts', {
+      args: ['open', hermit(dir), '--owner', 'worker:a1b2c3d4e5f6a7b8c', '--requester', 'discord:u1', '--conversation', 'discord:123', '--title', 'Thread work', '--done', 'Verified'],
       cwd: dir,
       env: { AGENT_DIR: hermit(dir) },
     });
-    expect(bound.exitCode).toBe(0);
+    expect(opened.exitCode).toBe(0);
     const r = await runStop(dir);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
+  }));
+
+  test('envelope whose chat holds only a resident-owned record: reply still owed', withDir(async (dir) => {
+    writeTranscript(dir, [envelope(), assistantText()]);
+    const opened = await runScript('task.ts', {
+      args: ['open', hermit(dir), '--owner', 'resident', '--requester', 'discord:u1', '--conversation', 'discord:123', '--title', 'Thread work', '--done', 'Verified'],
+      cwd: dir,
+      env: { AGENT_DIR: hermit(dir) },
+    });
+    expect(opened.exitCode).toBe(0);
+    const r = await runStop(dir);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('channel-responder reply is still owed');
   }));
 
   test('text-only channel turn with stop_hook_active true: stdout empty', withDir(async (dir) => {

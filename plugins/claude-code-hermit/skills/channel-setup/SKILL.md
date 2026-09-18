@@ -226,21 +226,20 @@ After `file=home` or `file=home+state`, the bot that handed out the code still r
 
 If access.json is verified, continue to step 6a.
 
-### 6a. Access control and home-chat helper
+### 6a. Access control
 
-Once per channel after verifying `<state_dir>/access.json`, read its `allowFrom` and the current channel config. Include iMessage: these settings are hermit-owned. Ask the applicable rows in one `AskUserQuestion` call, with the default option recommended:
+Once per channel after verifying `<state_dir>/access.json`, read its `allowFrom` and the current channel config. Include iMessage: these settings are hermit-owned. Ask the row in one `AskUserQuestion` call, with the default option recommended:
 
 | Header | Question | Options (`label`: description) |
 |---|---|---|
 | Access ctrl | Who may wake the hermit on this channel? | `Only <paired id>`: use the paired id from `allowFrom` (default) / `Allow everyone`: no hermit sender restriction / Other: additional user ids |
-| Home chat | Bind home-chat tasks to a conversation helper too? Non-home tasks always use helpers. | `No`: keep the current default (default) / `Yes`: use helpers for home-chat tasks too |
 
-Drop Access ctrl when `channels.<channel>.allowed_users` is already present, preserving it. Use the paired id from `allowFrom`; if it is ambiguous or unavailable, have the operator identify the intended ids through Other instead of guessing. Encode selected ids as a string array, including the paired id for additional ids. For Allow everyone omit `allowed_users`. Record Home chat as `bind_home_chat: false` or `true`; when `bind_home_chat` is already set, recommend its current value instead of `No`.
+Drop Access ctrl when `channels.<channel>.allowed_users` is already present, preserving it. Use the paired id from `allowFrom`; if it is ambiguous or unavailable, have the operator identify the intended ids through Other instead of guessing. Encode selected ids as a string array, including the paired id for additional ids. For Allow everyone omit `allowed_users`.
 
-Merge both answers in one payload through the existing reinit command:
+Merge the answer through the existing reinit command:
 
 ```bash
-echo '{"channels":{"<channel>":{"allowed_users":<selected_string_array>,"bind_home_chat":<boolean>}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "$(pwd)" --reinit >/dev/null
+echo '{"channels":{"<channel>":{"allowed_users":<selected_string_array>}}}' | bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-config.ts "$(pwd)" --reinit >/dev/null
 ```
 
 Omit `allowed_users` when the row was dropped or Allow everyone was chosen. Never use Edit/Write on `config.json`. Stop on a non-zero merge exit as in Adding an entry. Repeating the same answers must leave the file byte-identical. Continue to §6b.
@@ -315,7 +314,7 @@ Channel setup complete!
   State dir:      <state_dir>
 
   hermit-start passes --channels automatically on next boot.
-  Later changes: /claude-code-hermit:hermit-settings channels (recall, record, operators, bind_home_chat)
+  Later changes: /claude-code-hermit:hermit-settings channels (recall, record, operators)
 ```
 
 If anything was skipped, list the remaining steps.

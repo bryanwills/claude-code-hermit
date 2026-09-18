@@ -80,13 +80,13 @@ for (const reason of ['quiet', 'max-age', 'policy']) test(`standalone clear ${re
   } finally { f.cleanup(); }
 });
 
-for (const reason of ['execution-not-idle', 'stale-identity', 'idle-too-fresh', 'helper-running', 'registry-busy', 'under-token-floor']) test(`standalone clear refuses ${reason}`, () => {
+for (const reason of ['execution-not-idle', 'stale-identity', 'idle-too-fresh', 'worker-running', 'registry-busy', 'under-token-floor']) test(`standalone clear refuses ${reason}`, async () => {
   const f = fixture();
   try {
     if (reason === 'execution-not-idle') f.put('state/execution.json', { state: 'in_flight', cc_session_id: 'resident', at: new Date().toISOString() });
     if (reason === 'stale-identity') f.put('state/runtime.json', { ...f.runtime, cc_session_id: 'other' });
     if (reason === 'idle-too-fresh') f.put('state/execution.json', { state: 'idle', cc_session_id: 'resident', at: new Date().toISOString() });
-    if (reason === 'helper-running') f.put('state/conversations.json', { 'discord:thread': { status: 'running' } });
+    if (reason === 'worker-running') await f.open(['--owner', 'worker:a3b2c3d4e5f6a7b8c']);
     if (reason === 'under-token-floor') fs.writeFileSync(f.world.paths.costLog, '');
     if (reason === 'registry-busy') {
       const configDir = path.join(f.dir, 'registry');

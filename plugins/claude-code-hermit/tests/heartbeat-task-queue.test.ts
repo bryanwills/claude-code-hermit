@@ -53,13 +53,13 @@ describe('heartbeat task queue', () => {
     } finally { f.cleanup(); }
   });
 
-  test('young, helper-owned, waiting and unconfirmed records never generate queue notices', async () => {
+  test('young, worker-owned, waiting and unconfirmed records never generate queue notices', async () => {
     const f = await queuedFixture();
     try {
       expect(JSON.parse(await f.heartbeat('tick', [], f.record.opened_at)).notifications.queue).toBeUndefined();
       await f.ok('block', [f.record.id, '--result-stdin'], 'Delivered, awaiting confirmation');
       expect(JSON.parse(await f.heartbeat('tick')).notifications.queue).toBeUndefined();
-      await f.open(['--title', 'Helper task', '--owner', 'helper:discord:thread']);
+      await f.open(['--title', 'Worker task', '--owner', 'worker:a1b2c3d4e5f6a7b8c']);
       const waiting = await f.open(['--title', 'Blocked task']);
       await f.ok('block', [waiting.id, '--waiting-on', 'operator', '--status-line', 'Need answer', '--next', 'Continue']);
       expect(JSON.parse(await f.heartbeat('tick')).notifications.queue).toBeUndefined();

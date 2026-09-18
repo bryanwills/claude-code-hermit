@@ -11,24 +11,31 @@ it('intake uses the bounded task digest and injected policy', () => {
   expect(pre).toContain('injected TASKS.md');
   expect(pre).not.toContain('session-archive.ts');
 });
-for (const branch of ['Bound conversation', 'Bind', 'Task assignment', 'New instruction']) it(`${branch} names task invocation`, () => { const text = read('channel-responder'); const index = text.indexOf(`- **${branch}**`); expect(index).toBeGreaterThan(-1); expect(text.slice(index, index + 5500)).toContain('task.ts'); });
-it('resident guild threads bypass helper binding', () => {
+for (const branch of ['Task thread', 'Task assignment', 'New instruction']) it(`${branch} names task invocation`, () => { const text = read('channel-responder'); const index = text.indexOf(`- **${branch}**`); expect(index).toBeGreaterThan(-1); expect(text.slice(index, index + 5500)).toContain('task.ts'); });
+it('a chat assignment opens a resident record and hands it to a worker', () => {
   const text = read('channel-responder');
-  expect(text.indexOf('- **Resident guild thread**')).toBeLessThan(text.indexOf('- **Bind**'));
-  expect(text).toContain('[resident task thread <key>]');
-  expect(text).toContain('--owner resident --conversation <sourceKey>:<thread-id>');
-  expect(text).toContain('Never call `conversation.ts bind`');
-  expect(text).not.toContain('/claude-code-hermit:session-start');
+  expect(text).toContain('[task thread <key>: ');
+  expect(text).toContain('--owner resident --conversation <key>');
+  expect(text).toContain('claude-code-hermit:task-worker');
+  expect(text).toContain('--owner worker:<agentId>');
+  expect(text).not.toContain('conversation.ts bind');
 });
-it('REPORT handling records result and validates sender as before', () => {
-  const text = read('watch');
-  expect(text).toContain('task.ts block');
-  expect(text).toContain('generation');
+it('the worker is steered by id and replaced only when that send fails', () => {
+  const text = read('channel-responder');
+  const rule = text.slice(text.indexOf('- **Task thread**'), text.indexOf('- **Conversation command**'));
+  expect(rule).toContain('SendMessage');
+  expect(rule).toContain('Only when that send fails');
+  expect(rule).toContain('helper-reports/<id>-history.md');
+  expect(rule).not.toContain('claude --bg');
+});
+it('a completion notice posts the report and blocks the record', () => {
+  const text = read('channel-responder');
+  expect(text).toContain('WORKER <task-id> done <id>');
+  expect(text).toContain('WORKER <task-id> needs-input <id>');
   expect(text).toContain('[[helper-report <id>]]');
-  expect(text).toContain('--result-stdin <');
+  expect(text).toContain('--result-stdin');
 });
-it('parked resume continues in place without renaming flags', () => {
+it('the status summary lists worker-owned records', () => {
   const text = read('channel-responder');
-  expect(text).toContain("claude --bg --resume '<session_id>' '<body>'");
-  expect(text).not.toContain("--resume '<session_id>' --name");
+  expect(text).toContain("--open --owner 'worker:*' --json");
 });
