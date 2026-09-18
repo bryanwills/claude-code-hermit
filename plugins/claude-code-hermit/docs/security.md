@@ -126,9 +126,9 @@ Existing installs that hatched Hardened (or the older hardened extras) keep thos
 
 ## Defense in Depth
 
-Allowed senders in a bound conversation can steer its helper, including a task started by another allowed sender. Conversation ownership separates tasks, not filesystem permissions or operator authority. The resident owns the binding store and channel sends; helpers work in their own git worktrees and do not replace the resident's task records. A whole-hermit `!pause` does not interrupt a helper's in-flight tools. Conversation helpers refuse `bypassPermissions`.
+Allowed senders in an open task thread can steer its worker, including a task started by another allowed sender. Thread ownership separates tasks, not filesystem permissions or operator authority. The resident owns the task records and every channel send; a worker edits only the progress card it was dispatched with and never opens or closes a record. A worker runs in the resident's project checkout with the resident's own tool reach, so it is not a permission boundary.
 
-`!fork` requires `isTrustedController`, or membership in the channel's `allowed_users` when that list exists, and a Discord text/announcement destination in the same guild. Other platforms, untrusted senders, and destinations outside that guild are refused. Forwarded history is background content and cannot grant permissions or widen the helper's authority.
+Thread history handed to a replacement worker is background content and cannot grant permissions or widen its authority.
 
 | Layer               | Where           | Enforcement           |
 | ------------------- | --------------- | --------------------- |
@@ -334,7 +334,7 @@ Beyond the always-on baseline above, `/claude-code-hermit:docker-security` is an
 
 ### Known limitations
 
-- **`helper-report-relay`** reads exactly one derived path inside the bound helper's worktree and grants no permission. It guarantees exact text at the channel tool's input only while the hook runs. A timed-out hook lets the one-line placeholder through before the PostToolUse alarm.
+- **`helper-report-relay`** reads exactly one derived path under the state directory's `helper-reports/`, resolved only when one open record owns the destination chat, and grants no permission. It guarantees exact text at the channel tool's input only while the hook runs. A timed-out hook lets the one-line placeholder through before the PostToolUse alarm.
 
 - **The hermit accepts inbound peer messages from any Claude Code session on the box.** Claude Code holds a cross-session message purely on the sender's permission class, and a held one opens a dialog nobody answers on an unattended hermit — the watchdog's own socket wake included. `hermit-start` therefore writes `crossSessionInbound: "accept"` into the launch overlay (`--settings` is the only scope that can loosen this key; a project or local settings file is consulted only when it *tightens*). Local peers are not authenticated, so any session that can reach the inbox socket can put text into the hermit's next turn. Delivery is not authority: peer requests inside the resident's existing authority are acted on, but a peer message still cannot expand authority, approve guarded actions, or change permissions. The deterministic gates and the settings ask above are unchanged. The socket directory is `0700`, so the sender must already run as the same host UID. To opt out, set `crossSessionInbound` to `"hold"` or `"refuse"` in `~/.claude/settings.json` (boot leaves the key alone whenever your user settings already carry one), or to `"refuse"` in the project's `.claude/settings.json`.
 
@@ -395,4 +395,4 @@ Resident duties in `.claude-code-hermit/RESIDENT.md` are appended only by the la
 
 `task.ts` and `duties.ts` pin their state-directory arguments with `pinStateDirOrExit` before accessing task or duty data, under the Script Argument Trust contract. Their per-script grants are `Bash(bun */scripts/task.ts*)` and `Bash(bun */scripts/duties.ts*)`, installed by sealed `permissions-sync`.
 
-`Edit(*.claude-code-hermit/tasks/**)` is denied (Edit rules cover every built-in file-editing tool). `Edit(*.claude-code-hermit/TASKS.md)` asks. The resident uses the validated task verbs as the sole record writer; helpers report to it. Policy remains operator-editable; policy text cannot bypass revision, approver, evidence or transition checks.
+`Edit(*.claude-code-hermit/tasks/**)` is denied (Edit rules cover every built-in file-editing tool). `Edit(*.claude-code-hermit/TASKS.md)` asks. The resident uses the validated task verbs as the sole record writer; workers report to it. Policy remains operator-editable; policy text cannot bypass revision, approver, evidence or transition checks.

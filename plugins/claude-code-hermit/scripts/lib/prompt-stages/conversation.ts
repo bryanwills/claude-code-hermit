@@ -1,5 +1,4 @@
-import { readTasks } from '../tasks';
-import { lookup } from '../conversations';
+import { threadRecords } from '../tasks';
 import { resolveSlashCommand } from '../channel-slash-address';
 import { channelBotIdentity, isAllowedSender, isSelfMentioned } from '../channel-auth';
 import { cachedChat } from '../channel-chats';
@@ -7,49 +6,45 @@ import { safeForLLM } from '../sanitize';
 import { capture } from './channel-reply-reminder';
 import type { StageContext, StageResult } from './types';
 
-// `!fork` is the one conversation command that carries free text, and that text is
-// the sender's raw message body. Every other stage that puts channel-derived text
-// into additionalContext clamps and defuses it first (channel-reply-reminder,
-// pause-keyword, harness-command); without that an allowed sender can embed a
-// newline and forge a hook-authored line the model is told to trust.
-const MAX_ARGS_LEN = 400;
+// An assignment on a Discord guild channel (type 0 or 5) gets its own thread, and the
+// record's conversation key is that thread. A message in the parent channel therefore
+// belongs to no task thread, whatever record the channel's key might match.
+const inThreadChat = (ctx: StageContext, sourceKey: string, chatId: string) =>
+  sourceKey !== 'discord' || ![0, 5].includes(cachedChat(ctx.dir, chatId)?.type ?? -1);
 
 export async function run(ctx: StageContext): Promise<StageResult | void> {
   const env = ctx.envelope;
   if (!env || !isAllowedSender(ctx.config(), env.source, env.userId)) return;
   const key = `${env.sourceKey}:${env.chatId}`;
-  const record = lookup(ctx.dir, key);
   const addressed = resolveSlashCommand(env.body, channelBotIdentity(ctx.config(), env.source));
   const name = addressed?.command.slice(1);
   const args = addressed?.rest.trim() ?? '';
-  const conversationCommand = name && (
-    (['help', 'mute', 'unmute', 'restart'].includes(name) && !args)
-    || (name === 'fork' && !!args)
-  );
-  const safeArgs = safeForLLM(args.slice(0, MAX_ARGS_LEN));
+  const conversationCommand = !!name && ['help', 'mute', 'unmute', 'restart'].includes(name) && !args;
+  // Harness commands sent into a worker-owned thread belong to the thread, not the
+  // session: `!clear` restarts the worker and the rest are refused here, before the
+  // harness-command stage could record them for the resident. A resident-owned thread
+  // takes them as ordinary session commands, like any other chat.
+  const harnessCommand = !!name && ['clear', 'compact', 'model', 'effort', 'advisor', 'permission-mode'].includes(name);
+  const record = inThreadChat(ctx, env.sourceKey, env.chatId)
+    ? threadRecords(ctx.dir).find(task => task.conversation === key)
+    : undefined;
   if (!record) {
-    const residentTask = !conversationCommand
-      && (env.sourceKey !== 'discord' || ![0, 5].includes(cachedChat(ctx.dir, env.chatId)?.type ?? -1))
-      && readTasks(ctx.dir).find(task => task.status === 'open'
-        && task.owner === 'resident' && task.conversation === key);
-    if (residentTask) {
-      ctx.conversation = { key, owner: 'resident' };
-      return { context: `[resident task thread ${safeForLLM(key)}]` };
-    }
     // `!help` is answerable anywhere, so it gets its annotation rather than the
-    // "needs a binding" refusal — without one the model has nothing to act on.
+    // "needs a thread" refusal — without one the model has nothing to act on.
     if (conversationCommand) {
-      return { context: name === 'help' ? '[conversation command: help]' : '[conversation command outside a bound conversation]' };
+      return { context: name === 'help' ? '[conversation command: help]' : '[conversation command outside a task thread]' };
     }
     return;
   }
-  ctx.conversation = { key, record };
-  const context = `[bound conversation ${key}: ${record.status}, muted=${record.muted}]`;
-  if (name === 'model' || name === 'effort') {
+  ctx.conversation = { key, task_id: record.id, owner: record.owner };
+  const context = `[task thread ${safeForLLM(key)}: owner=${record.owner === 'resident' ? 'resident' : 'worker'}, muted=${record.muted}, waiting=${record.waiting_on !== null}]`;
+  if (harnessCommand && record.owner !== 'resident') {
     ctx.skipHarnessCommand = true;
-    return { context: `${context}\n[conversation command refused: per-conversation model/effort not supported]` };
+    if (name === 'clear') return { context: `${context}\n[conversation command: restart]` };
+    const reason = name === 'model' || name === 'effort' ? 'per-conversation model/effort not supported' : `!${name} does not reach the resident from a task thread`;
+    return { context: `${context}\n[conversation command refused: ${reason}]` };
   }
-  if (conversationCommand) return { context: `${context}\n[conversation command: ${name}${safeArgs ? ' ' + safeArgs : ''}]` };
+  if (conversationCommand) return { context: `${context}\n[conversation command: ${name}]` };
   // Mute silences ordinary steering, not an addressed command: pause/resume/snooze
   // and status are documented as always reachable from chat, and blocking here
   // settles the disposition before their stages ever run.

@@ -3980,3 +3980,27 @@ describe('resident-start always-on readiness', () => {
     expect(skill).not.toContain('What should I work on next?');
   });
 });
+
+// The task worker's dispatch/return contract is what channel-responder parses.
+describe('task-worker agent contract', () => {
+  const agent = read(path.join(AGENTS, 'task-worker.md'));
+
+  test('frontmatter names the agent and fences off dispatch and questions', () => {
+    const head = agentFrontmatter('task-worker');
+    expect(head).toContain('name: task-worker');
+    expect(head).toContain('- Agent');
+    expect(head).toContain('- AskUserQuestion');
+    expect(head).not.toContain('model:');
+    expect(head).not.toContain('tools:');
+  });
+
+  test('returns exactly one of the two WORKER lines', () => {
+    expect(agent).toContain('WORKER <task-id> done <id>');
+    expect(agent).toContain('WORKER <task-id> needs-input <id>');
+  });
+
+  test('writes its report where the relay hook reads it', () => {
+    expect(agent).toContain('.claude-code-hermit/helper-reports/<id>.md');
+    expect(agent).toContain('edit_message');
+  });
+});

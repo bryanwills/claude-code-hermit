@@ -18,8 +18,8 @@ import path from 'node:path';
 import { writeRegistryEntry } from './helpers/registry-fixture';
 import { runScript } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
+import { openTask } from './helpers/tasks';
 import { assistantEntry } from './helpers/transcript';
-import { bind, update } from '../scripts/lib/conversations';
 import { markGuest } from '../scripts/lib/guest-marker';
 import { startHttpStub } from './helpers/http-stub';
 
@@ -78,6 +78,11 @@ async function run(wd: Workdir, body: string, stubUrl: string) {
     cwd: wd.dir,
     env: { HERMIT_TELEGRAM_API_URL: stubUrl },
   });
+}
+
+function openThreadTask(wd: Workdir, key: string, owner: string, muted: boolean) {
+  return openTask(wd.dir, hermit(wd.dir),
+    ['--owner', owner, '--muted', String(muted), '--requester', `${key.split(':')[0]}:u1`, '--conversation', key]);
 }
 
 describe('user-prompt-pipeline: shutdown is terminal', () => {
@@ -631,41 +636,81 @@ describe('user-prompt-pipeline: resident gate', () => {
 });
 
 
-describe('bound conversation admission', () => {
+describe('task thread admission', () => {
   for (const scenario of [
-    { name: 'bound chat inside passive parent passes', bound: true, muted: false, body: 'continue', blocked: false },
-    { name: 'muted bound chat is blocked', bound: true, muted: true, body: 'continue', blocked: true },
-    { name: 'muted bound chat with mention passes', bound: true, muted: true, body: '<@777> continue', blocked: false },
-    { name: 'unbound passive chat stays blocked', bound: false, muted: false, body: 'continue', blocked: true },
+    { name: 'worker thread inside passive parent passes', task: true, owner: 'worker:a1b2c3d4e5f6a7b8c', muted: false, body: 'continue', blocked: false },
+    { name: 'resident thread inside passive parent passes', task: true, owner: 'resident', muted: false, body: 'continue', blocked: false },
+    { name: 'muted thread is blocked', task: true, owner: 'worker:a1b2c3d4e5f6a7b8c', muted: true, body: 'continue', blocked: true },
+    { name: 'muted thread with mention passes', task: true, owner: 'worker:a1b2c3d4e5f6a7b8c', muted: true, body: '<@777> continue', blocked: false },
+    { name: 'chat without a record stays blocked', task: false, owner: 'resident', muted: false, body: 'continue', blocked: true },
   ]) {
     test(scenario.name, async () => {
       const wd = trackedWorkdir();
       const dir = hermit(wd.dir);
       fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
       fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { thread: { type: 11, parent_id: 'parent', guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
-      if (scenario.bound) {
-        bind(dir, 'discord:thread', { session_name: 'conv-thread', session_id: 'session', worktree: wd.dir });
-        update(dir, 'discord:thread', { muted: scenario.muted });
-      }
+      if (scenario.task) expect((await openThreadTask(wd, 'discord:thread', scenario.owner, scenario.muted)).exitCode).toBe(0);
       const result = await runScript('user-prompt-pipeline.ts', {
         stdin: JSON.stringify({ prompt: `<channel source="discord" chat_id="thread" user="u1">${scenario.body}</channel>` }), cwd: wd.dir,
       });
       expect(result.exitCode).toBe(0);
-      if (scenario.blocked) expect(JSON.parse(result.stdout).decision).toBe('block');
-      else {
-        expect(result.stdout).toContain('[bound conversation discord:thread: running');
+      if (scenario.blocked) {
+        expect(JSON.parse(result.stdout).decision).toBe('block');
+        expect(result.stdout).not.toContain('[task thread');
+      } else {
+        expect(result.stdout).toContain(`[task thread discord:thread: owner=${scenario.owner === 'resident' ? 'resident' : 'worker'}, muted=${scenario.muted}, waiting=false]`);
         expect(result.stdout).toContain('[channel reply reminder]');
       }
     });
   }
+
+  test('unauthorized reply into a task thread stays blocked', async () => {
+    const wd = trackedWorkdir();
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
+    fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { thread: { type: 11, parent_id: 'parent', guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
+    expect((await openThreadTask(wd, 'discord:thread', 'worker:a1b2c3d4e5f6a7b8c', false)).exitCode).toBe(0);
+    const result = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: '<channel source="discord" chat_id="thread" user="stranger">continue</channel>' }), cwd: wd.dir,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).decision).toBe('block');
+    expect(result.stdout).not.toContain('[task thread');
+  });
+
+  test('a waiting record is annotated as waiting', async () => {
+    const wd = trackedWorkdir();
+    const dir = hermit(wd.dir);
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
+    fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { thread: { type: 11, parent_id: 'parent', guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
+    const opened = await openThreadTask(wd, 'discord:thread', 'resident', false);
+    expect(opened.exitCode).toBe(0);
+    const id = JSON.parse(opened.stdout).id;
+    const blocked = await runScript('task.ts', { args: ['block', dir, id, '--waiting-on', 'discord:u1', '--status-line', 'Need input', '--next', 'Answer'], cwd: wd.dir });
+    expect(blocked.exitCode).toBe(0);
+    const result = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: '<channel source="discord" chat_id="thread" user="u1">continue</channel>' }), cwd: wd.dir,
+    });
+    expect(result.stdout).toContain('[task thread discord:thread: owner=resident, muted=false, waiting=true]');
+  });
+
+  test('guild text channel with a record is not labeled a task thread', async () => {
+    const wd = trackedWorkdir();
+    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
+    fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { home: { type: 0, parent_id: null, guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
+    expect((await openThreadTask(wd, 'discord:home', 'resident', false)).exitCode).toBe(0);
+    const result = await runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt: '<channel source="discord" chat_id="home" user="u1">continue</channel>' }), cwd: wd.dir,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain('[task thread');
+  });
 });
 
 describe('conversation commands', () => {
-  for (const body of ['!help', '!mute', '!unmute', '!restart', '!fork investigate this', '!fork <#678> investigate this']) {
+  for (const body of ['!help', '!mute', '!unmute', '!restart']) {
     test(`annotates ${body}, including while muted`, async () => {
       const wd = setupChannelWorkdir();
-      bind(hermit(wd.dir), 'telegram:12345', { session_name: 'conv', session_id: 'sid', worktree: wd.dir });
-      update(hermit(wd.dir), 'telegram:12345', { muted: true });
+      expect((await openThreadTask(wd, 'telegram:12345', 'worker:a1b2c3d4e5f6a7b8c', true)).exitCode).toBe(0);
       const result = await run(wd, body, 'http://127.0.0.1:1');
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(`[conversation command: ${body.slice(1)}]`);
@@ -675,7 +720,7 @@ describe('conversation commands', () => {
     test(`refuses ${body} before the harness recorder`, async () => {
       const wd = setupChannelWorkdir();
       writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test' });
-      bind(hermit(wd.dir), 'telegram:12345', { session_name: 'conv', session_id: 'sid', worktree: wd.dir });
+      expect((await openThreadTask(wd, 'telegram:12345', 'worker:a1b2c3d4e5f6a7b8c', false)).exitCode).toBe(0);
       const result = await run(wd, body, 'http://127.0.0.1:1');
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain('[conversation command refused: per-conversation model/effort not supported]');
@@ -683,77 +728,62 @@ describe('conversation commands', () => {
       expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
     });
   }
-  for (const body of ['!mute', '!unmute', '!restart', '!fork task']) {
-    test(`${body} outside a binding`, async () => {
+  test('!clear in a worker thread restarts the worker instead of clearing the resident', async () => {
+    const wd = setupChannelWorkdir();
+    writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test' });
+    expect((await openThreadTask(wd, 'telegram:12345', 'worker:a1b2c3d4e5f6a7b8c', false)).exitCode).toBe(0);
+    const result = await run(wd, '!clear', 'http://127.0.0.1:1');
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('[conversation command: restart]');
+    expect(result.stdout).not.toContain('[harness-command]');
+    expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
+  });
+  for (const body of ['!compact', '!advisor opus', '!permission-mode plan']) {
+    test(`refuses ${body} in a worker thread before the harness recorder`, async () => {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test' });
+      expect((await openThreadTask(wd, 'telegram:12345', 'worker:a1b2c3d4e5f6a7b8c', false)).exitCode).toBe(0);
+      const result = await run(wd, body, 'http://127.0.0.1:1');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(`[conversation command refused: ${body.split(' ')[0]} does not reach the resident from a task thread]`);
+      expect(result.stdout).not.toContain('[harness-command]');
+      expect(fs.existsSync(hermit(wd.dir, 'state', 'pending-harness-command.json'))).toBe(false);
+    });
+  }
+  for (const body of ['!clear', '!model sonnet']) {
+    test(`${body} in a resident-owned thread is left to the harness recorder`, async () => {
+      const wd = setupChannelWorkdir();
+      writeRuntime(wd, { runtime_mode: 'headless', tmux_session: 'hermit-test' });
+      expect((await openThreadTask(wd, 'telegram:12345', 'resident', false)).exitCode).toBe(0);
+      const result = await run(wd, body, 'http://127.0.0.1:1');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('[task thread telegram:12345: owner=resident');
+      expect(result.stdout).not.toContain('[conversation command');
+    });
+  }
+  for (const body of ['!mute', '!unmute', '!restart']) {
+    test(`${body} outside a task thread`, async () => {
       const wd = setupChannelWorkdir();
       const result = await run(wd, body, 'http://127.0.0.1:1');
-      expect(result.stdout).toContain('[conversation command outside a bound conversation]');
+      expect(result.stdout).toContain('[conversation command outside a task thread]');
     });
   }
   test('non-allowed senders get no conversation annotations', async () => {
     const wd = setupChannelWorkdir();
-    bind(hermit(wd.dir), 'telegram:12345', { session_name: 'conv', session_id: 'sid', worktree: wd.dir });
-    for (const body of ['!help', '!mute', '!unmute', '!restart', '!fork task', '!model sonnet', '!effort high']) {
+    expect((await openThreadTask(wd, 'telegram:12345', 'worker:a1b2c3d4e5f6a7b8c', false)).exitCode).toBe(0);
+    for (const body of ['!help', '!mute', '!unmute', '!restart', '!model sonnet', '!effort high']) {
       const result = await runScript('user-prompt-pipeline.ts', { stdin: JSON.stringify({ prompt: envelope(body, 'stranger') }), cwd: wd.dir });
       expect(result.stdout).not.toContain('[conversation command');
-      expect(result.stdout).not.toContain('[bound conversation');
+      expect(result.stdout).not.toContain('[task thread');
     }
   });
-  test('malformed conversation commands are ordinary text', async () => {
+  test('malformed conversation commands and !fork are ordinary text', async () => {
     const wd = setupChannelWorkdir();
-    bind(hermit(wd.dir), 'telegram:12345', { session_name: 'conv', session_id: 'sid', worktree: wd.dir });
-    for (const body of ['!mute now', '!restart now', '!fork', '/mute']) {
+    expect((await openThreadTask(wd, 'telegram:12345', 'worker:a1b2c3d4e5f6a7b8c', false)).exitCode).toBe(0);
+    for (const body of ['!mute now', '!restart now', '!fork task', '/mute']) {
       const result = await run(wd, body, 'http://127.0.0.1:1');
-      expect(result.stdout).toContain('[bound conversation');
+      expect(result.stdout).toContain('[task thread');
       expect(result.stdout).not.toContain('[conversation command:');
     }
-  });
-});
-
-
-describe('resident task thread admission', () => {
-  for (const scenario of [
-    { name: 'authorized unmentioned reply passes', task: true, helper: false, user: 'u1', blocked: false },
-    { name: 'unrelated passive chatter stays blocked', task: false, helper: false, user: 'u1', blocked: true },
-    { name: 'unauthorized task reply stays blocked', task: true, helper: false, user: 'stranger', blocked: true },
-    { name: 'helper binding keeps precedence', task: true, helper: true, user: 'u1', blocked: false },
-  ]) test(scenario.name, async () => {
-    const wd = trackedWorkdir();
-    const dir = hermit(wd.dir);
-    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
-    fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { thread: { type: 11, parent_id: 'parent', guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
-    if (scenario.task) {
-      const opened = await runScript('task.ts', { args: ['open', dir, '--owner', 'resident', '--requester', 'discord:u1', '--conversation', 'discord:thread', '--title', 'Thread work', '--done', 'Verified'], cwd: wd.dir });
-      expect(opened.exitCode).toBe(0);
-    }
-    if (scenario.helper) bind(dir, 'discord:thread', { session_name: 'conv-thread', session_id: 'session', worktree: wd.dir });
-    const result = await runScript('user-prompt-pipeline.ts', {
-      stdin: JSON.stringify({ prompt: `<channel source="discord" chat_id="thread" user="${scenario.user}">continue</channel>` }), cwd: wd.dir,
-    });
-    expect(result.exitCode).toBe(0);
-    if (scenario.blocked) {
-      expect(JSON.parse(result.stdout).decision).toBe('block');
-      expect(result.stdout).not.toContain('[resident task thread');
-    } else if (scenario.helper) {
-      expect(result.stdout).toContain('[bound conversation discord:thread: running');
-      expect(result.stdout).not.toContain('[resident task thread');
-    } else {
-      expect(result.stdout).toContain('[resident task thread discord:thread]');
-      expect(result.stdout).toContain('[channel reply reminder]');
-    }
-  });
-
-  test('guild text channel with resident record is not labeled a task thread', async () => {
-    const wd = trackedWorkdir();
-    const dir = hermit(wd.dir);
-    fs.writeFileSync(hermit(wd.dir, 'config.json'), JSON.stringify({ channels: { discord: { allowed_users: ['u1'], passive_chats: ['parent'], bot_user_id: '777' } } }));
-    fs.writeFileSync(hermit(wd.dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: { home: { type: 0, parent_id: null, guild_id: 'guild', fetched_at: new Date().toISOString() } } } }));
-    const opened = await runScript('task.ts', { args: ['open', dir, '--owner', 'resident', '--requester', 'discord:u1', '--conversation', 'discord:home', '--title', 'Channel work', '--done', 'Verified'], cwd: wd.dir });
-    expect(opened.exitCode).toBe(0);
-    const result = await runScript('user-prompt-pipeline.ts', {
-      stdin: JSON.stringify({ prompt: '<channel source="discord" chat_id="home" user="u1">continue</channel>' }), cwd: wd.dir,
-    });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).not.toContain('[resident task thread');
   });
 });

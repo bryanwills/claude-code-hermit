@@ -4,6 +4,13 @@ import path from 'node:path';
 import { setupWorkdir } from './workdir';
 import { runScript, PLUGIN_ROOT } from './run';
 
+/** `task.ts open` against an arbitrary hermit dir, filling the flags a record always needs. */
+export function openTask(cwd: string, dir: string, args: string[] = []) {
+  const fill = (flag: string, value: string) => args.includes(flag) ? [] : [flag, value];
+  return runScript('task.ts', { cwd, env: { AGENT_DIR: dir }, args: ['open', dir,
+    ...fill('--title', 'Review result'), ...fill('--requester', 'discord:u1'), ...fill('--done', 'Result verified'), ...args] });
+}
+
 export function taskFixture() {
   const wd = setupWorkdir();
   const dir = path.join(wd.dir, '.claude-code-hermit');
@@ -17,7 +24,12 @@ export function taskFixture() {
     expect(r.exitCode).toBe(0);
     return JSON.parse(r.stdout);
   };
-  const open = (args: string[] = []) => ok('open', [...(args.includes('--title') ? [] : ['--title', 'Review result']), ...(args.includes('--requester') ? [] : ['--requester', 'discord:u1']), ...(args.includes('--done') ? [] : ['--done', 'Result verified']), ...args]);
+  const open = async (args: string[] = []) => {
+    const r = await openTask(wd.dir, dir, args);
+    expect(r.stderr).toBe('');
+    expect(r.exitCode).toBe(0);
+    return JSON.parse(r.stdout);
+  };
   return { ...wd, dir, put, run, ok, open, text: (id: string) => fs.readFileSync(path.join(dir, 'tasks', `${id}.md`), 'utf8') };
 }
 export async function taskLib(): Promise<any> {

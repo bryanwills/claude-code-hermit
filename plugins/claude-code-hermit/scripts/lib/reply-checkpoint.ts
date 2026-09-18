@@ -4,7 +4,7 @@
 import { isAllowedSender } from './channel-auth';
 import { parseChannelEnvelope } from './channel-envelope';
 import { readConfigRaw } from './config-read';
-import { lookup } from './conversations';
+import { threadRecords } from './tasks';
 import { readTailLines, toolUseNames, transcriptPath, turnPromptText } from './cc-compat';
 
 type Json = any;
@@ -26,7 +26,10 @@ export function replyBlockReason(dir: string, payload: Json): string | null {
     if (!env) return null;
 
     if (!isAllowedSender(readConfigRaw(dir), env.source, env.userId)) return null;
-    if (lookup(dir, `${env.sourceKey}:${env.chatId}`)) return null;
+    const key = `${env.sourceKey}:${env.chatId}`;
+    // A worker-owned thread ends its turn on a SendMessage to the worker, so no
+    // reply is owed there; a resident-owned thread still owes one like any chat.
+    if (threadRecords(dir).some(task => task.conversation === key && task.owner !== 'resident')) return null;
 
     for (let i = prompt.index + 1; i < lines.length; i++) {
       const line = lines[i];

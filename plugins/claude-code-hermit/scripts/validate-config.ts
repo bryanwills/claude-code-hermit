@@ -367,9 +367,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           );
         }
       }
-      if (ch.bind_home_chat !== undefined && typeof ch.bind_home_chat !== 'boolean') {
-        errors.push(`channels.${name}.bind_home_chat: must be a boolean`);
-      }
       if (ch.passive_chats !== undefined) {
         if (!Array.isArray(ch.passive_chats)) {
           errors.push(`channels.${name}.passive_chats: must be an array`);

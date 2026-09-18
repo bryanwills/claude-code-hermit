@@ -4,7 +4,7 @@ import { readTasks } from './lib/tasks';
 import path from 'node:path';
 import { appendJsonlLine } from './lib/append-jsonl';
 import { flagValue, readStdinIfFlagged } from './lib/cli';
-import { checkKey } from './lib/conversations';
+import { checkKey } from './lib/conversation-key';
 import { scanForInjection } from './lib/injection-scan';
 import { readConfigRaw } from './lib/config-read';
 import { compileCron, cronMatchesCompiled, makeTzFormatter, partsFromFormatter } from './lib/cron-match';

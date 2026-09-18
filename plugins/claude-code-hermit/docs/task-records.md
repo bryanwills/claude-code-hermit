@@ -32,13 +32,13 @@ The result mutation is not exposed by the pre-approved task CLI. The command run
 
 `state/execution.json` records `in_flight`, `idle` or `unknown`, with observation time and Claude session identity. Prompt admission marks a resident turn in flight; Stop and StopFailure mark idle; boot and compaction mark unknown. Stale in-flight observations become unknown. Guests do not write this state.
 
-The safe boundary requires idle for at least 60 seconds, an identity matching runtime `cc_session_id`, no running helper conversation, and an idle or shell registry entry when the resident PID has one. A configured token floor must also be met. Unknown never becomes idle through registry fallback. List and standup can display `execution: unknown (registry: <status>[, <waitingFor>], live process)` to explain an unknown observation.
+The safe boundary requires idle for at least 60 seconds, an identity matching runtime `cc_session_id`, no running task worker, and an idle or shell registry entry when the resident PID has one. A configured token floor must also be met. Unknown never becomes idle through registry fallback. List and standup can display `execution: unknown (registry: <status>[, <waitingFor>], live process)` to explain an unknown observation.
 
 The standalone watchdog clear additionally requires an unchanged pane across two ticks and operator quiet, context age or changed policy. Defaults are one quiet hour, maximum age 24 hours and 20,000 compactible tokens. Policy hashes cover OPERATOR.md, TASKS.md, CLAUDE.local.md, settings and configuration, excluding machine-maintained channel routing and version keys. Clears are locked and deduplicated per reset. Monitor rearming uses the same safe execution boundary.
 
 ## Cost and readers
 
-Progress-bearing writes bind task ids to the current turn. Matching cost rows carry `bucket: tasks`; shared rows allocate cost and tokens equally across their task ids. Otherwise channel conversation work is `conversation`, while heartbeat and routine work is `duties`. Helpers match their conversation task. The version-4 cost index stores date-keyed `by_task` buckets for 90 days; wider windows fall back to a scan using the same allocator. This is attribution, not a separate provider bill.
+Progress-bearing writes bind task ids to the current turn. Matching cost rows carry `bucket: tasks`; shared rows allocate cost and tokens equally across their task ids. Otherwise channel conversation work is `conversation`, while heartbeat and routine work is `duties`. A worker's rows match the record it was dispatched with. The version-4 cost index stores date-keyed `by_task` buckets for 90 days; wider windows fall back to a scan using the same allocator. This is attribution, not a separate provider bill.
 
 `scripts/lib/task-report.ts` normalizes records for brief, reflect, weekly review, cost report, health, MCP, export and dashboard. `done` means check or confirmed, `cancelled` remains distinct, and a result on an open record is `unconfirmed`. Lessons and decisions come from the record body. Readers use task records only. Recall also searches retained historical archives.
 
@@ -46,6 +46,6 @@ SessionStart injects TASKS.md beside operator policy, with a pointer after compa
 
 ## Channel workflow
 
-Before replying, the responder lists open records for the conversation and records operator activity. TASKS.md decides whether an assignment needs a record. In a guild channel, a resident task may receive its own thread and card without a helper conversation binding. Replies in an open resident-owned thread reach the resident; authorization still applies, unrelated passive chatter remains blocked and helper bindings take precedence.
+Before replying, the responder lists open records for the conversation and records operator activity. TASKS.md decides whether an assignment needs a record. In a guild text or announcement channel, the assignment opens its own thread first; the record's `conversation` key is that thread, and `owner` is `resident` until it is handed to a `worker:<agentId>` and back. An open record on a chat makes every later message in it steering for that record, so a second record is never opened there, and the boundary reports `worker-running` while such a record has no result and nothing to wait on. Replies in an open thread reach the resident; authorization still applies and unrelated passive chatter remains blocked.
 
 A confirmed result closes only the matching revision. Any authorized human in the conversation can steer a record; a named approver restricts confirmation. Duties may open deduplicated records for work requiring a person when `tasks.duties_open_records` is enabled.

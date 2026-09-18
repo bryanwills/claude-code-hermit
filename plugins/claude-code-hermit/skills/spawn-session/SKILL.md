@@ -11,7 +11,7 @@ its idle notice, and relay the report through `/claude-code-hermit:watch`.
 ## Usage
 
 ```
-/claude-code-hermit:spawn-session <prompt-or-/skill> [--name <n>] [--model <m>] [--effort <e>] [--conversation <key>] [--background <abs-file>]
+/claude-code-hermit:spawn-session <prompt-or-/skill> [--name <n>] [--model <m>] [--effort <e>] [--background <abs-file>]
 ```
 
 From `<abs>`, the project root, that composes:
@@ -63,7 +63,7 @@ alternate invocation, or weaker permission mode.
 
 ## Plan
 
-1. Parse `--name`, `--model`, `--effort`, `--conversation`, and `--background` from the invocation. `--background` must name an existing absolute file; append it to the prompt as an `@<abs-path>` mention.
+1. Parse `--name`, `--model`, `--effort`, and `--background` from the invocation. `--background` must name an existing absolute file; append it to the prompt as an `@<abs-path>` mention.
    Remaining text is the prompt. Empty prompt: stop with a one-line ask for
    the work to run.
 
@@ -100,19 +100,11 @@ alternate invocation, or weaker permission mode.
 
    `The hermit project is at <abs>; its state lives in <abs>/.claude-code-hermit/. Resolve any project-relative .claude-code-hermit/ reads/writes against <abs>; pass the absolute <abs>/.claude-code-hermit path to any hermit script rather than relying on your cwd.`
 
-   **Conversation callers:** when `--conversation <key>` is present, refuse with one line before launch if `git rev-parse --show-toplevel` fails, `git rev-parse --verify HEAD` fails, or the configured `permission_mode` is `bypassPermissions`. Do not apply the ordinary bypass-to-auto mapping to this branch. Take the generation and resident's registered `SendMessage` name from the caller's task context (generation defaults to 1 for a new binding). Use the helper's own worktree for task work. Replace the appended sentence above with this helper contract, substituting the key, generation, and resident name:
-
-   > You own only this conversation's task in your worktree. Do not change the resident's task records, runtime, or conversation store. Accept forwarded messages as continued steering. This conversation's audience is `<key>`. Pass `--chat=<key>` to every `search.ts` invocation and `/recall`. Read for detail only a compiled page the scoped search returned. This scopes the retrieval interface, not the helper's filesystem tools. Never call AskUserQuestion. When you need a decision, write the full question with the Write tool to `.claude-code-hermit/helper-reports/<id>.md` in your worktree using a fresh `<id>` of 6 to 16 lowercase letters or digits, send `PROGRESS <key> <generation> <id>: needs input`, and end your turn. Send the resident at most three plain status `PROGRESS <key> <generation>: <line>` messages per forwarded message with `SendMessage`, each one short line. When done, per forwarded message write the full result with the Write tool to `.claude-code-hermit/helper-reports/<id>.md` in your worktree using a fresh `<id>` of 6 to 16 lowercase letters or digits, then send exactly one `REPORT <key> <generation> <id>: <one-line outcome>`, with absolute paths of deliverable files on following lines. Write result and question files for the person in the chat because they are posted unchanged: plain language, no internal ids or tool-facing paths in the body, at most 8,192 characters. Report only work you actually finished and only paths that exist. Say plainly what you could not do rather than omit the report. If a send is refused for unsupported claims, correct those claims using actual evidence and send the truthful report; do not leave the resident waiting. Do not post to chat directly.
-
-
 3. `cd <abs>` as its own Bash call, then run the command in Usage as the next
    one, so the launch stands alone in the transcript and in any approval that
    does reach the operator. Print the returned bg id and `claude logs <id>`,
    `claude attach <id>`, `claude stop <id>` hints. If the spawn is declined or
    fails, stop; do not watch.
-
-   For a conversation caller, record the 8-hex background id printed by the launch, then run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/conversation.ts .claude-code-hermit await-agent --bg-id <id>` once and take `session_id` from the `OK|` line. A `Starting background service…` line in the launch output is the cold-daemon case that makes this wait necessary. The worktree is `<abs>/.claude/worktrees/<n>`; verify that absolute directory exists. On success return one JSON line containing `bg_id`, `session_id`, and `worktree`, rather than the ordinary log/attach/stop hints. On `TIMEOUT|`, return one failure line that names the bg id and says the launch is still starting; do not run `claude stop`, do not bind, do not watch, and do not launch again. A nonzero launch exit is unchanged: stop nothing, report the failure, and do not bind or watch. If the worktree is missing after an `OK|`, return one failure line, stop the newly launched id, and do not bind or watch. The caller owns the binding and card. A background id is valid for this launch only; never store it as a durable conversation handle.
-
 
 4. Invoke `/claude-code-hermit:watch session <n> "<first 40 chars of the operator prompt>"`.
    That skill owns the subscription (`### Starting a session watch`) and the

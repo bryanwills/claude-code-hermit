@@ -194,16 +194,3 @@ describe('template parity', () => {
   });
 });
 
-
-describe('channel bind_home_chat validation', () => {
-  test('rejects a non-boolean value', () => {
-    expect(validate({ channels: { discord: { bind_home_chat: 'yes' } } }).errors)
-      .toContain('channels.discord.bind_home_chat: must be a boolean');
-  });
-
-  test('accepts booleans and an absent key', () => {
-    for (const channel of [{}, { bind_home_chat: true }, { bind_home_chat: false }]) {
-      expect(validate({ channels: { discord: channel } }).errors.filter(error => error.includes('bind_home_chat'))).toEqual([]);
-    }
-  });
-});

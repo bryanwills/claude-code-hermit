@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { hermitDir } from './lib/cc-compat';
-import { list } from './lib/conversations';
+import { threadRecords } from './lib/tasks';
 import { runHook } from './lib/hook-input';
 
 function refuse(reason: string): never {
@@ -20,15 +20,15 @@ function main(payload: any): void {
   if (payload.hook_event_name !== 'PreToolUse') return;
   try {
     if (typeof input.chat_id !== 'string' || !input.chat_id) throw new Error('missing chat_id');
-    const bindings = Object.entries(list(hermitDir())).filter(([key]) => {
-      const [sourceKey, chatId] = key.split(':');
+    const dir = hermitDir();
+    const owned = threadRecords(dir).filter(record => {
+      const [sourceKey, chatId] = record.conversation!.split(':');
       const tool = payload.tool_name;
       return chatId === input.chat_id && typeof tool === 'string' &&
         (tool === `mcp__${sourceKey}__reply` || tool.endsWith(`_${sourceKey}__reply`));
     });
-    if (bindings.length !== 1) throw new Error('expected exactly one matching binding');
-    const worktree = fs.realpathSync(bindings[0][1].worktree);
-    const reports = path.join(worktree, '.claude-code-hermit', 'helper-reports');
+    if (owned.length !== 1) throw new Error('expected exactly one matching open record');
+    const reports = fs.realpathSync(path.join(dir, 'helper-reports'));
     const file = fs.realpathSync(path.join(reports, `${match[1]}.md`));
     if (!file.startsWith(`${reports}${path.sep}`)) throw new Error('report outside helper-reports');
     const text = fs.readFileSync(file, 'utf8');

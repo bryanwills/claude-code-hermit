@@ -7,9 +7,19 @@
 
 ### Changed
 - Shorter channel responder instructions and bounded formatting reads for routine messages
+- Work assigned in any chat runs as an internal worker with its own context instead of a background session, and the worker keeps the thread's progress message current itself
+- A reply in a task thread goes to the worker already running it, including after the agent's context is cleared; a new worker starts only when that message cannot be delivered
+- A thread belongs to its task record, so `!mute`, `!unmute` and `!restart` act on the record and a chat can hold only one open task at a time
+- Requires Claude Code 2.1.274 or newer
 
-### Fixed
-- A bound helper that ends a turn without a report no longer loops on repeating idle notices or drops silently out of its watch
+### Removed
+- `bind_home_chat`, the conversation binding store and `!fork`; a background helper still running from before the upgrade finishes on its own and its report is no longer posted to the thread
+
+### Upgrade Instructions
+- Delete every task record left over from a background helper: `grep -l '^owner: helper:' .claude-code-hermit/tasks/*.md | xargs -r rm`. The new reader rejects them, so `task.ts cancel` cannot close them.
+- Delete `.claude-code-hermit/state/conversations.json`.
+- Remove `bind_home_chat` from every `channels.<name>` object in `.claude-code-hermit/config.json`.
+- Run `/claude-code-hermit:hermit-doctor`.
 
 ## [1.4.1] - 2026-09-17
 
