@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- A worker that takes over a task thread after a restart, an unreachable worker or an answer to a waiting task keeps the thread's progress message current instead of going silent until its report
+
 ## [1.4.2] - 2026-09-18
 
 ### Added
