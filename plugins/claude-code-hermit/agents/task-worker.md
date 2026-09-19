@@ -22,7 +22,7 @@ The card ids are that JSON row's `card_chat_id` and `card_message_id`. When they
 
 Null ids mean the thread has no card: make no progress edits and let the report carry everything.
 
-Record durable progress on the record as you go with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <task-id>`, piping one line. The next worker on this thread starts from those notes.
+Record durable progress on the record as you go with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <task-id>`, piping one line. The next worker on this thread starts from those notes. When the work taught something the next task would want (an operator preference, a gotcha, a fact about this environment), pipe one line into `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts lesson .claude-code-hermit <task-id>` before the WORKER line. Write nothing when there is no such lesson.
 
 ## Your report
 
