@@ -28,6 +28,12 @@ it('the worker is steered by id and replaced only when that send fails', () => {
   expect(rule).toContain('helper-reports/<id>-history.md');
   expect(rule).not.toContain('claude --bg');
 });
+it('parks a resident-owned record as waiting', () => {
+  const text = read('channel-responder');
+  const rule = text.slice(text.indexOf('- **Task thread**'), text.indexOf('- **Conversation command**'));
+  expect(rule).toContain('Park the task');
+  expect(rule).toContain('--waiting-on <requester>');
+});
 it('a completion notice posts the report and blocks the record', () => {
   const text = read('channel-responder');
   expect(text).toContain('WORKER <task-id> done <id>');

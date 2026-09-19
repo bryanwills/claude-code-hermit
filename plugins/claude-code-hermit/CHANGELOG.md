@@ -5,6 +5,9 @@
 ### Fixed
 - Settings history names which routine ids and fields changed instead of two identical truncated arrays
 - A config write made during an upgrade is recorded as `upgrade:` plus the writer, not as an operator edit
+- Task records from chat work carry a lesson when the work taught one
+- Asking the agent to park a task records it as waiting instead of leaving it looking active
+- Cost of a task handed to a worker counts toward that task when the handoff turn records no progress line
 - A worker that takes over a task thread after a restart, an unreachable worker or an answer to a waiting task keeps the thread's progress message current instead of going silent until its report
 
 ## [1.4.2] - 2026-09-18

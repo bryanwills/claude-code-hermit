@@ -220,7 +220,7 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
       if (verb === 'note') {
         const metadata = ['due', 'card', 'check', 'decision', 'approval', 'done', 'clear-waiting', 'owner', 'muted'].some(key => key in flags);
         if (!line && !metadata) throw new Error('empty');
-        progress = !!line;
+        progress = !!line || 'owner' in flags;
         if (line) append(record, flags.decision ? 'Decisions' : 'Progress', actor, line, now);
         if ('check' in flags && record.check !== checkFlag(flags)) { record.check = checkFlag(flags); record.result_rev++; }
         if ('due' in flags) record.due = dateFlag(flags, 'due');
