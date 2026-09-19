@@ -374,9 +374,14 @@ if (import.meta.main) {
       // again would print them back-slash escaped.
       const render = (v: Json): string => (typeof v === 'string' ? v : JSON.stringify(v));
       for (const r of rows) {
-        const from = r.old === undefined ? '(unset)' : render(r.old);
-        const to = r.new === undefined ? '(removed)' : render(r.new);
-        console.log(`${r.ts}  ${r.path}  ${from} → ${to}  [${r.actor}]`);
+        const change = r.diff
+          ? [
+              ...r.diff.added.map((id) => `+${id}`),
+              ...r.diff.removed.map((id) => `-${id}`),
+              ...Object.entries(r.diff.changed).map(([id, fields]) => `~${id}(${fields.join(',')})`),
+            ].join(' ') || '(reordered)'
+          :`${r.old === undefined ? '(unset)' : render(r.old)} → ${r.new === undefined ? '(removed)' : render(r.new)}`;
+        console.log(`${r.ts}  ${r.path}  ${change}  [${r.actor}]`);
       }
     }
     process.exit(0);

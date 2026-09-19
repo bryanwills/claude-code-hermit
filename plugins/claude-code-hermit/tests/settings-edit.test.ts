@@ -630,6 +630,17 @@ describe('settings-edit history', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('No recorded settings changes');
   });
+
+  test('history names the routine id and field that changed', async () => {
+    const dir = freshDir();
+    const file = seedConfig(dir, validConfig({
+      routines: [{ id: 'heartbeat-restart', schedule: '0 9 * * *', skill: 'claude-code-hermit:brief', enabled: true }],
+    }));
+    await runScript('settings-edit.ts', { args: [file, 'set', 'routines.0.schedule', '"0 8 * * *"'] });
+    const r = await runScript('settings-edit.ts', { args: [file, 'history', 'routines'] });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('~heartbeat-restart(schedule)');
+  });
 });
 
 describe('settings-edit record-file', () => {

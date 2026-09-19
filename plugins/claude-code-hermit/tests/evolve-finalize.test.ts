@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { finalize, writeSnapshot } from '../scripts/evolve-finalize';
+import { auditConfigChange } from '../scripts/lib/config-audit';
 import { runScript, runPinnedScript } from './helpers/run';
 
 // Fake plugin root with plugin.json version "1.2.6" (shared, read-only across tests).
@@ -417,6 +418,22 @@ test('snapshot mode exits 0 through the CLI and leaves config.json untouched', w
   expect(r.stdout.startsWith('OK|')).toBe(true);
   expect(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')).toBe(before);
   expect(JSON.parse(fs.readFileSync(snapFile(dir), 'utf8')).to).toBe('1.2.6');
+}));
+
+test('step-time writes during a live snapshot are upgrade-prefixed; finalize stays hermit-evolve', withProj(async (dir) => {
+  writeConfig(dir, '{"heartbeat":{"every":"2h"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  writeSnapshot(dir, '1.2.6');
+  // Stand in for a settings-edit write that lands while the snapshot is live.
+  writeConfig(dir, '{"heartbeat":{"every":"30m"},"_hermit_versions":{"claude-code-hermit":"1.2.5"}}');
+  auditConfigChange(dir, { heartbeat: { every: '2h' } }, { heartbeat: { every: '30m' } }, 'settings-edit');
+
+  const result = finalize({ hermitDir: dir, core: '1.2.6', pluginRoot: PR, siblings: [] });
+
+  expect(result.ok).toBe(true);
+  expect(result.audit_scope).toBe('whole-run');
+  expect(ledgerRows(dir).some((r) => r.actor === 'upgrade:settings-edit' && r.path === 'heartbeat.every')).toBe(true);
+  expect(ledgerRows(dir).some((r) => r.actor === 'hermit-evolve' && r.path === 'heartbeat.every')).toBe(true);
+  expect(rowFor(dir, '_hermit_versions.claude-code-hermit').actor).toBe('hermit-evolve');
 }));
 
 test('whole-run: a step-2b migration write is attributed to hermit-evolve', withProj(async (dir) => {

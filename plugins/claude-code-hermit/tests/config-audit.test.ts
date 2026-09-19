@@ -8,6 +8,7 @@ import {
   isSecretPath,
   ledgerPath,
   readHistory,
+  SNAPSHOT_FILE,
 } from '../scripts/lib/config-audit';
 import { setupWorkdir } from './helpers/workdir';
 
@@ -167,6 +168,104 @@ describe('auditConfigChange', () => {
     } finally {
       fs.rmSync(probe, { recursive: true, force: true });
     }
+  });
+
+  test('id-keyed arrays record added ids', () => {
+    withDir((stateDir) => {
+      auditConfigChange(stateDir, { routines: [{ id: 'a' }] }, { routines: [{ id: 'a' }, { id: 'b' }] }, 'settings-edit');
+      const written = rows(stateDir);
+      expect(written).toHaveLength(1);
+      expect(written[0].path).toBe('routines');
+      expect(written[0].diff).toEqual({ added: ['b'], removed: [], changed: {} });
+    });
+  });
+
+  test('id-keyed arrays record removed ids', () => {
+    withDir((stateDir) => {
+      auditConfigChange(stateDir, { routines: [{ id: 'a' }, { id: 'b' }] }, { routines: [{ id: 'a' }] }, 'settings-edit');
+      expect(rows(stateDir)[0].diff).toEqual({ added: [], removed: ['b'], changed: {} });
+    });
+  });
+
+  test('id-keyed arrays record changed field names per id', () => {
+    withDir((stateDir) => {
+      auditConfigChange(
+        stateDir,
+        { routines: [{ id: 'a', schedule: '0 9 * * *' }] },
+        { routines: [{ id: 'a', schedule: '0 8 * * *' }] },
+        'settings-edit',
+      );
+      expect(rows(stateDir)[0].diff).toEqual({ added: [], removed: [], changed: { a: ['schedule'] } });
+    });
+  });
+
+  test('id-keyed array reorder records no changed entries', () => {
+    withDir((stateDir) => {
+      auditConfigChange(
+        stateDir,
+        { routines: [{ id: 'a', n: 1 }, { id: 'b', n: 2 }] },
+        { routines: [{ id: 'b', n: 2 }, { id: 'a', n: 1 }] },
+        'settings-edit',
+      );
+      const written = rows(stateDir);
+      expect(written).toHaveLength(1);
+      expect(written[0].diff).toEqual({ added: [], removed: [], changed: {} });
+    });
+  });
+
+  test('arrays without string ids get no diff', () => {
+    withDir((stateDir) => {
+      auditConfigChange(stateDir, { tags: ['a'] }, { tags: ['a', 'b'] }, 'settings-edit');
+      expect(rows(stateDir)[0].diff).toBeUndefined();
+    });
+  });
+
+  test('a member field named token never puts its value in the row', () => {
+    withDir((stateDir) => {
+      const secret = 'NEVER-LEAK-THIS-TOKEN-VALUE';
+      auditConfigChange(
+        stateDir,
+        { routines: [{ id: 'a', blob: 'x'.repeat(200), token: 'before' }] },
+        { routines: [{ id: 'a', blob: 'x'.repeat(200), token: secret }] },
+        'settings-edit',
+      );
+      const row = rows(stateDir)[0];
+      expect(row.diff).toEqual({ added: [], removed: [], changed: { a: ['token'] } });
+      expect(JSON.stringify(row)).not.toContain(secret);
+    });
+  });
+
+  function plantSnapshot(stateDir: string, ts: string): string {
+    const file = path.join(stateDir, 'state', SNAPSHOT_FILE);
+    fs.writeFileSync(file, JSON.stringify({ ts, to: '1.2.6', config: {} }));
+    return file;
+  }
+
+  test('a live upgrade snapshot prefixes the actor on config.json writes', () => {
+    withDir((stateDir) => {
+      const file = plantSnapshot(stateDir, new Date().toISOString());
+      auditConfigChange(stateDir, { a: 1 }, { a: 2 }, 'settings-edit');
+      auditConfigChange(stateDir, { a: 2 }, { a: 3 }, 'settings-migrate:1.4.0');
+      expect(rows(stateDir)[0].actor).toBe('upgrade:settings-edit');
+      expect(rows(stateDir)[1].actor).toBe('upgrade:settings-migrate:1.4.0');
+      expect(fs.existsSync(file)).toBe(true);
+    });
+  });
+
+  test('a 25h-old snapshot does not prefix the actor', () => {
+    withDir((stateDir) => {
+      plantSnapshot(stateDir, new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString());
+      auditConfigChange(stateDir, { a: 1 }, { a: 2 }, 'settings-edit');
+      expect(rows(stateDir)[0].actor).toBe('settings-edit');
+    });
+  });
+
+  test('a live snapshot does not prefix a non-config.json target', () => {
+    withDir((stateDir) => {
+      plantSnapshot(stateDir, new Date().toISOString());
+      auditConfigChange(stateDir, { a: 1 }, { a: 2 }, 'apply-settings', '.claude/settings.json');
+      expect(rows(stateDir)[0].actor).toBe('apply-settings');
+    });
   });
 });
 
