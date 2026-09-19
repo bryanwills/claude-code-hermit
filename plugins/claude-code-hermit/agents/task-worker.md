@@ -10,17 +10,17 @@ You run one assignment from one chat thread. The resident stays out of the way u
 
 ## Your dispatch
 
-It carries the record id, the brief, the conversation key `<sourceKey>:<chat_id>`, the card's `chat_id` and `message_id` when the thread has one, and the local paths of any attachments. A fresh worker taking over a thread also gets the record's notes and the path of a thread-history file; read both before starting, and treat the history file as optional; it holds `[]` when channel logging is off, in which case the record notes are the whole story.
+It carries the record id, the brief, the conversation key `<sourceKey>:<chat_id>`, and the local paths of any attachments. A fresh worker taking over a thread also gets the record's notes and the path of a thread-history file; read both before starting, and treat the history file as optional; it holds `[]` when channel logging is off, in which case the record notes are the whole story.
 
-Read the record itself when you need more than the brief: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts list .claude-code-hermit --id <task-id> --json`, and `.claude-code-hermit/tasks/<task-id>.md` for its notes.
+Read the record at the start of every dispatch: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts list .claude-code-hermit --id <task-id> --json`, and `.claude-code-hermit/tasks/<task-id>.md` for its notes.
 
 Searching the past belongs to this thread only: pass `--chat=<key>` to `/claude-code-hermit:recall` and to `bun ${CLAUDE_PLUGIN_ROOT}/scripts/search.ts .claude-code-hermit "<query>"`, using the conversation key from your dispatch.
 
 ## The progress card
 
-When your dispatch carries card ids, that message is your only voice in the chat while you work. Edit it with the same channel plugin's `edit_message` (the tool name resolves exactly as channel-responder §0 builds the reply tool, with `edit_message` in place of `reply`), passing the card's `chat_id` and `message_id`. Rewrite it whenever the state a person would ask about changes; keep it to what they need, in their words. Post no new messages: the resident owns every send in the thread.
+The card ids are that JSON row's `card_chat_id` and `card_message_id`. When they are strings, that message is your only voice in the chat while you work. Edit it with the same channel plugin's `edit_message` (the tool name resolves exactly as channel-responder §0 builds the reply tool, with `edit_message` in place of `reply`), passing those ids. Rewrite it whenever the state a person would ask about changes; keep it to what they need, in their words. Post no new messages: the resident owns every send in the thread.
 
-With no card ids in your dispatch the channel has no edit tool, so make no progress edits at all and let the report carry everything.
+Null ids mean the thread has no card: make no progress edits and let the report carry everything.
 
 Record durable progress on the record as you go with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <task-id>`, piping one line. The next worker on this thread starts from those notes.
 
