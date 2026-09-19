@@ -16,6 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { appendJsonlLine, pruneJsonlIfHeadStale } from './append-jsonl';
+import { readJson } from './cli';
 import { readRuntimeJson } from './runtime';
 import { utcISOStamp } from './time';
 
@@ -31,10 +32,18 @@ export interface AuditRow {
   path: string;
   old?: Json;
   new?: Json;
+  /** Ids and field names only, never values. Present on id-keyed array edits. */
+  diff?: { added: string[]; removed: string[]; changed: Record<string, string[]> };
 }
 
 const RETENTION_DAYS = 90;
 const VALUE_CAP = 120;
+
+/** Filename under `state/` for the pre-migration config snapshot evolve-finalize writes. */
+export const SNAPSHOT_FILE = 'evolve-config-snapshot.json';
+
+/** A snapshot older than this is not a live upgrade; do not prefix the actor. */
+export const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Path segments whose values never enter the ledger — only presence markers. */
 const SECRET_SEGMENT = /^(.*token|.*secret|.*password|.*bearer)$/i;
@@ -68,6 +77,60 @@ function capValue(value: Json): Json {
 
 function isPlainObject(v: Json): boolean {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function isIdKeyedArray(v: Json): v is Json[] {
+  return Array.isArray(v) && v.every((m) => isPlainObject(m) && typeof m.id === 'string');
+}
+
+/**
+ * Structural diff for arrays of `{ id: string, ... }` objects. Ids and field
+ * names only: values stay out so a `token` field cannot leak into the ledger
+ * via this path. `old`/`new` on the row remain independently capped.
+ */
+function idKeyedArrayDiff(
+  before: Json,
+  after: Json,
+): { added: string[]; removed: string[]; changed: Record<string, string[]> } | undefined {
+  if (!isIdKeyedArray(before) || !isIdKeyedArray(after)) return undefined;
+  const oldMap = new Map<string, Json>();
+  const newMap = new Map<string, Json>();
+  for (const m of before) oldMap.set(m.id, m);
+  for (const m of after) newMap.set(m.id, m);
+  const added: string[] = [];
+  const removed: string[] = [];
+  const changed: Record<string, string[]> = {};
+  for (const id of oldMap.keys()) {
+    if (!newMap.has(id)) removed.push(id);
+  }
+  for (const id of newMap.keys()) {
+    if (!oldMap.has(id)) added.push(id);
+  }
+  for (const [id, next] of newMap) {
+    const prev = oldMap.get(id);
+    if (prev === undefined) continue;
+    const fields: string[] = [];
+    const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
+    for (const key of keys) {
+      if (JSON.stringify(prev[key]) === JSON.stringify(next[key])) continue;
+      fields.push(key);
+    }
+    if (fields.length > 0) changed[id] = fields;
+  }
+  return { added, removed, changed };
+}
+
+/**
+ * Prefix config.json writes made while an upgrade snapshot is live. Never
+ * throws and never deletes the snapshot: readSnapshot() owns discard.
+ */
+function actorFor(stateDir: string, actor: string, target: AuditTarget): string {
+  if (target !== 'config.json') return actor;
+  if (actor === 'hermit-evolve' || actor === 'evolve-finalize') return actor;
+  const snap = readJson(path.join(stateDir, 'state', SNAPSHOT_FILE));
+  const taken = new Date(snap?.ts).getTime();
+  if (Number.isNaN(taken) || Date.now() - taken > SNAPSHOT_MAX_AGE_MS) return actor;
+  return `upgrade:${actor}`;
 }
 
 /**
@@ -119,15 +182,23 @@ export function auditConfigChange(
     const ts = utcISOStamp();
     const runtime = readRuntimeJson(path.join(stateDir, 'state'));
     const session_id = runtime?.session_id ?? 'unknown';
+    const attributed = actorFor(stateDir, actor, target);
 
     const rows: AuditRow[] =
       before === undefined
-        ? [{ ts, session_id, actor, target, path: '*', new: 'config created' }]
-        : diffLeaves(before, after).map(({ path: dotted, old, new: next }) =>
-            isSecretPath(dotted)
-              ? { ts, session_id, actor, target, path: dotted, old: presence(old), new: presence(next) }
-              : { ts, session_id, actor, target, path: dotted, old: capValue(old), new: capValue(next) },
-          );
+        ? [{ ts, session_id, actor: attributed, target, path: '*', new: 'config created' }]
+        : diffLeaves(before, after).map(({ path: dotted, old, new: next }) => {
+            if (isSecretPath(dotted)) {
+              return { ts, session_id, actor: attributed, target, path: dotted, old: presence(old), new: presence(next) };
+            }
+            const row: AuditRow = {
+              ts, session_id, actor: attributed, target, path: dotted,
+              old: capValue(old), new: capValue(next),
+            };
+            const diff = idKeyedArrayDiff(old, next);
+            if (diff) row.diff = diff;
+            return row;
+          });
     if (rows.length === 0) return;
 
     const file = ledgerPath(stateDir);

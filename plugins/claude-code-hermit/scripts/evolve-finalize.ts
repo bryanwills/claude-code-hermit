@@ -34,7 +34,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { assertStateDir, pinStateDirOrExit } from './lib/cc-compat';
-import { auditConfigChange } from './lib/config-audit';
+import { auditConfigChange, SNAPSHOT_FILE, SNAPSHOT_MAX_AGE_MS } from './lib/config-audit';
 import { cmpSemver } from './lib/semver';
 import { utcISOStamp } from './lib/time';
 import { applyMissingDefaults, hasPath, isPlainObject } from './lib/evolve-config';
@@ -61,14 +61,13 @@ export interface FinalizeResult {
 // could only ever show the version stamp and this run's own defaults merge. The
 // snapshot moves `before` ahead of those writes, which is what lets the ledger
 // answer "why did this setting change during the upgrade?".
-const SNAPSHOT_FILE = 'evolve-config-snapshot.json';
-
-// A snapshot older than this is not trusted. The window it closes: a prior run
-// wrote one and aborted before step 9, the operator then edited config by hand,
-// and a later run drops the (model-performed) step-1 snapshot — the stale file
-// would attribute the operator's own edits to the upgrade. Degrading to
-// version-only is honest; a wrong row is not.
-const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// SNAPSHOT_FILE / SNAPSHOT_MAX_AGE_MS live in config-audit.ts so step-time
+// writes can detect a live snapshot without importing this script. A snapshot
+// older than the window is not trusted: a prior run wrote one and aborted
+// before step 9, the operator then edited config by hand, and a later run
+// drops the (model-performed) step-1 snapshot: the stale file would attribute
+// the operator's own edits to the upgrade. Degrading to version-only is honest;
+// a wrong row is not.
 
 function snapshotPath(hermitDir: string): string {
   return path.join(hermitDir, 'state', SNAPSHOT_FILE);
