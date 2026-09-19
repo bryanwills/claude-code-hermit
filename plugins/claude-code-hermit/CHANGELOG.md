@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Fixed
+- Task records from chat work carry a lesson when the work taught one
+- Asking the agent to park a task records it as waiting instead of leaving it looking active
 - A worker that takes over a task thread after a restart, an unreachable worker or an answer to a waiting task keeps the thread's progress message current instead of going silent until its report
 
 ## [1.4.2] - 2026-09-18

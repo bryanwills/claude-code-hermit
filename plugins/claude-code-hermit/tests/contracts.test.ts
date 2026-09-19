@@ -4003,4 +4003,8 @@ describe('task-worker agent contract', () => {
     expect(agent).toContain('.claude-code-hermit/helper-reports/<id>.md');
     expect(agent).toContain('edit_message');
   });
+
+  test('records a reusable lesson when the work taught one', () => {
+    expect(agent).toContain('task.ts lesson');
+  });
 });
