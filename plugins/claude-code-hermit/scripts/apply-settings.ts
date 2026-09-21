@@ -142,8 +142,14 @@ const HERMIT_ALLOW = [
   // space before * is a word boundary: `proposal micro *` matches
   // `proposal micro .claude-code-hermit brief-cycle` but not a
   // `micro…`-prefixed verb.
+  // `block` and `close` are the two commands the waiting-task annotation hands
+  // the resident, so they are sealed beside note and list: the annotation
+  // reaches the model with no resolvable plugin root, and its `bun
+  // */scripts/task.ts*` twin is suspended under auto mode.
   'Bash(.claude-code-hermit/bin/hermit-run task note *)',
   'Bash(.claude-code-hermit/bin/hermit-run task list *)',
+  'Bash(.claude-code-hermit/bin/hermit-run task block *)',
+  'Bash(.claude-code-hermit/bin/hermit-run task close *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal micro *)',
   'Bash(.claude-code-hermit/bin/hermit-run proposal metrics *)',
   // The shared domain-hatch protocol, pinned per verb for the same reason:

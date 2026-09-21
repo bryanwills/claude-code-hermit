@@ -477,11 +477,6 @@ export function deriveDuties(dir: string): { name: string; last_run: string | nu
   const names = new Set<string>();
   const config = readConfigRaw(dir);
   for (const routine of config?.routines ?? []) if (typeof routine.id === 'string') names.add(routine.id);
-  try {
-    for (const line of fs.readFileSync(metrics, 'utf8').split('\n')) {
-      try { const row = JSON.parse(line); if (typeof row.routine_id === 'string') names.add(row.routine_id); } catch {}
-    }
-  } catch {}
   const rows: ReturnType<typeof deriveDuties> = [...names].sort().map(name => ({ name: `routine:${name}`, last_run: lastRoutineFire(metrics, name), last_verdict: lastRoutineEvent(metrics, name) }));
   const alert = readAlertState(path.join(dir, 'state/alert-state.json'));
   const value = alert.kind === 'ok' ? alert.value : null;
