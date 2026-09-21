@@ -71,6 +71,7 @@ export function run(ctx: StageContext): StageResult | void {
 
   if (action === 'pause') {
     setPause(dir, { reason: 'operator', by });
+    ctx.suppressResponderInvoke = true;
     return {
       context: `[pause] Hermit paused by ${by} (indefinite). Only the channel reply tool works until resumed.\n`,
     };
@@ -87,6 +88,7 @@ export function run(ctx: StageContext): StageResult | void {
     }
     const until = new Date(Date.now() + ms).toISOString();
     setPause(dir, { reason: 'operator', by, until });
-    return { context: `[pause] Hermit paused by ${by} until ${until}.\n` };
+    ctx.suppressResponderInvoke = true;
+    return { context: `[pause] Hermit paused by ${by} until ${until}. Only the channel reply tool works until resumed.\n` };
   }
 }

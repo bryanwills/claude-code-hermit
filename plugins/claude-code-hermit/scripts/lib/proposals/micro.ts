@@ -6,7 +6,11 @@
 //   proposal.ts micro <hermit-state-dir> resolve <MP-id> --action approved|rejected|answered|expired [--answer "<label>"]
 //   proposal.ts micro <hermit-state-dir> nudge <MP-id>
 //   proposal.ts micro <hermit-state-dir> brief-cycle
+//   proposal.ts micro <hermit-state-dir> match [<MP-id>] --reply <token>
 // Output (stdout, one line):
+//   MATCH|<id>|<yes|no|label>|<tier>|<on_resolve or ->
+//   AMBIGUOUS|<reason>|<id>=<opt1>/<opt2>;<id>=...
+//   NONE|no-pending
 //   RESOLVED|<id>|<action>
 //   NUDGED|<id>|<follow_up_count>
 //   NONE|no-match
@@ -29,7 +33,7 @@
 // exists to remove. (Targeted resolve/nudge keep `NONE|no-match` exit 0 for a
 // well-formed but absent id — channel-responder's benign double-resolve relies
 // on it; brief-cycle never emits NONE.)
-// Implements channel-responder/SKILL.md § Micro-approval response and
+// Implements channel-responder/approvals.md § Micro-approval response and
 // brief/SKILL.md's MP lifecycle step.
 
 import path from 'node:path';
@@ -42,7 +46,7 @@ import { listProposalFiles, readFrontmatter } from '../frontmatter';
 
 type Json = any;
 
-const VERBS = ['resolve', 'nudge'];
+const VERBS = ['resolve', 'nudge', 'match'];
 const ACTIONS = ['approved', 'rejected', 'answered', 'expired'];
 
 // A proposal in one of these states can no longer consume an "how should I
@@ -50,7 +54,7 @@ const ACTIONS = ['approved', 'rejected', 'answered', 'expired'];
 // deferred proposal queues a fresh entry, so sweeping it loses nothing.
 export const MOOT_STATUSES = ['resolved', 'dismissed', 'deferred'];
 
-const USAGE = 'Usage: proposal.ts micro <hermit-state-dir> resolve|nudge <MP-id> [--action <a>] [--answer <label>] | brief-cycle | sweep';
+const USAGE = 'Usage: proposal.ts micro <hermit-state-dir> resolve|nudge <MP-id> [--action <a>] [--answer <label>] | match [<MP-id>] --reply <token> | brief-cycle | sweep';
 
 function fail(msg: string): never {
   console.error(msg);
@@ -249,6 +253,54 @@ function sweepCli(stateDir: string): never {
   emit(result.swept.length > 0 ? `SWEPT|${result.swept.join(',')}` : 'NONE|no-moot');
 }
 
+// Read-only matching leaves resolution and its write ordering with resolve.
+function matchReply(stateDir: string, args: string[]): never {
+  const hasId = args.length === 4;
+  if ((!hasId && args.length !== 3) || args[hasId ? 2 : 1] !== '--reply'
+    || (hasId && args[1].startsWith('-'))) fail(USAGE);
+  const id = hasId ? args[1] : undefined;
+  const reply = args[hasId ? 3 : 2].trim().toLowerCase();
+  const read = readMicroProposals(path.join(stateDir, 'state', 'micro-proposals.json'));
+  if (read.status === 'corrupt') fail(`${read.error} — refusing to match. Repair it first.`);
+  const pending: Json[] = read.status === 'missing' ? []
+    : read.data.pending.filter((entry: Json) => entry?.status === 'pending');
+  if (!pending.length) emit('NONE|no-pending');
+  const entry = id ? pending.find(entry => entry.id === id) : pending[0];
+  if (!entry) emit('NONE|no-match');
+
+  // Embedded newlines in operator-authored labels must not split the protocol line.
+  const line = (value: unknown): string => String(value).replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  const ambiguous = (reason: string, entries: Json[]): never => emit(
+    `AMBIGUOUS|${reason}|${entries.map(entry =>
+      `${line(entry.id)}=${(entry.options ?? ['yes', 'no']).map(line).join('/')}`).join(';')}`,
+  );
+  if (!id && pending.length > 1) ambiguous('multiple-pending', pending);
+  let answer: string;
+  if (entry.options === undefined) {
+    if (reply !== 'yes' && reply !== 'no') emit('NONE|no-match');
+    answer = reply;
+  } else {
+    if (!Array.isArray(entry.options) || !entry.options.every((label: unknown) => typeof label === 'string')) {
+      fail('micro-proposals.json options must be an array of labels. Repair it first.');
+    }
+    const options: string[] = entry.options;
+    if (reply === 'yes' || reply === 'no') ambiguous('options-require-choice', [entry]);
+    if (/^[+-]?\d+$/.test(reply)) {
+      const index = Number(reply) - 1;
+      if (!Number.isSafeInteger(index) || index < 0 || index >= options.length) {
+        ambiguous('number-out-of-range', [entry]);
+      }
+      answer = options[index];
+    } else {
+      const matches = reply ? options.filter(label => label.toLowerCase().startsWith(reply)) : [];
+      if (!matches.length) emit('NONE|no-match');
+      if (matches.length > 1) ambiguous('multiple-labels', [entry]);
+      answer = matches[0];
+    }
+  }
+  emit(`MATCH|${line(entry.id)}|${line(answer)}|${line(entry.tier)}|${line(entry.on_resolve ?? '-')}`);
+}
+
 export function run(stateDir: string, args: string[]): never {
   const verb = args[0];
   const id = args[1];
@@ -258,6 +310,7 @@ export function run(stateDir: string, args: string[]): never {
   // brief-cycle and sweep take no <MP-id> — dispatch before the id requirement.
   if (verb === 'brief-cycle') briefCycle(stateDir);
   if (verb === 'sweep') sweepCli(stateDir);
+  if (verb === 'match') matchReply(stateDir, args);
 
   if (!id) fail(USAGE);
 

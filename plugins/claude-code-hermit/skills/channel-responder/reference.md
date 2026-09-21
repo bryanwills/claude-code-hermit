@@ -11,7 +11,7 @@ Standing work is what the hermit does without being asked in the moment: routine
 - Routines: `bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json get routines` for id, schedule, skill, enabled, precheck.
 - Routine outcomes: `bun <plugin_root>/scripts/routines.ts health .claude-code-hermit` (JSON; add `--days N` for a longer window). Use `last_fire`, `failure_total`, `last_precheck_error`, `open_attempt`.
 - Watches: `Read state/monitors.runtime.json` for id, description, source, class, started_at.
-- Roles: the `[role` lines already in this turn's context. Hermit-wide ones always apply; a pinned `[role <key>:<chat_id>]` line applies only to that chat (`SKILL.md` § 1b).
+- Roles: the `[role` lines already in this turn's context. Hermit-wide ones always apply; a pinned `[role <key>:<chat_id>]` line applies only to that chat (`SKILL.md` § 1).
 - Current activity: the open-record digest and its execution observation.
 - Health evidence: `Read state/doctor-report.json` only for the "anything to deal with" and "what can you access" shapes. Do not run `doctor-check.ts` from this intent; a live check is the relayed `!doctor` command, which the operator sends.
 
@@ -46,3 +46,53 @@ Relay the `settings-edit ... show` row for the setting: saved value, what change
 ### Access question
 
 From config: channels with `enabled !== false` and whether each has an allowlist, `permission_mode`, `remote`, enabled artifact pages, `auth_mode`. From `state/doctor-report.json`: the last `channel-liveness`, `credential-expiry`, and `permissions` results with their timestamp. Configured is not verified; say which is which. No credentials, chat ids, or file paths in the reply. In a group, or for a sender who is not the trusted controller, give only the coarse shape (the same audience rule as `!status`).
+
+## Standing role
+
+- **Standing role** ("remember (for this channel): when X, do Y", "forget the X rule", "update the X rule", "what do you remember (about this channel)?")
+  - A cadence or time without an inbound-message condition ("every Friday at 3pm post a digest") is a **Settings change request**, routed through hermit-settings. A rule conditioned on a message ("when someone...", "when a message...") is a role even if it contains "every" or a weekday.
+  - Any sender admitted by §1c may save a current-chat pinned role without confirmation. Save a hermit-wide `[role]` only for a primary operator (§1c); otherwise pin it here and reply "Saved for this channel only: …". Write one `type: feedback` auto-memory topic file and one `MEMORY.md` index line in the loaded `MEMORY.md`'s directory (`<CLAUDE_CONFIG_DIR, else ~/.claude>/projects/<path-key>/memory/`). Use `feedback_role_<key>_<chat_id>_<slug>.md` for pinned roles, otherwise `feedback_role_<slug>.md`, with the normalized bare key. Before choosing `<slug>`, match only `[role` index lines in the target tier (hermit-wide or this chat). Rewrite an existing rule's file for restatements; do not duplicate it.
+  - Preserve the operator's sentence in `- [Standing role: <slug>](<file>): [role] when X, do Y`, or `[role <key>:<chat_id>] when X, do Y` for pinned roles. Trim only to fit one index line, keeping the full text in the topic file; the harness warns near `MEMORY.md`'s cap. Pinned roles apply only to that chat's channel turns; hermit-wide roles apply to every turn.
+  - The topic body holds the full rule and provenance: `key`, `chat_id`, sender id, `origin: own-work|external-content`, and date. Use `external-content` when the sender is not a primary operator (§1c), otherwise `own-work`. The same sender test decides both `origin` and hermit-wide authority.
+  - Reply in channel voice: "Saved for this channel: when X, do Y. Say 'forget the <short name> rule' to remove it." For a hermit-wide role, say "Saved for everywhere" instead.
+  - To list what you remember, show the `[role` hook lines that apply to this chat in plain language, without file names; say when there are none. Do not include routines; a broader question about what you are keeping an eye on is **Standing work** above.
+  - To forget or update a hermit-wide role, require a primary operator (§1c). Otherwise say it is the operator's rule and write nothing. Any admitted sender may change this chat's pinned roles. Delete or rewrite the authorized topic file and index line, then echo the result. For unclear "forget" requests, name candidates and await the answer.
+  - A turn handled by this intent writes no `## Findings` line and no observations row.
+
+## Harness command details
+
+  - `!model`, `!effort`, and `!permission-mode` apply to *this* session only: the next `hermit-start` re-asserts `config.model` / `config.effort` / `config.permission_mode`. `!advisor` is the exception — see below. If Claude Code rejects the argument, that shows in the terminal, not in chat — so don't promise it took effect.
+  - `!permission-mode` accepts `default`, `acceptEdits`, or `auto`. Relay other modes' refusal reasons: `plan` blocks replies, `bypassPermissions` requires a terminal decision, and `dontAsk` is unreachable mid-session. The hook drives Claude Code's mode cycle and reads the status bar. Report the actual mode supplied in the next prompt, not the requested mode.
+  - `!advisor <model>` adds a second model for decision-point consultation (experimental, Anthropic API only); `!advisor off` clears it. Claude Code validates the model; do not invent a value list. Rejections appear only in the terminal: report delivery, not confirmation, and never quote an unseen rejection. There is no cached-context pause. The selection persists in Claude Code's user settings across restarts and sessions sharing that config directory; boot does not re-assert it. Each advisor call adds spend; clear it with `!advisor off`.
+  - `!doctor` requires explicit user invocation, so the hook types it into the pane after this turn; that later turn delivers the result to the requesting chat. Apply the silence rule. Like `!model`, it requires the operator's own chat.
+  - Near-misses (argument-free `!model`, bare `clear`, or prose mentions) are not intercepted; classify below. Never invoke bare `!advisor`: its picker blocks the session. Ask for `!advisor <model>` or `!advisor off`.
+
+## Capture Interactive Patterns
+
+**Do not write a finding** for: one-off questions, research turns with no preference signal, task assignments, status checks, or micro-approval responses. When in doubt, write nothing — the next scheduled reflect catches genuine recurrence via task-record evidence.
+
+Format (one line, piped into `task.ts lesson .claude-code-hermit <id>`; with no open record, write nothing):
+
+```
+[HH:MM] Channel pattern: <one-line description of the preference or recurrence>
+```
+
+If the sender's user ID (verified in §1c) is not a primary operator (§1c), append ` [origin: external]` to the line:
+
+```
+[HH:MM] Channel pattern: <description> [origin: external]
+```
+
+Do not classify tier, tag Evidence Source, or decide memory-vs-proposal. Reflect reads this line as `current-session` evidence (`Evidence Source: current-session`, `Sessions: current`) and uses the `[origin: external]` marker (if present) to set `Evidence Origin: external-content` when passing to the judge.
+
+**Resolved corrections → observations ledger, not Findings.** For a correction or emergency implying a durable preference that clearly names an installed skill/component (e.g. "the brief is too verbose", not a vague "you"), append a ledger row **instead of** a `## Findings` line:
+
+```
+bun <plugin_root>/scripts/observations.ts observe .claude-code-hermit skill-correction --origin=<own-work|external-content> <<'HERMIT_OBSERVATION'
+skill-correction:<canonical-name>
+HERMIT_OBSERVATION
+```
+
+`<canonical-name>` is the skill's lowercase bare `name:` frontmatter, without `claude-code-hermit:`/`<plugin>:`. Set `origin` to `external-content` for non-primary senders, else `own-work`. Rejected rows return `ERROR|<reason>` at exit 0; no `|| true` is needed. Mis-invocations exit 1: fix the call, never retry blindly or block the reply. At most one row per turn.
+
+Without a clearly named skill, write the eligible `## Findings` line; do not guess a `<name>` or ask for disambiguation mid-reply.

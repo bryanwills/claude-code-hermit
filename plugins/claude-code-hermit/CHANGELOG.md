@@ -6,8 +6,13 @@
 - `spawn-session --proposal <PROP-id>` attaches the proposal to the helper's prompt, opens a linked task record, and appends a handoff line under the proposal's `## Operator Decision`
 - Spawned helpers close with a five-field `GUEST_REPORT:` block that the idle relay carries to the operator, into the linked record's result, and onto the proposal, leaving proposal status untouched
 - `--no-artifacts` on `proposal-act` skips the dashboard and proposals-page refreshes, as `proposal-create` does
+### Changed
+- Channel responder and task instructions fit the compaction retention budget, with task procedures owned by the task skill and conditional procedures in responder reference files
+- Micro-proposal answers use read-only `proposal.ts micro match` for target and option matching
 
 ### Fixed
+- Channel reminders request the responder until a successful invocation is recorded for the current session after its last context reset, and never while paused
+- Undelivered client notices are persisted by the sender in `state/watchdog-events.jsonl`
 - Duty digests show only configured routines and pair the latest event with its own timestamp
 - Waiting resident task messages include the newest waiting reason and commands to record the outcome
 - Resident permission grant covers `task block` and `task close`, the commands that line offers

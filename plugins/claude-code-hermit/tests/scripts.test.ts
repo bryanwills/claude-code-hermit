@@ -5297,3 +5297,77 @@ describe('session-check config validation', () => {
     }
   });
 });
+
+
+describe('proposal micro match is read-only', () => {
+  const plain = { id: 'MP-plain', status: 'pending', tier: 1, question: 'Proceed?' };
+  const choices = { id: 'MP-options', status: 'pending', tier: 2,
+    options: ['Ship now', 'Ship later', 'Cancel'], on_resolve: '/example {answer}' };
+  const cases: { name: string; pending: any[]; args: string[]; output: string }[] = [
+    { name: 'yes case insensitive', pending: [plain], args: ['--reply', 'YES'], output: 'MATCH|MP-plain|yes|1|-' },
+    { name: 'no case insensitive', pending: [plain], args: ['--reply', 'No'], output: 'MATCH|MP-plain|no|1|-' },
+    { name: 'explicit id', pending: [plain], args: ['MP-plain', '--reply', 'yes'], output: 'MATCH|MP-plain|yes|1|-' },
+    { name: 'unknown id', pending: [plain], args: ['MP-other', '--reply', 'yes'], output: 'NONE|no-match' },
+    { name: 'unknown answer', pending: [plain], args: ['--reply', 'perhaps'], output: 'NONE|no-match' },
+    { name: 'number', pending: [choices], args: ['--reply', '2'], output: 'MATCH|MP-options|Ship later|2|/example {answer}' },
+    { name: 'id and number', pending: [choices], args: ['MP-options', '--reply', '1'], output: 'MATCH|MP-options|Ship now|2|/example {answer}' },
+    { name: 'unique label prefix', pending: [choices], args: ['--reply', 'cAn'], output: 'MATCH|MP-options|Cancel|2|/example {answer}' },
+    { name: 'full label', pending: [choices], args: ['--reply', 'ship NOW'], output: 'MATCH|MP-options|Ship now|2|/example {answer}' },
+    { name: 'multi-label prefix', pending: [choices], args: ['--reply', 'ship'], output: 'AMBIGUOUS|multiple-labels|MP-options=Ship now/Ship later/Cancel' },
+    { name: 'number too large', pending: [choices], args: ['--reply', '4'], output: 'AMBIGUOUS|number-out-of-range|MP-options=Ship now/Ship later/Cancel' },
+    { name: 'zero', pending: [choices], args: ['--reply', '0'], output: 'AMBIGUOUS|number-out-of-range|MP-options=Ship now/Ship later/Cancel' },
+    { name: 'negative number', pending: [choices], args: ['--reply', '-1'], output: 'AMBIGUOUS|number-out-of-range|MP-options=Ship now/Ship later/Cancel' },
+    { name: 'yes against options', pending: [choices], args: ['--reply', 'yes'], output: 'AMBIGUOUS|options-require-choice|MP-options=Ship now/Ship later/Cancel' },
+    { name: 'no against options', pending: [choices], args: ['--reply', 'NO'], output: 'AMBIGUOUS|options-require-choice|MP-options=Ship now/Ship later/Cancel' },
+    { name: 'no matching label', pending: [choices], args: ['--reply', 'unrelated'], output: 'NONE|no-match' },
+    { name: 'several without id', pending: [plain, choices], args: ['--reply', '2'], output: 'AMBIGUOUS|multiple-pending|MP-plain=yes/no;MP-options=Ship now/Ship later/Cancel' },
+    { name: 'several with id', pending: [plain, choices], args: ['MP-options', '--reply', '3'], output: 'MATCH|MP-options|Cancel|2|/example {answer}' },
+    { name: 'none pending', pending: [], args: ['--reply', 'yes'], output: 'NONE|no-pending' },
+    { name: 'resolved rows ignored', pending: [{ ...choices, status: 'answered' }, null, plain], args: ['--reply', 'yes'], output: 'MATCH|MP-plain|yes|1|-' },
+    { name: 'only resolved rows', pending: [{ ...plain, status: 'approved' }], args: ['--reply', 'yes'], output: 'NONE|no-pending' },
+  ];
+  for (const item of cases) test(item.name, withDir(async (dir) => {
+    const file = hermit(dir, 'state', 'micro-proposals.json');
+    const ledger = hermit(dir, 'state', 'proposal-metrics.jsonl');
+    const before = JSON.stringify({ pending: item.pending });
+    write(file, before);
+    write(ledger, '{"prior":true}\n');
+    const beforeStat = fs.statSync(file);
+    const result = await runProposal(hermit(dir), ['micro', 'match', ...item.args]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(item.output + '\n');
+    expect(result.stderr).toBe('');
+    expect(fs.readFileSync(file, 'utf8')).toBe(before);
+    expect(fs.statSync(file).mtimeMs).toBe(beforeStat.mtimeMs);
+    expect(fs.statSync(file).ino).toBe(beforeStat.ino);
+    expect(fs.readFileSync(ledger, 'utf8')).toBe('{"prior":true}\n');
+  }));
+
+  test('missing file stays missing', withDir(async (dir) => {
+    const result = await runProposal(hermit(dir), ['micro', 'match', '--reply', 'yes']);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('NONE|no-pending\n');
+    expect(fs.existsSync(hermit(dir, 'state', 'micro-proposals.json'))).toBe(false);
+    expect(fs.existsSync(hermit(dir, 'state', 'proposal-metrics.jsonl'))).toBe(false);
+  }));
+
+  test('corrupt file fails loud without writes', withDir(async (dir) => {
+    const file = hermit(dir, 'state', 'micro-proposals.json');
+    write(file, '{broken');
+    const result = await runProposal(hermit(dir), ['micro', 'match', '--reply', 'yes']);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('unparseable');
+    expect(fs.readFileSync(file, 'utf8')).toBe('{broken');
+    expect(fs.existsSync(hermit(dir, 'state', 'proposal-metrics.jsonl'))).toBe(false);
+  }));
+
+  for (const args of [[], ['MP-plain'], ['--reply'], ['--bogus', 'yes'], ['MP-plain', '--reply', 'yes', 'extra']]) {
+    test(`rejects malformed match args ${JSON.stringify(args)}`, withDir(async (dir) => {
+      const result = await runProposal(hermit(dir), ['micro', 'match', ...args]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(fs.existsSync(hermit(dir, 'state', 'micro-proposals.json'))).toBe(false);
+    }));
+  }
+});

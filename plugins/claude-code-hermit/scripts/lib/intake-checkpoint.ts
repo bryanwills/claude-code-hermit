@@ -27,7 +27,7 @@ export function intakeBlockReason(dir: string, sessionId: string | null): string
     const thisTurn = tasks.filter(task => Date.parse(task.opened_at) >= turnAt);
     const ackConversation = `${ack.channel}:${ack.chat_id}`;
     if (thisTurn.length === 0 && !tasks.some(task => task.status === 'open' && task.conversation === ackConversation)) {
-      return 'channel-responder Task assignment is still open. Run task.ts open now for the work you just acknowledged.';
+      return 'task skill intake is still open. Run task.ts open now for the work you just acknowledged.';
     }
 
     if (thisTurn.some(task => {
@@ -36,7 +36,7 @@ export function intakeBlockReason(dir: string, sessionId: string | null): string
       const type = cachedChat(dir, chatId)?.type;
       return type === 0 || type === 5;
     })) {
-      return 'channel-responder Resident guild thread is still open. The task record is keyed to a guild channel; open a thread and key the record to it.';
+      return 'task skill resident guild thread is still open. The task record is keyed to a guild channel; open a thread and key the record to it.';
     }
     return null;
   } catch {

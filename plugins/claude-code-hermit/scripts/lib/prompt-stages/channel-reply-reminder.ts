@@ -10,7 +10,9 @@
 
 import { safeForLLM } from '../sanitize';
 import { logMessage, isLoggingEnabled, unaddressedSince } from '../channel-log';
-import { readExecution } from '../tasks';
+import path from 'node:path';
+import { readJson } from '../cli';
+import { isPaused } from '../pause';
 import { isAllowedSender, allowedUserIds, channelBotIdentity, isPassiveChat, isSelfMentioned } from '../channel-auth';
 import { escapeRegExp } from '../md-write';
 import type { ChannelEnvelope, StageContext, StageResult } from './types';
@@ -108,17 +110,10 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
     ? `\`${tool}\` with chat_id="${chatId}"`
     : `the channel's \`reply\` tool with chat_id="${chatId}"`;
 
-  const execution = readExecution(ctx.dir);
-  const invokeNow = execution.state === 'unknown'
-    && (execution.reason?.startsWith('resident-start:') || execution.reason === 'precompact');
-
   let reminder =
     `[channel reply reminder] Inbound message arrived on the \`${source || 'unknown'}\` channel` +
     ` (chat_id=\`${chatId}\`). Every reply, including a short acknowledgement, must go through ${toolLine}.` +
     ` Transcript/terminal output does not reach the operator.` +
-    (invokeNow
-      ? ' Handle it with the channel-responder skill: invoke `/claude-code-hermit:channel-responder` now; this is the first message since the context was reset.'
-      : ' Handle it with the channel-responder skill: invoke `/claude-code-hermit:channel-responder` unless its instructions are already in this context.') +
     selfMentionClause(ctx, envelope) + '\n';
 
   const addressed = passive
@@ -154,4 +149,24 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
   }
 
   return { context: reminder };
+}
+
+// Control stages must settle before asking for a Skill tool call.
+export function invokeResponder(ctx: StageContext): StageResult | void {
+  if (!ctx.envelope || ctx.suppressResponderInvoke) return;
+  // pause-gate.ts denies every tool but the channel reply tool, so while the
+  // hermit is paused a Skill call can only be refused. A refused call leaves no
+  // PostToolUse record, so the request would repeat on every message for the
+  // whole pause window.
+  if (isPaused(ctx.dir).paused) return;
+  const record = readJson(path.join(ctx.dir, 'state', 'channel-responder-invoked.json'));
+  const sameSession = typeof ctx.sessionId === 'string' && !!ctx.sessionId
+    && record?.session_id === ctx.sessionId;
+  const invokedAt = typeof record?.at === 'string' ? Date.parse(record.at) : NaN;
+  const runtime = ctx.runtime();
+  const resetAt = typeof runtime?.last_context_reset_at === 'string'
+    ? Date.parse(runtime.last_context_reset_at) : NaN;
+  if (sameSession && Number.isFinite(invokedAt)
+    && (!Number.isFinite(resetAt) || invokedAt >= resetAt)) return;
+  return { context: 'Handle it with the channel-responder skill: invoke `/claude-code-hermit:channel-responder` now; no invocation has been observed in this session since the last context reset.' };
 }

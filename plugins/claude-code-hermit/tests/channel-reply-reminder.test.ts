@@ -55,18 +55,98 @@ describe('channel-reply-reminder', () => {
     const r = await run('<channel source="discord" chat_id="1" user="U1">plain message</channel>', dir);
     expect(r.stdout).not.toContain('your own account on this channel');
     expect(r.stdout).toContain('[channel reply reminder]');
-    expect(r.stdout).toContain('unless its instructions are already in this context');
+    expect(r.stdout).toContain('invoke `/claude-code-hermit:channel-responder` now');
   }, withBotId()));
 
-  test('first message after context reset — invoke the responder now', withDir(async (dir) => {
-    write(hermit(dir, 'state', 'execution.json'), JSON.stringify({
-      state: 'unknown', turn_id: null, at: new Date().toISOString(),
-      source: null, cc_session_id: null, reason: 'resident-start:compact',
+  test('invoke request survives non-channel prompts and repeats until observed after reset', withDir(async (dir) => {
+    const reset = '2026-09-20T12:00:00.000Z';
+    write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ last_context_reset_at: reset }));
+    const prompt = '<channel source="discord" chat_id="1" user="U1">plain message</channel>';
+    const runSession = (prompt: string, session = 'resident') => runScript('user-prompt-pipeline.ts', {
+      stdin: JSON.stringify({ prompt, session_id: session }), cwd: dir,
+    });
+    const invoke = 'invoke `/claude-code-hermit:channel-responder` now';
+    expect((await runSession(prompt)).stdout).toContain(invoke);
+    expect((await runSession('heartbeat')).stdout).not.toContain(invoke);
+    expect((await runSession(prompt)).stdout).toContain(invoke);
+    write(hermit(dir, 'state', 'channel-responder-invoked.json'), JSON.stringify({
+      session_id: 'resident', at: '2026-09-20T11:00:00.000Z',
     }));
-    const r = await run('<channel source="discord" chat_id="1" user="U1">plain message</channel>', dir);
-    expect(r.stdout).toContain('now; this is the first message since the context was reset');
-    expect(r.stdout).not.toContain('unless its instructions are already in this context');
-  }, withBotId()));
+    expect((await runSession(prompt)).stdout).toContain(invoke);
+    expect((await runSession(prompt)).stdout).toContain(invoke);
+    const hook = await runScript('channel-responder-invoked.ts', {
+      cwd: dir, stdin: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Skill',
+        session_id: 'resident', tool_input: { skill: 'claude-code-hermit:channel-responder' },
+        tool_response: { success: true } }),
+    });
+    expect(hook.exitCode).toBe(0);
+    expect(hook.stdout).toBe('');
+    expect(hook.stderr).toBe('');
+    const record = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'channel-responder-invoked.json'), 'utf8'));
+    expect(record.session_id).toBe('resident');
+    expect(Date.parse(record.at)).toBeGreaterThan(Date.parse(reset));
+    expect((await runSession(prompt)).stdout).not.toContain('invoke `');
+    expect((await runSession(prompt, 'another-session')).stdout).toContain(invoke);
+    for (const runtime of ['{}', '{broken']) {
+      write(hermit(dir, 'state', 'runtime.json'), runtime);
+      expect((await runSession(prompt)).stdout).not.toContain('invoke `');
+      expect((await runSession(prompt, 'another-session')).stdout).toContain(invoke);
+    }
+  }));
+
+  test('Skill hook ignores other skills, failed calls, guests and malformed payloads', withDir(async (dir) => {
+    const recordPath = hermit(dir, 'state', 'channel-responder-invoked.json');
+    const baseline = '{"session_id":"prior","at":"2026-09-20T10:00:00.000Z"}';
+    write(recordPath, baseline);
+    write(hermit(dir, 'state', '.guest-guest'), 'guest');
+    const payload = { hook_event_name: 'PostToolUse', tool_name: 'Skill', session_id: 'resident',
+      tool_input: { skill: 'channel-responder' }, tool_response: { success: true } };
+    for (const input of ['{broken', 'null', JSON.stringify({ ...payload, tool_input: {} }),
+      JSON.stringify({ ...payload, tool_input: { skill: 'task' } }),
+      JSON.stringify({ ...payload, tool_response: { success: false } }),
+      JSON.stringify({ ...payload, session_id: 'guest' }),
+      JSON.stringify({ ...payload, session_id: null })]) {
+      const result = await runScript('channel-responder-invoked.ts', { cwd: dir, stdin: input });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toBe('');
+      expect(fs.readFileSync(recordPath, 'utf8')).toBe(baseline);
+    }
+    const result = await runScript('channel-responder-invoked.ts', { cwd: dir, stdin: JSON.stringify(payload) });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(fs.readFileSync(recordPath, 'utf8')).session_id).toBe('resident');
+  }));
+
+  test('control verdicts retain reply routing without requesting a Skill call', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ runtime_mode: 'headless', tmux_session: 'hermit-test' }));
+    for (const command of ['!clear', '!doctor', '!pause', '!snooze 30m']) {
+      const result = await run(`<channel source="discord" chat_id="1" user="U1">${command}</channel>`, dir);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('mcp__plugin_discord_discord__reply');
+      expect(result.stdout).not.toContain('invoke `');
+      if (command === '!clear' || command === '!doctor') {
+        expect(result.stdout).toContain('End the turn with no tool call and no reply');
+      } else expect(result.stdout).toContain('Only the channel reply tool works');
+    }
+    for (const command of ['!resume', '!permission-mode plan']) {
+      const result = await run(`<channel source="discord" chat_id="1" user="U1">${command}</channel>`, dir);
+      expect(result.stdout).toContain('invoke `/claude-code-hermit:channel-responder` now');
+    }
+  }));
+
+  // pause-gate denies the Skill call outright, and a denied call leaves no
+  // PostToolUse record — so the request would repeat on every paused message.
+  test('a paused hermit is not asked to invoke the responder', withDir(async (dir) => {
+    write(hermit(dir, 'state', 'runtime.json'), JSON.stringify({ runtime_mode: 'headless', tmux_session: 'hermit-test' }));
+    const message = '<channel source="discord" chat_id="1" user="U1">any update?</channel>';
+    expect((await run(message, dir)).stdout).toContain('invoke `/claude-code-hermit:channel-responder` now');
+    await run('<channel source="discord" chat_id="1" user="U1">!pause</channel>', dir);
+    const paused = await run(message, dir);
+    expect(paused.stdout).toContain('mcp__plugin_discord_discord__reply');
+    expect(paused.stdout).not.toContain('invoke `');
+    await run('<channel source="discord" chat_id="1" user="U1">!resume</channel>', dir);
+    expect((await run(message, dir)).stdout).toContain('invoke `/claude-code-hermit:channel-responder` now');
+  }));
 
   test('bot_username — an @handle mention matches case-insensitively (telegram shape)', withDir(async (dir) => {
     const r = await run('<channel source="telegram" chat_id="1" user="U1">hey @HermitBot status?</channel>', dir);

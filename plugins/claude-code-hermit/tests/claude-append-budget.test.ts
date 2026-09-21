@@ -19,7 +19,7 @@ import { PLUGIN_ROOT } from './helpers/run';
 import { isModelInvocationDisabled } from './helpers/skill-frontmatter';
 
 const APPEND_PATH = path.join(PLUGIN_ROOT, 'state-templates', 'CLAUDE-APPEND.md');
-const CHANNEL_RESPONDER = path.join(PLUGIN_ROOT, 'skills', 'channel-responder', 'SKILL.md');
+const CHANNEL_RESPONDER = path.join(PLUGIN_ROOT, 'skills', 'channel-responder', 'outbound.md');
 const WATCH_SKILL = path.join(PLUGIN_ROOT, 'skills', 'watch', 'SKILL.md');
 const SKILLS_DIR = path.join(PLUGIN_ROOT, 'skills');
 const AGENTS_DIR = path.join(PLUGIN_ROOT, 'agents');
@@ -161,7 +161,7 @@ describe('CLAUDE-APPEND load-bearing anchors', () => {
 describe('relocation targets received the moved content', () => {
   test('channel-responder carries the outbound notification protocol', () => {
     const cr = fs.readFileSync(CHANNEL_RESPONDER, 'utf8');
-    expect(cr.includes('Outbound notification protocol')).toBe(true);
+    expect(cr).toContain('Use this protocol for proactive notifications');
     // the protocol body must route through the unified --notice mechanism, not a
     // model-side resolver + reply-tool call.
     expect(cr.includes('channel-send.ts')).toBe(true);
@@ -206,7 +206,8 @@ describe('push-format constant has exactly one owner', () => {
 
   for (const skill of ['brief', 'channel-responder']) {
     test(`${skill} defers to the APPEND instead of restating it`, () => {
-      const body = fs.readFileSync(path.join(SKILLS_DIR, skill, 'SKILL.md'), 'utf8');
+      const file = skill === 'channel-responder' ? 'outbound.md' : 'SKILL.md';
+      const body = fs.readFileSync(path.join(SKILLS_DIR, skill, file), 'utf8');
       expect(CONSTANT.test(body)).toBe(false);
       expect(body.includes('Operator Notification push format')).toBe(true);
     });

@@ -11,9 +11,14 @@ it('intake uses the bounded task digest and injected policy', () => {
   expect(pre).toContain('injected TASKS.md');
   expect(pre).not.toContain('session-archive.ts');
 });
-for (const branch of ['Task thread', 'Task assignment', 'New instruction']) it(`${branch} names task invocation`, () => { const text = read('channel-responder'); const index = text.indexOf(`- **${branch}**`); expect(index).toBeGreaterThan(-1); expect(text.slice(index, index + 5500)).toContain('task.ts'); });
-it('a chat assignment opens a resident record and hands it to a worker', () => {
+it('responder routes assignments, steering, confirmations and completions to task', () => {
   const text = read('channel-responder');
+  for (const term of ['/claude-code-hermit:task', 'TASKS.md threshold', 'annotated task thread',
+    'confirmation, cancel or changed definition of done', '[conversation command: ...]', 'WORKER <task-id>',
+    'Acknowledge first', 'steering, never a second record']) expect(text).toContain(term);
+});
+it('a chat assignment opens a resident record and hands it to a worker', () => {
+  const text = read('task');
   expect(text).toContain('[task thread <key>: ');
   expect(text).toContain('--owner resident --conversation <key>');
   expect(text).toContain('claude-code-hermit:task-worker');
@@ -21,27 +26,25 @@ it('a chat assignment opens a resident record and hands it to a worker', () => {
   expect(text).not.toContain('conversation.ts bind');
 });
 it('the worker is steered by id and replaced only when that send fails', () => {
-  const text = read('channel-responder');
-  const rule = text.slice(text.indexOf('- **Task thread**'), text.indexOf('- **Conversation command**'));
+  const rule = read('task');
   expect(rule).toContain('SendMessage');
   expect(rule).toContain('Only when that send fails');
   expect(rule).toContain('helper-reports/<id>-history.md');
   expect(rule).not.toContain('claude --bg');
 });
 it('parks a resident-owned record as waiting', () => {
-  const text = read('channel-responder');
-  const rule = text.slice(text.indexOf('- **Task thread**'), text.indexOf('- **Conversation command**'));
+  const rule = read('task');
   expect(rule).toContain('Park the task');
   expect(rule).toContain('--waiting-on <requester>');
 });
 it('a completion notice posts the report and blocks the record', () => {
-  const text = read('channel-responder');
+  const text = read('task');
   expect(text).toContain('WORKER <task-id> done <id>');
   expect(text).toContain('WORKER <task-id> needs-input <id>');
   expect(text).toContain('[[helper-report <id>]]');
   expect(text).toContain('--result-stdin');
 });
 it('the status summary lists worker-owned records', () => {
-  const text = read('channel-responder');
+  const text = read('task');
   expect(text).toContain("--open --owner 'worker:*' --json");
 });
