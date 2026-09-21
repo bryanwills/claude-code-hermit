@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.4] - 2026-09-21
 
 ### Added
 - `spawn-session --proposal <PROP-id>` attaches the proposal to the helper's prompt, opens a linked task record, and appends a handoff line under the proposal's `## Operator Decision`
