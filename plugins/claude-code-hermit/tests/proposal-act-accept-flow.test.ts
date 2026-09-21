@@ -150,6 +150,11 @@ describe('proposal-act accept flow', () => {
     expect(skill).toContain('Before committing, run: bun');
     expect(skill).toContain('On "action":"RUN"');
   });
+
+  test('--no-artifacts is documented under Dashboard Refresh', () => {
+    const dash = skill.split('## Dashboard Refresh')[1]?.split('## ')[0] ?? '';
+    expect(dash).toContain('--no-artifacts');
+  });
 });
 
 // PROP-017: channel-safe approvals. Guards the Step-0 marker, the 3-option

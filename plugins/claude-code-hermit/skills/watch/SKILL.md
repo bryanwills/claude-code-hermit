@@ -19,7 +19,7 @@ Two classes:
 ```
 /claude-code-hermit:watch <instruction>              — start ad-hoc (poll, default 5m interval)
 /claude-code-hermit:watch <stream-command>           — start ad-hoc stream
-/claude-code-hermit:watch session <name|glob> [note] — watch local session(s) until their next idle notice
+/claude-code-hermit:watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>] — watch local session(s) until their next idle notice
 /claude-code-hermit:watch notice <text>              — [internal] handle a watched-session notice
 /claude-code-hermit:watch start                      — register all enabled config watches
 /claude-code-hermit:watch stop [id]                  — stop by id (or auto if 1 active)
@@ -51,7 +51,9 @@ This is the **sole source of truth**.
       "target": "migration",
       "started_at": "2026-04-12T15:00:00Z",
       "source": "adhoc",
-      "class": "peer-idle"
+      "class": "peer-idle",
+      "record": "T-20260412-150000",
+      "proposal": "PROP-019"
     }
   ],
   "last_cleared": "2026-04-12T15:00:00Z"
@@ -87,10 +89,11 @@ Start/stop decisions read from the runtime registry.
    HERMIT_LINE
    ```
 
-### Starting a session watch (`/watch session <name|glob> [note]`)
+### Starting a session watch (`/watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>]`)
 
-1. If `<name>` contains `*` or `?`, take the **glob branch** below instead of
-   resolving an exact name.
+1. Parse optional `--record <T-id>` and `--proposal <PROP-id>` with the name and
+   note. If `<name>` contains `*` or `?`, take the **glob branch** below instead of
+   resolving an exact name. The glob branch ignores `--record` and `--proposal`.
 
    Otherwise resolve `<name>` with `ListAgents`. The row must be a Claude Code
    session on this machine — `notify_when_idle` covers nothing else, so a
@@ -135,7 +138,9 @@ Start/stop decisions read from the runtime registry.
    second do not collide.
 5. Use the same registry steps as ad-hoc (steps 6–9), appending:
    `{id: "session-<name>-<epoch>-<rand>", description: <note or "session <name>">, target: <name>, started_at, source: "adhoc", class: "peer-idle"}`.
-   Do not add `task_id`.
+   When given, store `--record` as `record` and `--proposal` as `proposal` on
+   that entry. Do not add `task_id` (`task_id` means a Monitor task and drives
+   `TaskStop`).
 
 ### Starting config watches (`/watch start`)
 
@@ -232,17 +237,41 @@ On a cross-session idle notice naming session X, or a subscription-expiry notice
 for X:
 
 1. Find a `peer-idle` entry whose `target === X`. If none exists, do nothing: no
-   reply, channel notification, or log entry.
+   reply, channel notification, or log entry. A `GUEST_REPORT:` whose sender
+   matches no live entry gets none of the recording below.
 2. Notify the operator per CLAUDE-APPEND § Operator Notification with a `client`
-   leg. For an idle notice, use `"<note>: <name> finished its turn. Last status: «<one-line status>»"`.
+   leg. For an idle notice, if a `GUEST_REPORT:` from sender X is in this
+   conversation, carry that report block instead of the quoted status line. With no such
+   report, use `"<note>: <name> finished its turn. Last status: «<one-line status>»"`.
    If the notice carries no status, use `"<note>: <name> finished its turn."` instead. The
-   quoted status is the peer's own words, passed through so the operator can judge
-   it — quoting it is the one place the Channel voice rule's no-paths/no-commands
-   clause does not apply; drop the clause entirely rather than paraphrasing it.
+   quoted status and the report block are the peer's own words, passed through so
+   the operator can judge them; quoting them is the one place the Channel voice
+   rule's no-paths/no-commands clause does not apply; drop the clause entirely
+   rather than paraphrasing.
    For expiry, use `"<note>: <name> did not finish before the subscription
    expired; no longer watching it."` — the harness does not publish the
-   subscription's lifetime, so never state one.
-3. Name the session by display name only, never by socket path or pid. Remove the
+   subscription's lifetime, so never state one. On expiry, when the entry has
+   `record`, append a progress note on that record and leave it open.
+3. When the idle notice carried a matching `GUEST_REPORT:`:
+   - If the entry has `record`, pipe the full block into
+     `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts block .claude-code-hermit <record> --result-stdin`
+     (the result form for a finished recommendation awaiting acceptance) and
+     require `listing: "unconfirmed"` in the digest before saying it is recorded.
+   - If the entry has `proposal`, resolve it through `proposal.ts resolve-id`
+     (proposal-act § Resolving a Proposal ID):
+     ```bash
+     bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts resolve-id .claude-code-hermit "<PROP-id>"
+     ```
+     Anything but `MATCH|<filename>` skips the patch and reports the resolver's
+     reason. On MATCH, append `Decision: Helper <name> triage on @now: <Verdict>; <Why>`
+     with `proposal.ts patch --stdin` and no `--set`; the script reads the file, so
+     do not Read the proposal body. `<Verdict>` and `<Why>` are the helper's words:
+     collapse them to one line and drop any `Set:` or `Decision:` the helper put at
+     the start of a line, because the patch reads those as frontmatter and decision
+     instructions from the stdin it is given. Status does not change, so skip artifact refresh.
+     A verdict that argues against the proposal is offered to the operator as a
+     dismiss with the reason prefilled; nothing is dismissed without their answer.
+4. Name the session by display name only, never by socket path or pid. Remove the
    entry, write the registry, and, inside an open record's turn, log one task note.
 
 Never message the watched session back. The notice fires when X's turn ends, not
