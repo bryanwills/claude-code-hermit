@@ -21,7 +21,7 @@ const read = (...p: string[]) => fs.readFileSync(path.join(PLUGIN_ROOT, ...p), '
 // rare-branch procedures file); assert against the combined surface.
 const reflect        = read('skills', 'reflect', 'SKILL.md') + '\n' + read('skills', 'reflect', 'branches.md');
 const proposalAct    = read('skills', 'proposal-act', 'SKILL.md');
-const channelResponder = read('skills', 'channel-responder', 'SKILL.md');
+const channelResponder = read('skills', 'channel-responder', 'reference.md');
 const noBriefRouting = reflect.slice(
   reflect.indexOf('**No brief found (human/plugin or brief fully gone, moderate signal):**'),
   reflect.indexOf('## `skill-preference:*` routing'),

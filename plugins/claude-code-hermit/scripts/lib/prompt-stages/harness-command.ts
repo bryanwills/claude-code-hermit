@@ -85,10 +85,11 @@ export function run(ctx: StageContext): StageResult | void {
   });
   if (!ok) return;
 
+  ctx.suppressResponderInvoke = true;
   const rendered = renderCommand(parsed);
   return {
     context: isRelayedSkillCommand
-      ? `[harness-command] "${rendered}" requested by ${by} — will run when the current turn ends; its result comes back to this chat.\n`
-      : `[harness-command] "${rendered}" requested by ${by} — will be applied to this session when the current turn ends.\n`,
+      ? `[harness-command] "${rendered}" requested by ${by} — will run when the current turn ends; its result comes back to this chat. End the turn with no tool call and no reply.\n`
+      : `[harness-command] "${rendered}" requested by ${by} — will be applied to this session when the current turn ends. End the turn with no tool call and no reply.\n`,
   };
 }

@@ -13,6 +13,8 @@ export type { ChannelEnvelope };
 
 export interface StageContext {
   skipHarnessCommand?: boolean;
+  suppressResponderInvoke?: boolean;
+  sessionId?: string | null;
   conversation?: { key: string; task_id: string; owner: string };
   /** Resolved hermit state dir — computed once for the whole pipeline. */
   dir: string;
