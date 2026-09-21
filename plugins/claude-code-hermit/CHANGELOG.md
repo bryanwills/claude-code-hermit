@@ -9,6 +9,10 @@
 ### Changed
 - Channel responder and task instructions fit the compaction retention budget, with task procedures owned by the task skill and conditional procedures in responder reference files
 - Micro-proposal answers use read-only `proposal.ts micro match` for target and option matching
+- A posted result is confirmed when the requester clearly adopts it (acts on it, thanks for it as finished, or builds the next request on it), as well as by the explicit words
+- A record's check runs when the result is recorded; the daily run remains the fallback
+- A named approver blocks check closure
+- A changed definition of done clears its check
 
 ### Fixed
 - Channel reminders request the responder until a successful invocation is recorded for the current session after its last context reset, and never while paused
@@ -16,6 +20,24 @@
 - Duty digests show only configured routines and pair the latest event with its own timestamp
 - Waiting resident task messages include the newest waiting reason and commands to record the outcome
 - Resident permission grant covers `task block` and `task close`, the commands that line offers
+
+### Upgrade Instructions
+
+**Confirmation and cancel words.** In `.claude-code-hermit/TASKS.md`, look only at the section `## Confirmation and cancel words`. Other sections are never touched. Compare that section's body (the text after the heading, up to the next `## ` heading) to these three outcomes:
+
+- It equals this previous template text, quoted verbatim:
+
+  Use “ok”, “yes”, or “confirmed” to confirm a posted result at its current revision. Use “cancel” or “stop this task” to cancel with a reason. A pending micro-proposal takes precedence.
+
+  Replace the section with the same-named section from `${CLAUDE_PLUGIN_ROOT}/state-templates/TASKS.md.template`.
+
+- It already equals the current template's same-named section: do nothing.
+
+- Anything else: keep the file and **defer per SKILL.md Step 10** with `options: ["Adopt the new policy", "Keep my wording"]`, no `on_resolve`; the chosen branch is applied in attended Step 10 only:
+  - *Adopt the new policy*: replace that section with the current template section; leave every other section as-is.
+  - *Keep my wording*: leave the file unchanged.
+
+TASKS.md is part of the watchdog's policy hash (`scripts/lib/context-policy.ts` → `contextPolicyHash`). Replacing the section makes the install eligible for a context clear under the usual conditions in `docs/task-records.md`; this step promises none.
 
 ## [1.4.3] - 2026-09-19
 
