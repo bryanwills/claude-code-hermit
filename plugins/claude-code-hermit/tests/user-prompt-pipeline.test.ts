@@ -697,8 +697,7 @@ describe('task thread admission', () => {
     expect(result.stdout).toContain(`[waiting task ${id}: Need input; next: Answer`);
     expect(result.stdout).toContain(`hermit-run task block .claude-code-hermit ${id} --result-stdin`);
     expect(result.stdout).toContain(`hermit-run task note .claude-code-hermit ${id} --clear-waiting`);
-    // A stall carries no result, and `close --by confirmed` throws stale-result without one.
-    expect(result.stdout).not.toContain('--by confirmed');
+    expect(result.stdout).toContain(`hermit-run task close .claude-code-hermit ${id} --by confirmed --actor discord:u1 --result-rev 0 --reason-stdin`);
     expect(result.stdout).toContain('nothing is owed when this message does not change the task');
 
   });
