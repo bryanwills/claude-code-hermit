@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Duty digests show only configured routines and pair the latest event with its own timestamp
+- Waiting resident task messages include the newest waiting reason and commands to record the outcome
+- Resident permission grant covers `task block` and `task close`, the commands that line offers
+
 ## [1.4.3] - 2026-09-19
 
 ### Fixed

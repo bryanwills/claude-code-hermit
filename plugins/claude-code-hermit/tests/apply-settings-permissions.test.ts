@@ -369,6 +369,8 @@ describe('literal-path hermit-run grants', () => {
     'Bash(.claude-code-hermit/bin/hermit-run observations observe *)',
     'Bash(.claude-code-hermit/bin/hermit-run task note *)',
     'Bash(.claude-code-hermit/bin/hermit-run task list *)',
+    'Bash(.claude-code-hermit/bin/hermit-run task block *)',
+    'Bash(.claude-code-hermit/bin/hermit-run task close *)',
     'Bash(.claude-code-hermit/bin/hermit-run rc-server start)',
     'Bash(.claude-code-hermit/bin/hermit-run rc-server stop)',
     'Bash(.claude-code-hermit/bin/hermit-run rc-server status)',
@@ -385,10 +387,12 @@ describe('literal-path hermit-run grants', () => {
     });
   }
 
-  test('task resolver grants expose only note and list', () => {
+  test('task resolver grants expose only the verbs the annotation offers', () => {
     expect(HERMIT_ALLOW.filter((entry: string) => entry.includes('hermit-run task '))).toEqual([
       'Bash(.claude-code-hermit/bin/hermit-run task note *)',
       'Bash(.claude-code-hermit/bin/hermit-run task list *)',
+      'Bash(.claude-code-hermit/bin/hermit-run task block *)',
+      'Bash(.claude-code-hermit/bin/hermit-run task close *)',
     ]);
     expect(HERMIT_ALLOW.some((entry: string) => entry.includes('task-check.ts'))).toBe(false);
   });

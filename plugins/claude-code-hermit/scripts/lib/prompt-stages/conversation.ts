@@ -37,7 +37,24 @@ export async function run(ctx: StageContext): Promise<StageResult | void> {
     return;
   }
   ctx.conversation = { key, task_id: record.id, owner: record.owner };
-  const context = `[task thread ${safeForLLM(key)}: owner=${record.owner === 'resident' ? 'resident' : 'worker'}, muted=${record.muted}, waiting=${record.waiting_on !== null}]`;
+  let context = `[task thread ${safeForLLM(key)}: owner=${record.owner === 'resident' ? 'resident' : 'worker'}, muted=${record.muted}, waiting=${record.waiting_on !== null}]`;
+  if (record.owner === 'resident' && record.waiting_on !== null) {
+    // `note --done` clears result/result_at without clearing waiting_on, so a
+    // record can be waiting with neither a stall nor a result to quote.
+    const latestIsStall = record.stall_at !== null && (!record.result_at || Date.parse(record.stall_at) > Date.parse(record.result_at));
+    const reason = latestIsStall
+      ? `${safeForLLM(record.stall_status).slice(0, 160)}; next: ${safeForLLM(record.stall_next).slice(0, 160)}`
+      : record.result
+        ? `awaiting confirmation of result_rev=${record.result_rev}: ${safeForLLM(record.result).slice(0, 160)}`
+        : `waiting on ${safeForLLM(record.waiting_on).slice(0, 160)}`;
+    const taskCommand = '.claude-code-hermit/bin/hermit-run task';
+    const target = `.claude-code-hermit ${record.id}`;
+    // An envelope carrying more than one user_id resolves to a null userId, and an
+    // install with no allowed_users still admits it, leaving no identity to close under.
+    const actor = env.userId === null ? null : safeForLLM(`${env.sourceKey}:${env.userId}`).slice(0, 160);
+    const confirmed = actor ? `; operator confirmed: ${taskCommand} close ${target} --by confirmed --actor ${actor} --result-rev ${record.result_rev} --reason-stdin` : '';
+    context += `\n[waiting task ${record.id}: ${reason}; finished outcome: ${taskCommand} block ${target} --result-stdin; wait answered: ${taskCommand} note ${target} --clear-waiting${confirmed}; nothing is owed when this message does not change the task]`;
+  }
   if (harnessCommand && record.owner !== 'resident') {
     ctx.skipHarnessCommand = true;
     if (name === 'clear') return { context: `${context}\n[conversation command: restart]` };

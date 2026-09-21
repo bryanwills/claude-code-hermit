@@ -6,7 +6,7 @@ Return structured JSON for the calling skill to compose and deliver. Read fresh 
 
 The caller supplies `plugin_root` (absolute), `mode` (`morning`, `evening`, `daily`, `default-no-session`), `today` (ISO date), and morning `context_recovery`.
 
-Run `bun <plugin_root>/scripts/task-report.ts .claude-code-hermit --limit 20` for normalized records and `bun <plugin_root>/scripts/task.ts list .claude-code-hermit --open --owner resident --json` for open resident work. Run `bun <plugin_root>/scripts/duties.ts summary .claude-code-hermit` for requested and observed duties, returning any discrepancy in `findings`.
+Run `bun <plugin_root>/scripts/task-report.ts .claude-code-hermit --limit 20` for normalized records and `bun <plugin_root>/scripts/task.ts list .claude-code-hermit --open --owner resident --json` for open resident work. Run `bun <plugin_root>/scripts/duties.ts summary .claude-code-hermit` for requested and observed duties, returning any discrepancy in `findings`; a `skipped-precheck` last event is healthy (the routine ran its precheck and had nothing to do), not a discrepancy.
 
 ## Per-mode instructions
 

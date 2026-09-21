@@ -323,3 +323,9 @@ export function lastRoutineFire(metricsPath: string, routineId: string): string 
 export function lastRoutineEvent(metricsPath: string, routineId: string): string | null {
   return lastMatching(metricsPath, routineId, (e) => (typeof e.event === 'string' ? e.event : null));
 }
+
+/** Event and timestamp of the routine's most recent row, or null. */
+export function lastRoutineEventWithTimestamp(metricsPath: string, routineId: string): string | null {
+  return lastMatching(metricsPath, routineId, (e) =>
+    (typeof e.event === 'string' ? `${e.event}@${typeof e.ts === 'string' ? e.ts : 'unknown'}` : null));
+}

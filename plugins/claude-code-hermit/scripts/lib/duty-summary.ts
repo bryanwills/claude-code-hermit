@@ -2,6 +2,7 @@ import path from 'node:path';
 import { readConfigRaw } from './config-read';
 import { readJson } from './cli';
 import { deriveDuties } from './tasks';
+import { lastRoutineEventWithTimestamp } from './routines/history';
 import { effectiveHeartbeatMode } from './heartbeat/control';
 
 export function dutySummary(dir: string): string[] {
@@ -15,6 +16,9 @@ export function dutySummary(dir: string): string[] {
       ? `enabled=${config.heartbeat?.enabled !== false}, every=${config.heartbeat?.every ?? '30m'}, mode=${mode}`
       : routine ? `enabled=${routine.enabled !== false}, schedule=${routine.schedule ?? '?'}, mode=${routines?.mode ?? 'unknown'}` : 'configured';
     const live = readJson(path.join(dir, 'state', heartbeat ? 'heartbeat-liveness.json' : 'routine-monitor-liveness.json'));
-    return `${duty.name}: requested ${requested}; observed pid=${typeof live?.pid === 'number' ? live.pid : 'unknown'}, last_run=${duty.last_run ?? 'unknown'}, last_verdict=${duty.last_verdict ?? 'unknown'}`;
+    const lastEvent = routine
+      ? lastRoutineEventWithTimestamp(path.join(dir, 'state/routine-metrics.jsonl'), routine.id)
+      : duty.last_verdict;
+    return `${duty.name}: requested ${requested}; observed pid=${typeof live?.pid === 'number' ? live.pid : 'unknown'}, last_fired=${duty.last_run ?? 'unknown'}, last_event=${lastEvent ?? 'unknown'}`;
   });
 }

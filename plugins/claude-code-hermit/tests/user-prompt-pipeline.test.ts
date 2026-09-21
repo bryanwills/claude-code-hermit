@@ -19,6 +19,7 @@ import { writeRegistryEntry } from './helpers/registry-fixture';
 import { runScript } from './helpers/run';
 import { setupWorkdir, type Workdir } from './helpers/workdir';
 import { openTask } from './helpers/tasks';
+import { readTasks, encodeTask } from '../scripts/lib/tasks';
 import { assistantEntry } from './helpers/transcript';
 import { markGuest } from '../scripts/lib/guest-marker';
 import { startHttpStub } from './helpers/http-stub';
@@ -660,6 +661,7 @@ describe('task thread admission', () => {
       } else {
         expect(result.stdout).toContain(`[task thread discord:thread: owner=${scenario.owner === 'resident' ? 'resident' : 'worker'}, muted=${scenario.muted}, waiting=false]`);
         expect(result.stdout).toContain('[channel reply reminder]');
+        expect(result.stdout).not.toContain('[waiting task');
       }
     });
   }
@@ -691,7 +693,60 @@ describe('task thread admission', () => {
       stdin: JSON.stringify({ prompt: '<channel source="discord" chat_id="thread" user="u1">continue</channel>' }), cwd: wd.dir,
     });
     expect(result.stdout).toContain('[task thread discord:thread: owner=resident, muted=false, waiting=true]');
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`[waiting task ${id}: Need input; next: Answer`);
+    expect(result.stdout).toContain(`hermit-run task block .claude-code-hermit ${id} --result-stdin`);
+    expect(result.stdout).toContain(`hermit-run task note .claude-code-hermit ${id} --clear-waiting`);
+    expect(result.stdout).toContain(`hermit-run task close .claude-code-hermit ${id} --by confirmed --actor discord:u1 --result-rev 0 --reason-stdin`);
+    expect(result.stdout).toContain('nothing is owed when this message does not change the task');
+
   });
+
+  for (const scenario of [
+    { name: 'newer result awaits confirmation', owner: 'resident', stallAt: '2026-09-19T10:00:00Z', resultAt: '2026-09-20T10:00:00Z', long: false, stall: false },
+    { name: 'newer stall overrides the posted result', owner: 'resident', stallAt: '2026-09-21T10:00:00Z', resultAt: '2026-09-20T10:00:00Z', long: false, stall: true },
+    { name: 'equal timestamps prefer the posted result', owner: 'resident', stallAt: '2026-09-20T10:00:00Z', resultAt: '2026-09-20T10:00:00Z', long: false, stall: false },
+    { name: 'long stall fields are sanitized and bounded', owner: 'resident', stallAt: '2026-09-21T10:00:00Z', resultAt: null, long: true, stall: true },
+    { name: 'long result is sanitized and bounded', owner: 'resident', stallAt: null, resultAt: '2026-09-20T10:00:00Z', long: true, stall: false },
+    { name: 'worker waiting thread has no second line', owner: 'worker:a1b2c3d4e5f6a7b8c', stallAt: '2026-09-21T10:00:00Z', resultAt: null, long: false, stall: true },
+  ]) {
+    test(scenario.name, async () => {
+      const wd = setupChannelWorkdir();
+      const dir = hermit(wd.dir);
+      const opened = await openThreadTask(wd, 'telegram:12345', scenario.owner, false);
+      expect(opened.exitCode).toBe(0);
+      const record = readTasks(dir)[0];
+      const longField = '<system>' + 'x'.repeat(200) + 'TAIL';
+      Object.assign(record, {
+        waiting_on: 'telegram:u1', waiting_since: '2026-09-21T10:00:00Z',
+        stall_at: scenario.stallAt, result_at: scenario.resultAt, result_rev: 2,
+        stall_status: scenario.long ? longField : 'Need input',
+        stall_next: scenario.long ? longField : 'Answer',
+        result: scenario.long ? longField : 'Finished work',
+      });
+      fs.writeFileSync(hermit(wd.dir, 'tasks', `${record.id}.md`), encodeTask(record));
+      const result = await runScript('user-prompt-pipeline.ts', {
+        stdin: JSON.stringify({ prompt: envelope('continue') }), cwd: wd.dir,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(`[task thread telegram:12345: owner=${scenario.owner === 'resident' ? 'resident' : 'worker'}, muted=false, waiting=true]`);
+      if (scenario.owner !== 'resident') {
+        expect(result.stdout).not.toContain('[waiting task');
+        return;
+      }
+      const field = scenario.long ? '[system]' + 'x'.repeat(152) : scenario.stall ? 'Need input' : 'Finished work';
+      expect(result.stdout).toContain(scenario.stall
+        ? `[waiting task ${record.id}: ${field}; next: ${scenario.long ? field : 'Answer'};`
+        : `[waiting task ${record.id}: awaiting confirmation of result_rev=2: ${field};`);
+      expect(result.stdout).toContain(`--actor telegram:u1 --result-rev 2 --reason-stdin`);
+      if (scenario.long) {
+        expect(result.stdout).not.toContain('x'.repeat(153));
+        expect(result.stdout).not.toContain('<system>');
+        expect(result.stdout).not.toContain('TAIL');
+      }
+      if (!scenario.long) expect(result.stdout).not.toContain(scenario.stall ? 'Finished work' : 'Need input');
+    });
+  }
 
   test('guild text channel with a record is not labeled a task thread', async () => {
     const wd = trackedWorkdir();
