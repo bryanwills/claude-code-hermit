@@ -15,7 +15,7 @@ Read [SAFETY.md](SAFETY.md) before changing these gates. `src/cli.ts` and `bin/h
 
 ## Verification
 
-The plugin suite needs full Git history and Python with `python-dotenv` and `PyYAML` for test fixtures, although shipped code is TypeScript. Set `GATE_PARITY_PYTHON` when that interpreter is outside PATH. The setup is recorded in the repository's `.github/workflows/test-ha.yml`.
+The plugin suite needs full Git history and Python with `python-dotenv` and `PyYAML` for test fixtures, although shipped code is TypeScript. Set `GATE_PARITY_PYTHON` when that interpreter is outside PATH. Install both packages for `python3` itself: the suite's `uv` fallback cannot run inside an executor sandbox when `uv` is a snap (`snap-confine` needs privileges the sandbox drops), which shows up as "No Python with python-dotenv + PyYAML found". The setup is recorded in the repository's `.github/workflows/test-ha.yml`.
 
 Changes to `src/policy.ts` or `hooks/mcp-safety-gate.ts` must preserve the corpus/golden behavior in `tests/gate-corpus.test.ts` and the fail-closed properties in `tests/gate-fuzz.test.ts`. Keep YAML parity and apply-result verification intact; a successful tool call alone is not proof that the intended automation was installed.
 
