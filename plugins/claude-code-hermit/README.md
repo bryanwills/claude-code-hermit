@@ -215,7 +215,7 @@ See [budgets](docs/config-reference.md#budget) and [routine scheduling](docs/rou
 
 Reach the running agent through your connected channels or Claude Code Remote Control. You can also start separate sessions for additional work:
 
-- **Background sessions with follow-up.** Through [`/spawn-session`](skills/spawn-session/SKILL.md), the agent launches a local Claude Code helper in its own Git worktree and relays its status when it becomes idle. Set the helper’s model and effort with options such as `--model sonnet --effort high`.
+- **Background sessions with follow-up.** Through [`/spawn-session`](skills/spawn-session/SKILL.md), the agent launches a local Claude Code helper in its own Git worktree and relays its status when it becomes idle. Pass `--proposal` to link the helper to a proposal; its report lands on the task record and the proposal. Set the helper’s model and effort with options such as `--model sonnet --effort high`.
 - **Local [Remote Control](https://code.claude.com/docs/en/remote-control) gate.** Through [`/rc-gate`](skills/rc-gate/SKILL.md), the agent manages a Remote Control server on your machine or server. While the gate is open, you can spawn new Claude Code sessions from the Claude app, using your local files and tools. Each session gets its own Git worktree, while the agent keeps running.
 
 Both session-spawning paths require a Git workspace. Remote Control requires a Claude sign-in through `/login` on the machine running the agent.

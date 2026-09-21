@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- `spawn-session --proposal <PROP-id>` attaches the proposal to the helper's prompt, opens a linked task record, and appends a handoff line under the proposal's `## Operator Decision`
+- Spawned helpers close with a five-field `GUEST_REPORT:` block that the idle relay carries to the operator, into the linked record's result, and onto the proposal, leaving proposal status untouched
+- `--no-artifacts` on `proposal-act` skips the dashboard and proposals-page refreshes, as `proposal-create` does
+
 ### Fixed
 - Duty digests show only configured routines and pair the latest event with its own timestamp
 - Waiting resident task messages include the newest waiting reason and commands to record the outcome

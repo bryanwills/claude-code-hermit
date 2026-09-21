@@ -187,7 +187,8 @@ stays in the markup anyway, since it's free and still resolves for a locally ope
 remixed copy of the page.
 
 Refresh triggers: `proposal-create` (step 6), `proposal-act` (every accept/defer/
-dismiss/resolve flow, after its Respond step). Both refresh silently by default,
+dismiss/resolve flow, after its Respond step). `proposal-act` skips its refresh
+under `--no-artifacts`, as `proposal-create` does. Both refresh silently by default,
 matching the dashboard's existing no-URL-re-post convention — with one exception:
 when the refresh returns a URL, the flow that just created one or more proposals
 appends a single bare `📎 <url>` line to its own announcement, whether it created
