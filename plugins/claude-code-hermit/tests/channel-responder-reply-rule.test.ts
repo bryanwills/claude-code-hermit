@@ -199,6 +199,13 @@ test('procedure owners retain mandatory rules and command interfaces', () => {
       "Post a non-result stall digest's one status/next message to its requester",
       'state its queue position from the open-record order', 'continue with `next_queued` in the same turn',
       'Never silently abandon work in progress',
+      '`TASKS.md` defines what counts as confirmation',
+      'Close with a reason quoting the message that confirmed',
+      'the reply names the close so the requester can object',
+      'exits 0 only when the whole definition of done holds',
+      'runs `task-check.ts <id>` in the same turn',
+      'It only observes and never writes, deletes, sends or deploys',
+      'A record with a named approver gets no check',
     ]],
     [approvals, [
       'match [<MP-id>] --reply', 'on `AMBIGUOUS`', 'Preserve micro-proposal precedence',

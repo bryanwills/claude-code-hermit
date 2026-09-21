@@ -12,6 +12,40 @@ it('duty evidence only closes its matching dedupe key', async () => { const f = 
 it('cancel requires reason and records actor', async () => { const f = taskFixture(); try { const { id } = await f.open(); expect((await f.run('cancel', [id, '--actor', 'discord:u2', '--reason-stdin'])).stderr).toContain('empty-reason'); await f.ok('cancel', [id, '--actor', 'discord:u2', '--reason-stdin'], 'No longer needed'); const lib = await taskLib(); expect(lib.decodeTask(f.text(id))).toMatchObject({ closed_by: 'cancelled', closed_actor: 'discord:u2', closed_reason: 'No longer needed' }); } finally { f.cleanup(); } });
 for (const verb of ['close', 'cancel']) it(`replayed ${verb} leaves closed record unchanged`, async () => { const f = taskFixture(); try { const { id } = await f.open(); await f.ok('cancel', [id, '--actor', 'discord:u1', '--reason-stdin'], 'Stop'); const before = f.text(id); expect((await f.run(verb, [id, '--actor', 'discord:u1', ...(verb === 'close' ? ['--by', 'confirmed'] : ['--reason-stdin'])], 'Stop')).stderr).toContain('not-open'); expect(f.text(id)).toBe(before); } finally { f.cleanup(); } });
 it('only close and cancel produce closed status across every verb', async () => { const f = taskFixture(); try { const { id } = await f.open(); const lib = await taskLib(); for (const [verb, args, input] of [['note', [id], 'Progress'], ['block', [id, '--result-stdin'], 'Ready'], ['list', [], ''], ['standup', [], '']] as [string, string[], string][]) { await f.ok(verb, args, input); expect(lib.decodeTask(f.text(id)).status).toBe('open'); } expect((await f.run('close', [id, '--by', 'auto', '--actor', 'hermit'])).stderr).toContain('invalid-closed-by'); } finally { f.cleanup(); } });
+it('passing check leaves an approver record open', async () => {
+  const f = taskFixture();
+  try {
+    const { id } = await f.open(['--check', 'true', '--approver', 'discord:u2']);
+    const lib = await taskLib();
+    expect(lib.mutateTask(f.dir, 'check-result', id, { 'result-rev': '0', exit: '0', 'output-stdin': true }, 'proof')).toMatchObject({ closed_by: null });
+    const record = lib.decodeTask(f.text(id));
+    expect(record.status).toBe('open');
+    expect(record.closed_by).toBeNull();
+    expect(f.text(id)).toContain('check passed; approver confirmation still required');
+    // The passed check is cleared, so the daily run stops re-executing it every wake.
+    expect(record.check).toBeNull();
+    expect((await f.ok('list', ['--with-check'])).rows).toEqual([]);
+  } finally { f.cleanup(); }
+});
+it('check close with a held claim rejects a named approver', async () => {
+  const f = taskFixture();
+  try {
+    fs.writeFileSync(path.join(f.dir, 'state/hypotheses.jsonl'), JSON.stringify({ id: 'claim-1', state: 'held', claim: 'Outcome', created_at: new Date().toISOString() }) + '\n');
+    const { id } = await f.open(['--claim', 'claim-1', '--approver', 'discord:u2']);
+    const r = await f.run('close', [id, '--by', 'check', '--actor', 'hermit', '--claim', 'claim-1']);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr).toContain('approver-required');
+    const lib = await taskLib();
+    expect(lib.decodeTask(f.text(id)).status).toBe('open');
+  } finally { f.cleanup(); }
+});
+it('check close with duty evidence rejects a named approver', async () => {
+  const f = taskFixture();
+  try {
+    const { id } = await f.open(['--dedupe-key', 'duty:heartbeat:item', '--approver', 'discord:u2']);
+    expect((await f.run('close', [id, '--by', 'check', '--actor', 'duty:heartbeat'])).stderr).toContain('approver-required');
+  } finally { f.cleanup(); }
+});
 it('check-result closes only on zero and refuses a closed record', async () => {
   const f = taskFixture();
   try {

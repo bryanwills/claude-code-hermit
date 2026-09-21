@@ -26,6 +26,14 @@ test('changing a check, its definition or status refuses the old snapshot', asyn
     expect(() => mutateTask(f.dir, 'check-result', id, { 'result-rev': String(snapshot.result_rev), exit: '0', 'output-stdin': true }, 'proof')).toThrow('stale-check');
     await f.ok('note', [id, '--check', 'clear']);
     expect((await f.ok('list', ['--with-check'])).rows).toEqual([]);
+    const { id: redefined } = await f.open(['--check', 'true']);
+    await f.ok('note', [redefined, '--done', 'New definition', '--actor', 'discord:u1']);
+    expect(decodeTask(f.text(redefined)).check).toBeNull();
+    expect((await f.ok('list', ['--with-check'])).rows).toEqual([]);
+    const { id: replaced } = await f.open(['--check', 'true']);
+    await f.ok('note', [replaced, '--done', 'New definition', '--actor', 'discord:u1', '--check', 'false']);
+    expect(decodeTask(f.text(replaced)).check).toBe('false');
+    expect((await f.ok('list', ['--with-check'])).rows.map((row: { id: string }) => row.id)).toEqual([replaced]);
   } finally { f.cleanup(); }
 });
 

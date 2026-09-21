@@ -233,6 +233,7 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
           record.result_rev++;
           record.result = null;
           record.result_at = null;
+          if (!('check' in flags)) record.check = null;
           append(record, 'Decisions', required(flags, 'actor'), 'Definition of done: ' + record.summary, now);
         }
         if ('approval' in flags) {
@@ -250,8 +251,13 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
         const exit = flag(flags, 'exit');
         if (!flags['output-stdin'] || !/^-?\d+$/.test(exit ?? '')) throw new Error('invalid-check-result');
         if (Number(exit) === 0) {
-          finish(record, 'check', 'hermit', 'check:exit-0', now);
-          if (line) append(record, 'Outcome', 'hermit', line, now);
+          // Clearing the passed check is what ends the daily run: the record stays open with its
+          // result, and a still-set check would re-execute the command on every later wake forever.
+          if (record.approver) { record.check = null; append(record, 'Progress', 'hermit', `check passed; approver confirmation still required${line ? ' ' + line : ''}`, now); }
+          else {
+            finish(record, 'check', 'hermit', 'check:exit-0', now);
+            if (line) append(record, 'Outcome', 'hermit', line, now);
+          }
         } else append(record, 'Progress', 'hermit', `check:exit-${exit} ${line}`, now);
         digest = { id, closed_by: record.closed_by, result_rev: record.result_rev };
       } else if (verb === 'block') {
@@ -279,6 +285,7 @@ export function mutateTask(dir: string, verb: string, id: string | undefined, fl
           if (!record.result || !/^\d+$/.test(flag(flags, 'result-rev') ?? '') || Number(flags['result-rev']) !== record.result_rev) throw new Error('stale-result');
           if (!flags['reason-stdin'] || !reason) throw new Error('empty-reason');
         } else {
+          if (record.approver) throw new Error('approver-required');
           const claim = (flags.claim as string[] | undefined)?.[0];
           if (closer.startsWith('duty:') && record.dedupe_key?.startsWith(closer + ':')) reason = closer;
           else if (closer === 'hermit' && claim && record.claims.includes(claim) && heldClaim(dir, claim)) reason = `later:${claim}:held`;
