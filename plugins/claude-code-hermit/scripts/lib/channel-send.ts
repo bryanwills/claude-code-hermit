@@ -40,6 +40,9 @@ export interface SendResult {
   // saw it. Callers gating a "notified" flag must read `delivered`, not `ok`,
   // so a degraded write still leaves the heartbeat re-announce fallback armed.
   delivered?: boolean;
+  // Failed client notices remain undelivered even when saved for recovery.
+  undelivered_saved?: boolean;
+  persistence_error?: string;
 }
 
 /** Where and how to send. `target` overrides outbound resolution (used to reply
@@ -207,15 +210,18 @@ export interface OperatorNoticeResult {
   maintainer?: SendResult;
 }
 
-export function appendMaintainerFindings(hermitDir: string, text: string): string | null {
+/** Append one notice row to Findings. Returns null on success, else the error. */
+export function appendMaintainerFindings(
+  hermitDir: string, text: string, action = 'maintainer-notice',
+): string | null {
   try {
     return appendJsonlLine(path.join(hermitDir, 'state', 'watchdog-events.jsonl'), JSON.stringify({
       ts: new Date().toISOString(),
-      action: 'maintainer-notice',
+      action,
       reason: text,
     }));
   } catch (error: any) {
-    return error.message;
+    return error?.message || String(error);
   }
 }
 
@@ -278,6 +284,11 @@ export async function sendOperatorNotice(hermitDir: string, notice: OperatorNoti
       out.client = await sendToChannel(hermitDir, notice.client, {
         target: clientTarget ?? undefined, timeoutMs: notice.timeoutMs, config,
       });
+      if (!out.client.ok) {
+        const error = appendMaintainerFindings(hermitDir, notice.client, 'undelivered-client-notice');
+        out.client.undelivered_saved = error === null;
+        if (error !== null) out.client.persistence_error = error;
+      }
     }
   }
 

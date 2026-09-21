@@ -47,7 +47,7 @@ import type { StageContext, StageResult } from './lib/prompt-stages/types';
 import { openTurnMarker, run as recordOperatorAction } from './record-operator-action';
 import { run as conversation } from './lib/prompt-stages/conversation';
 import { run as promptContext } from './lib/prompt-stages/prompt-context';
-import { run as channelReplyReminder } from './lib/prompt-stages/channel-reply-reminder';
+import { run as channelReplyReminder, invokeResponder } from './lib/prompt-stages/channel-reply-reminder';
 import { run as pauseKeyword } from './lib/prompt-stages/pause-keyword';
 import { run as harnessCommand } from './lib/prompt-stages/harness-command';
 import { run as skillRelay } from './lib/prompt-stages/skill-relay';
@@ -110,6 +110,7 @@ async function main(raw: string): Promise<void> {
 
   const ctx: StageContext = {
     dir,
+    sessionId,
     prompt,
     envelope: parseChannelEnvelope(prompt),
     transcriptPath: transcript,
@@ -175,6 +176,7 @@ async function main(raw: string): Promise<void> {
   // send, so an outer-timeout kill can lose a send but never a state write.
   await stage('pause-keyword', pauseKeyword, ctx);
   if (!ctx.skipHarnessCommand) await stage('harness-command', harnessCommand, ctx);
+  await stage('channel-responder-invoke', invokeResponder, ctx);
   await stage('skill-relay', skillRelay, ctx);
 
   // 7. Deterministic status.

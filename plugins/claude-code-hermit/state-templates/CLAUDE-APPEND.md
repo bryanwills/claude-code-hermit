@@ -13,7 +13,7 @@ Config watches auto-register on session start; ad-hoc via `/watch <instruction>`
 
 - `HEARTBEAT_EVALUATE` notification, or a peer message whose entire body is that token → invoke `/claude-code-hermit:heartbeat run`.
 - `ROUTINE_DUE` notification, or a peer message whose entire body is that token → invoke `/claude-code-hermit:hermit-routines run` with the bracketed ids.
-- A subagent completion whose result ends with a `WORKER <task-id> …` line → channel-responder's Task thread rule.
+- A subagent completion whose result ends with a `WORKER <task-id> …` line → `/claude-code-hermit:task`.
 - A cross-session idle notice (a watched session finished its turn, or the notice says the subscription expired) → invoke `/claude-code-hermit:watch notice` with the notice text.
 - A Monitor expiry notice (event prefix `Monitor expired after`) → invoke `/claude-code-hermit:watch notice` with the notice text, including its task id.
 - Peer message starting `GUEST_REPORT:`: inside an open record's turn, record `[guest:<name>] <report>` through `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <id>` with the note on stdin. Otherwise skip the note; no channel notice.
@@ -26,7 +26,7 @@ Main owns outbound sends and `AskUserQuestion`; a task worker edits only the car
 - **No channel enabled** (no channel entry with `enabled !== false`, excluding `primary`): if `push_notifications === true`, fire `PushNotification(message="<≤200 chars, no markdown, actionable first>", status="proactive")` and respond in conversation. Empty channels config: don't log an issue.
 - **Channel enabled:** compose the audience version(s) and run `.claude-code-hermit/bin/hermit-run channel-send .claude-code-hermit --notice` with `{"client": "<plain>", "maintainer": "<technical/spend detail>"}` on stdin (either key alone is fine).
 
-Delivery failures, degraded legs, and exit-code handling: `/claude-code-hermit:channel-responder` § Outbound notification protocol.
+Delivery failures, degraded legs, and exit-code handling: `skills/channel-responder/outbound.md`.
 
 **Channel voice.** No internal IDs (PROP-NNN, T-..., MP-…), no token counts, slash commands, file paths, or cron strings; plain language with the one next step the operator can do from chat. Terminal/maintainer output is exempt. One exception: the five channel control commands (`!pause`, `!stop`, `!resume`, `!snooze`, `!status`) may be named when the operator asks how to control you.
 

@@ -112,8 +112,8 @@ describe('suggestion cards: channel-facing proposal vocabulary stays plain', () 
     expect(content).toContain('Suggestion cards');
   });
 
-  test('channel-responder/SKILL.md maps YES/LATER/NO replies to accept/defer/dismiss', () => {
-    const content = skillContent.get('channel-responder')!;
+  test('channel-responder/approvals.md maps YES/LATER/NO replies to accept/defer/dismiss', () => {
+    const content = fs.readFileSync(path.join(SKILLS_DIR, 'channel-responder', 'approvals.md'), 'utf8');
     expect(content).toContain('`YES`');
     expect(content).toContain('`LATER`');
     expect(content).toMatch(/`NO`.*dismiss/);

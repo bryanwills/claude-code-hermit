@@ -105,7 +105,7 @@ the row's own tier and the operator's config, not by the flag.
    or degraded, skip this step: an id left unconfirmed keeps `escalation.new` non-empty, so the
    next run retries it instead of dropping it, and the doctor routine keeps waking on it.
    For exit-code handling and the event-log fallback, follow
-   `/claude-code-hermit:channel-responder` § Outbound notification protocol.
+   `skills/channel-responder/outbound.md`.
 
 ## Silence policy
 

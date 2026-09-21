@@ -1,6 +1,6 @@
 ---
 name: task-worker
-description: Runs one chat assignment for the resident in its own context: does the work, keeps the thread's progress card current, and returns a single WORKER line naming the report file. Dispatched by channel-responder's Task thread rule.
+description: Runs one chat assignment for the resident in its own context: does the work, keeps the thread's progress card current, and returns a single WORKER line naming the report file. Dispatched by `/claude-code-hermit:task`.
 effort: medium
 disallowedTools:
   - Agent

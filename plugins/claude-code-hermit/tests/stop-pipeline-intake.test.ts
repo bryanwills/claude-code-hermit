@@ -88,7 +88,7 @@ describe('stop-pipeline — channel intake checkpoint', () => {
     const body = JSON.parse(r.stdout);
     expect(body.decision).toBe('block');
     expect(body.reason).toContain('task.ts open');
-    expect(body.reason).toContain('channel-responder');
+    expect(body.reason).toContain('task skill');
     expect(turnExists(dir)).toBe(true);
   }));
 
@@ -101,8 +101,8 @@ describe('stop-pipeline — channel intake checkpoint', () => {
     expect(r.exitCode).toBe(0);
     const body = JSON.parse(r.stdout);
     expect(body.decision).toBe('block');
-    expect(body.reason).toContain('Resident guild thread');
-    expect(body.reason).toContain('channel-responder');
+    expect(body.reason).toContain('resident guild thread');
+    expect(body.reason).toContain('task skill');
     expect(turnExists(dir)).toBe(true);
   }));
 

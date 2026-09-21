@@ -3696,8 +3696,8 @@ describe('proactive-notify unification contract', () => {
     expect(weeklyReview).toContain('--notice');
   });
 
-  test('channel-responder §5 and CLAUDE-APPEND both point to the same --notice mechanism', () => {
-    const responder = read(path.join(SKILLS, 'channel-responder', 'SKILL.md'));
+  test('channel-responder outbound.md and CLAUDE-APPEND both point to the same --notice mechanism', () => {
+    const responder = read(path.join(SKILLS, 'channel-responder', 'outbound.md'));
     const append = read(path.join(TEMPLATES, 'CLAUDE-APPEND.md'));
     expect(responder).toContain('channel-send.ts');
     expect(responder).toContain('--notice');
@@ -4007,4 +4007,18 @@ describe('task-worker agent contract', () => {
   test('records a reusable lesson when the work taught one', () => {
     expect(agent).toContain('task.ts lesson');
   });
+});
+
+
+test('responder invocation evidence has one resident Skill hook writer', () => {
+  const hooks = JSON.parse(read(path.join(PLUGIN_ROOT, 'hooks/hooks.json')));
+  const entries = hooks.hooks.PostToolUse.filter((entry: any) => entry.matcher === 'Skill');
+  expect(entries).toHaveLength(1);
+  expect(entries[0].hooks).toEqual([{
+    type: 'command', command: 'bun',
+    args: ['${CLAUDE_PLUGIN_ROOT}/scripts/channel-responder-invoked.ts'], timeout: 3,
+  }]);
+  const architecture = read(path.join(PLUGIN_ROOT, 'docs/architecture.md'));
+  expect(architecture).toContain('state/channel-responder-invoked.json');
+  expect(architecture).toContain('channel-responder-invoked.ts only');
 });

@@ -470,6 +470,47 @@ describe('channel-send CLI --notice', () => {
       expect(stub.requests.length).toBe(1);
       expect(stub.requests[0].body.chat_id).toBe('12345');
       expect(stub.requests[0].body.text).toBe('plain notice');
+      expect(findings(wd)).not.toContain('undelivered-client-notice');
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('failed client send persists the original text and preserves exit 1', async () => {
+    const stub = startHttpStub();
+    stub.setStatus(500);
+    const wd = setupChannelWorkdir();
+    const text = 'Please confirm\nthis exact client notice.';
+    try {
+      const result = await runNotice(wd, { client: text }, stub);
+      expect(result.exitCode).toBe(1);
+      const out = JSON.parse(result.stdout);
+      expect(out.delivered).toBe(false);
+      expect(out.result.client.ok).toBe(false);
+      expect(out.result.client.undelivered_saved).toBe(true);
+      const events = findings(wd).trim().split('\n').map(line => JSON.parse(line));
+      expect(events.filter(event => event.action === 'undelivered-client-notice')).toEqual([
+        { ts: expect.any(String), action: 'undelivered-client-notice', reason: text },
+      ]);
+    } finally {
+      stub.stop();
+      wd.cleanup();
+    }
+  });
+
+  test('failed client persistence is reported without changing delivery failure', async () => {
+    const stub = startHttpStub();
+    stub.setStatus(500);
+    const wd = setupChannelWorkdir();
+    fs.mkdirSync(hermit(wd.dir, 'state', 'watchdog-events.jsonl'));
+    try {
+      const result = await runNotice(wd, { client: 'Keep this text' }, stub);
+      expect(result.exitCode).toBe(1);
+      const out = JSON.parse(result.stdout);
+      expect(out.delivered).toBe(false);
+      expect(out.result.client.undelivered_saved).toBe(false);
+      expect(out.result.client.persistence_error).toBeString();
     } finally {
       stub.stop();
       wd.cleanup();

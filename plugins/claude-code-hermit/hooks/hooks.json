@@ -49,6 +49,17 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/channel-responder-invoked.ts"],
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "matcher": ".*reply$",
         "hooks": [
           {

@@ -183,6 +183,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/runtime.json`           | hermit-start + cost-tracker + startup-context.ts (process stamp) | heartbeat, resident-start, /hermit-routines, hermit-watchdog (config/env, registry, inbox), hermit-doctor (peer inbox) |
 | `state/alert-state.json`       | heartbeat only                                      | heartbeat     |
 | `state/reflection-state.json`  | reflect + session (non-overlapping phases)          | heartbeat (debounce), hermit-settings (session-check display) |
+| `state/channel-responder-invoked.json` | channel-responder-invoked.ts only (resident Skill PostToolUse; session id and invocation time) | channel-reply-reminder stage (compares session and context-reset stamp) |
 | `state/channel-activity.json`  | channel-hook.ts only                                | channel-responder, heartbeat                                  |
 | `state/channel-replies.jsonl`  | channel-hook.ts (append only)                       | none — reflect's engagement join was removed (the ledger records outbound sends only, so it could not measure operator engagement) |
 | `state/channel-log.sqlite`     | channel-reply-reminder stage + channel-hook.ts (append, via `lib/channel-log.ts`); weekly-review marks/prunes | search.ts (recall, fourth source); weekly-review consolidation |
@@ -202,7 +203,7 @@ One writer per state file. No shared mutation bus. (Exception: `state/micro-prop
 | `state/cost-index.json`        | cost-tracker.ts + subagent-cost.ts (each folds its own append; tmp+rename, offset-based) | cost-tracker.ts (getCumulativeCost fallback), doctor-check.ts |
 | `state/watchdog-state.json`    | hermit-watchdog.ts only                             | doctor-check.ts (`last_run` liveness + `consecutive_stale` + `last_hygiene_eval` + `hygiene_eval_counts`) |
 | `state/context-surface.json`   | cost-tracker.ts only (derived at each compaction boundary) | hermit-watchdog.ts (compact-tier conversation gate), doctor-check.ts (`context-age`) |
-| `state/watchdog-events.jsonl`  | hermit-watchdog.ts only (append)                    | doctor-check.ts (event counts), resident-start (restart reason)|
+| `state/watchdog-events.jsonl`  | hermit-watchdog.ts + channel-send.ts (append; maintainer fallback and undelivered client notices)                    | doctor-check.ts (event counts), resident-start (restart reason)|
 | `state/template-manifest.json` | `manifest-seed.ts` (called by hatch seed, docker-setup baselines, hermit-evolve update-after-copy) | evolve-plan.ts (classify), doctor-check.ts (shape check) |
 
 Per-file update policies for managed files under `.claude-code-hermit/`:
