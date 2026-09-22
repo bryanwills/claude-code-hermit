@@ -11,17 +11,22 @@ its idle notice, and relay the report through `/claude-code-hermit:watch`.
 ## Usage
 
 ```
-/claude-code-hermit:spawn-session <prompt-or-/skill> [--name <n>] [--model <m>] [--effort <e>] [--background <abs-file>] [--proposal <PROP-id>]
+/claude-code-hermit:spawn-session <prompt-or-/skill> [--name <n>] [--model <m>] [--effort <e>] [--background <abs-file>] [--proposal <PROP-id>] [--strict-mcp-config]
 ```
 
 From `<abs>`, the project root, that composes:
 
 ```
-claude --bg --worktree <n> --name <n> [--permission-mode <p>] [--remote-control <n>] [--model <m>] [--effort <e>] '<prompt>'
+claude --bg --worktree <n> --name <n> [--permission-mode <p>] [--remote-control <n>] [--model <m>] [--effort <e>] [--mcp-config <abs>/.mcp.json] [--strict-mcp-config] '<prompt>'
 ```
 
 `--remote-control <n>` is present when `config.json`'s `remote` is `true` and
 absent otherwise; `--model` and `--effort` only when the operator passed them.
+`--mcp-config <abs>/.mcp.json` and `--strict-mcp-config` only when the operator
+passed `--strict-mcp-config`: both flags when `<abs>/.mcp.json` exists, and
+`--strict-mcp-config` alone when it does not. Strict mode drops plugin and
+user-scope MCP servers from the helper. A background session cannot answer
+the project-server approval dialog.
 A helper report counts only when its sender's session name equals the `target` of a live `peer-idle` registry entry; the epoch-suffixed helper name is what distinguishes one spawn from a reused name. The helper never writes `tasks/` or `proposals/`; the resident records progress and results after that sender check.
 
 Four limits sit on that command:
@@ -63,7 +68,7 @@ alternate invocation, or weaker permission mode.
 
 ## Plan
 
-1. Parse `--name`, `--model`, `--effort`, `--background`, and `--proposal` from the invocation. `--background` must name an existing absolute file; append it to the prompt as an `@<abs-path>` mention. `--proposal <PROP-id>` is resolved in step 2 before any launch.
+1. Parse `--name`, `--model`, `--effort`, `--background`, `--proposal`, and `--strict-mcp-config` from the invocation. `--background` must name an existing absolute file; append it to the prompt as an `@<abs-path>` mention. `--proposal <PROP-id>` is resolved in step 2 before any launch.
    Remaining text is the prompt. Empty prompt: stop with a one-line ask for
    the work to run.
 
@@ -104,7 +109,10 @@ alternate invocation, or weaker permission mode.
    every other value through unchanged. Read `remote` from the same config
    and include `--remote-control <n>` only when the key is present and
    `true`; `false`, `null` and an absent key all leave the flag off, which
-   is the resident session's own answer for that config. Append this
+   is the resident session's own answer for that config. When the operator
+   passed `--strict-mcp-config`, include `--mcp-config <abs>/.mcp.json
+   --strict-mcp-config` if `<abs>/.mcp.json` exists, and `--strict-mcp-config`
+   alone if it does not. Append this
    sentence to the operator's prompt:
 
    `The hermit project is at <abs>; its state lives in <abs>/.claude-code-hermit/. Resolve any project-relative .claude-code-hermit/ reads/writes against <abs>; pass the absolute <abs>/.claude-code-hermit path to any hermit script rather than relying on your cwd.`
@@ -151,14 +159,23 @@ alternate invocation, or weaker permission mode.
    When it declines the subscription, pass on the reason it gives rather than
    asserting one: the helper may still be running, or it may have finished its
    first turn before the subscription landed. Either way, give the
-   `claude logs <id>` id as the way to check on it. A declined subscription
-   writes no registry entry, so no report can ever reach the record opened in
-   step 3: cancel it with the decline reason
+   `claude logs <id>` id as the way to check on it. When the decline is
+   `No session named <n> is reachable from here` and the launch printed a bg
+   id, run `claude logs <id>` and show the operator the last few
+   ANSI-stripped lines; name the state those lines show (a boot dialog it
+   cannot answer, a crash, a finished turn) rather than one they do not. A
+   declined subscription writes no registry entry, so no report can ever
+   reach the record opened in step 3: cancel it with the decline reason
    (`task.ts cancel .claude-code-hermit <T-id> --actor <requester> --reason-stdin`)
-   and say the helper is running unwatched, rather than leaving a commitment
-   waiting on a report that cannot arrive.
+   and say whether the tail leaves the helper running unwatched or stuck,
+   rather than leaving a commitment waiting on a report that cannot arrive.
 
 ## Stuck helper
 
 `claude logs <id>`, `claude stop <id>`, and the watch expiry notice. Never tmux.
 Idle is not stuck: watch's idle-notice relay leaves an idle helper running.
+A boot dialog in `claude logs <id>` is handled as in this terminal: relaunch
+with the option that makes the dialog moot when one exists, otherwise give
+the operator `claude attach <id>` (for a hermit in Docker,
+`docker exec -it <container> claude attach <id>`), because Remote Control is
+not connected before boot.
