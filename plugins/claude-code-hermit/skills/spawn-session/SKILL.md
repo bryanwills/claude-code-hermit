@@ -17,7 +17,7 @@ its idle notice, and relay the report through `/claude-code-hermit:watch`.
 From `<abs>`, the project root, that composes:
 
 ```
-claude --bg --worktree <n> --name <n> [--permission-mode <p>] [--remote-control <n>] [--model <m>] [--effort <e>] [--mcp-config <abs>/.mcp.json] [--strict-mcp-config] '<prompt>'
+claude --bg --worktree <n> --name <n> [--permission-mode <p>] [--remote-control <n>] [--model <m>] [--effort <e>] [--mcp-config <abs>/.mcp.json] [--strict-mcp-config] --append-system-prompt-file <abs>/.claude-code-hermit/state/helper-system-prompt.md '<prompt>'
 ```
 
 `--remote-control <n>` is present when `config.json`'s `remote` is `true` and
@@ -29,12 +29,17 @@ user-scope MCP servers from the helper. A background session cannot answer
 the project-server approval dialog.
 A helper report counts only when its sender's session name equals the `target` of a live `peer-idle` registry entry; the epoch-suffixed helper name is what distinguishes one spawn from a reused name. The helper never writes `tasks/` or `proposals/`; the resident records progress and results after that sender check.
 
-Four limits sit on that command:
+Five limits sit on that command:
 
 - The helper's worktree `.claude-code-hermit/` is a projection (`OPERATOR.md`,
   `config.json`, `compiled/` only). Any file the helper must Read is passed as
   an absolute path in the prompt, spelled as an `@<abs-path>` mention so
   Claude Code injects it at launch.
+- `<abs>/.claude-code-hermit/state/helper-system-prompt.md` is written at boot
+  and gated like `RESIDENT.md`. Pass it as `--append-system-prompt-file` (a
+  system-prompt file is not expanded, so `@<abs-path>` mentions still belong
+  in the prompt). The appended text reaches the helper's main conversation
+  and forks, not its non-fork subagents.
 - A worktree carries no `.claude/settings.local.json` (it is gitignored, so
   nothing checks it out), so the helper inherits none of this hermit's
   permission rules. `--permission-mode <p>` from `config.json`'s
@@ -105,29 +110,17 @@ alternate invocation, or weaker permission mode.
    `<abs>/.claude-code-hermit/proposals/<filename>` to the prompt as an
    `@<abs-path>` mention, the same way `--background` is. Read `<p>` from `<abs>/.claude-code-hermit/config.json`
    (`permission_mode`), dropping the flag for `default`, `null` or an absent
-   key, mapping `bypassPermissions` to `auto` (Four limits), and passing
+   key, mapping `bypassPermissions` to `auto` (Five limits), and passing
    every other value through unchanged. Read `remote` from the same config
    and include `--remote-control <n>` only when the key is present and
    `true`; `false`, `null` and an absent key all leave the flag off, which
    is the resident session's own answer for that config. When the operator
    passed `--strict-mcp-config`, include `--mcp-config <abs>/.mcp.json
    --strict-mcp-config` if `<abs>/.mcp.json` exists, and `--strict-mcp-config`
-   alone if it does not. Append this
-   sentence to the operator's prompt:
-
-   `The hermit project is at <abs>; its state lives in <abs>/.claude-code-hermit/. Resolve any project-relative .claude-code-hermit/ reads/writes against <abs>; pass the absolute <abs>/.claude-code-hermit path to any hermit script rather than relying on your cwd.`
-
-   Then append: finish by sending the resident one `GUEST_REPORT:` message with
-   this exact block, and end the turn on a one-sentence verdict:
-
-   ```
-   GUEST_REPORT: <one-sentence verdict>
-   Verdict: <verdict>
-   Why: <one line>
-   Scope change: <none | what changed>
-   Next step: <what the operator decides next>
-   Evidence: <branch, files, commands>
-   ```
+   alone if it does not. Check that
+   `<abs>/.claude-code-hermit/state/helper-system-prompt.md` exists; boot
+   writes it. If it is missing, refuse with one line: restart with hermit-start
+   so boot writes the helper system-prompt file.
 
 3. `cd <abs>` as its own Bash call, then run the command in Usage as the next
    one, so the launch stands alone in the transcript and in any approval that

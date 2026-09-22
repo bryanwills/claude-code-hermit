@@ -198,7 +198,7 @@ Claude Code's `--permission-mode auto` (the hermit's default) routes tool calls 
 
   Routine prechecks retain their separate rule: direct `routines.<index>.precheck` and `precheck_timeout_s` mutations ask, including unset. A routine-container replacement asks when it adds or changes a precheck; removal and reordering with unchanged prechecks stay silent. This checkpoint registers unattended execution; it does not freeze the referenced script's contents. Routine/session-check commands, schedules, model tuning, budgets, escalation, lifecycle, and recording preferences gain no new gate.
 
-  A target spelled through a shell variable and direct Edit/Write, redirect, `cp`/`mv`/`tee`, or `sed -i` onto `config.json` still ask. The hook also retains protection for `RESIDENT.md` and `claude-settings.json`. A write staged through `bash -c`, `eval`, or a script is outside what the hook can read and stays classifier-watched. This is a command-text policy guard, not a filesystem boundary. Boot, hatch, and upgrade writers retain their separate entry points. For recognized `channel-access` pair, policy, and group-add commands, the hook uses the caller's `permission_mode`: it denies `bypassPermissions` and asks elsewhere, naming the explicit code, policy, or enrolment values. The target hermit's configured mode does not decide this gate.
+  A target spelled through a shell variable and direct Edit/Write, redirect, `cp`/`mv`/`tee`, or `sed -i` onto `config.json` still ask. The hook also retains protection for `RESIDENT.md`, `state/helper-system-prompt.md` and `claude-settings.json`. A write staged through `bash -c`, `eval`, or a script is outside what the hook can read and stays classifier-watched. This is a command-text policy guard, not a filesystem boundary. Boot, hatch, and upgrade writers retain their separate entry points. For recognized `channel-access` pair, policy, and group-add commands, the hook uses the caller's `permission_mode`: it denies `bypassPermissions` and asks elsewhere, naming the explicit code, policy, or enrolment values. The target hermit's configured mode does not decide this gate.
 
   The dialog is relayed by the channel plugin to its `allowFrom` DMs, never to `maintainer_channel_id`. An empty `allowFrom` means the prompt reaches nobody and the session waits until the watchdog stalled-dialog notice. A No is the operator's answer: never retry or route around it. To forbid chat settings writes entirely, add `Bash(*settings-edit*)` to native `permissions.deny`.
 
@@ -389,7 +389,7 @@ Plugins run with the same permissions as Hermit. The default `auto` mode applies
 
 See [Recommended Plugins](recommended-plugins.md) for the full list and installation instructions.
 
-Resident duties in `.claude-code-hermit/RESIDENT.md` are appended only by the launcher. Writes to that file and the operator-owned `claude-settings.json` use the same settings gate as config.json, with redirect denies and Edit ask rules.
+Resident duties in `.claude-code-hermit/RESIDENT.md` are appended only by the launcher, and the helper system prompt in `state/helper-system-prompt.md` is written only at boot. Writes to those files and the operator-owned `claude-settings.json` use the same settings gate as config.json, with redirect denies and Edit ask rules.
 
 ### Task record script boundary
 

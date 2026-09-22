@@ -142,11 +142,16 @@ function resolveTarget(verb: string, target: string): string {
 }
 
 /** The hermit-dir files a shell write must raise the native prompt for. */
-export const PROTECTED_FILES = ['config.json', 'RESIDENT.md', 'claude-settings.json'];
-const PROTECTED_FILE_ALT = PROTECTED_FILES.map((n) => n.replace(/\./g, String.raw`\.`)).join('|');
+export const PROTECTED_FILES = ['config.json', 'RESIDENT.md', 'claude-settings.json', 'state/helper-system-prompt.md'];
+// A nested file's directory is optional so `$STATE/<basename>` matches the way
+// `$DIR/config.json` does: the hook cannot tell which directory a variable names.
+const PROTECTED_FILE_ALT = PROTECTED_FILES
+  .map((n) => n.replace(/\./g, String.raw`\.`).replace(/^(.+\/)/, '(?:$1)?'))
+  .join('|');
 
-function targetsConfigFile(p: string): boolean {
-  return PROTECTED_FILES.some(name => p.replace(/\\/g, '/').endsWith(`.claude-code-hermit/${name}`));
+function targetsConfigFile(p: string): string | undefined {
+  const normalized = p.replace(/\\/g, '/');
+  return PROTECTED_FILES.find((name) => normalized.endsWith(`.claude-code-hermit/${name}`));
 }
 
 /**
@@ -371,7 +376,8 @@ function main(payload: any): void {
       typeof payload.cwd === 'string' ? payload.cwd : process.cwd());
   } else {
     const fp = typeof input.file_path === 'string' ? input.file_path : '';
-    asked = targetsConfigFile(fp) ? [path.basename(fp.replace(/\\/g, '/'))] : null;
+    const match = targetsConfigFile(fp);
+    asked = match ? [match] : null;
   }
 
   if (!asked) return;
