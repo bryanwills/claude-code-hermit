@@ -2198,6 +2198,14 @@ describe('resident prompt launch requirement', () => {
     const { cmd } = await runBuildClaudeCommand({}, CLAUDE_FETCH_FAILS);
     expect(cmd[cmd.indexOf('--append-system-prompt-file') + 1]).toBe(path.resolve('.claude-code-hermit/RESIDENT.md'));
   });
+  test('boot writes helper-system-prompt.md with project root and resident name', async () => {
+    const { cmd } = await runBuildClaudeCommand({}, CLAUDE_FETCH_FAILS);
+    const file = fs.readFileSync('.claude-code-hermit/state/helper-system-prompt.md', 'utf8');
+    expect(file).toContain(path.resolve('.'));
+    expect(file).toContain(peerName({}));
+    expect(file).not.toContain('{{');
+    expect(cmd).not.toContain(path.resolve('.claude-code-hermit/state/helper-system-prompt.md'));
+  });
   test('missing resident exits 1 and stamps runtime even at the current version', async () => {
     const version = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.claude-plugin/plugin.json'), 'utf8')).version;
     writeConfig({ _hermit_versions: { 'claude-code-hermit': version } });

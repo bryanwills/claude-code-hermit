@@ -31,6 +31,7 @@ import { outputStyleFor } from './lib/voice';
 import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY, SEALED_SETTINGS_OPS } from './lib/settings/automode-entries';
 import { overlayHooks } from './lib/settings/overlay-hooks';
 import { writeFileAtomic } from './lib/md-write';
+import { renderTemplate } from './lib/render-template';
 import { transcriptDirFor } from './lib/cc-compat';
 
 type Json = any;
@@ -647,6 +648,17 @@ function requireResident(): void {
   }
 }
 
+function writeHelperSystemPrompt(residentName: string): void {
+  const rendered = renderTemplate(
+    fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'helper-system-prompt.md.template'), 'utf8'),
+    {
+      PROJECT_ROOT: hermitFile('..'),
+      RESIDENT_NAME: residentName,
+    },
+  );
+  writeFileAtomic(path.resolve(STATE_DIR, 'helper-system-prompt.md'), rendered);
+}
+
 /** Build the claude launch command from config. */
 function buildClaudeCommand(config: Json, tools: Json, opts?: { resume?: string }): string[] {
   const cmd = ['claude'];
@@ -766,6 +778,7 @@ function buildClaudeCommand(config: Json, tools: Json, opts?: { resume?: string 
   // A resident without its pause gate must not boot.
   const overlay = renderLaunchOverlay(config);
   if (!overlay) process.exit(1);
+  writeHelperSystemPrompt(name);
   cmd.push('--settings', overlay);
   cmd.push('--append-system-prompt-file', hermitFile('RESIDENT.md'));
 
