@@ -6,6 +6,14 @@
 - `--strict-mcp-config` on `spawn-session` drops plugin and user-scope MCP servers from the helper, passing the project's own `.mcp.json` through when it exists
 - A helper whose watch subscription is declined is reported with its `claude logs` tail naming the state it is in, instead of a bare decline reason
 
+### Changed
+- Spawned helpers receive the hermit anchor and `GUEST_REPORT:` protocol through `--append-system-prompt-file` from a boot-written `state/helper-system-prompt.md`, so both survive `/compact` and `/clear`, and the file is protected like `RESIDENT.md`
+
+### Upgrade Instructions
+1. Run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny ask-only`. Use the settings file Step 1's preflight resolved (`domain-hatch.ts preflight`). Additive and unattended-safe: if the target already carries at least one seeded deny entry, merge the ask list into `permissions.ask` and touch nothing else; if none are present, print `skip-preserved` and write nothing. Report the outcome (entries added, or `skip-preserved`).
+2. Unless step 1 printed `skip-preserved`, run `bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> deny-add 'Bash(*> *.claude-code-hermit/state/helper-system-prompt.md*)' 'Bash(*>.claude-code-hermit/state/helper-system-prompt.md*)'` against the same file, adding `'Edit(*.claude-code-hermit/state/helper-system-prompt.md)'` to that call when its `permissions.deny` already holds `Edit(*.claude-code-hermit/RESIDENT.md)` (a Hardened install). `deny ask-only` merges only the ask list, so this is what puts the new redirect denies in place. Additive and idempotent.
+3. Restart with hermit-start so boot writes `state/helper-system-prompt.md`.
+
 ## [1.4.4] - 2026-09-21
 
 ### Added

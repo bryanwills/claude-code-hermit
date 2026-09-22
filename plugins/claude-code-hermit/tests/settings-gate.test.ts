@@ -319,7 +319,7 @@ describe('settings-gate silent paths', () => {
 
 test('resident instructions and operator overlay are protected for every write tool', async () => {
   const dir = fixture();
-  for (const name of ['RESIDENT.md', 'claude-settings.json']) {
+  for (const name of ['RESIDENT.md', 'claude-settings.json', 'state/helper-system-prompt.md']) {
     const file = `.claude-code-hermit/${name}`;
     for (const tool of ['Edit', 'Write'] as const) {
       const result = await runGate(payload({ dir, tool, input: { file_path: file, content: '{}' } }), dir);
@@ -330,6 +330,8 @@ test('resident instructions and operator overlay are protected for every write t
       expectAsk(result.stdout, `Hermit setting: ${name}`);
     }
   }
+  const viaStateVar = await runGate(payload({ dir, tool: 'Bash', input: { command: 'echo x > "$STATE_DIR/helper-system-prompt.md"' } }), dir);
+  expectAsk(viaStateVar.stdout, 'Hermit setting: helper-system-prompt.md');
 });
 
 describe('static settings policy', () => {

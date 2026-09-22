@@ -54,9 +54,13 @@ describe('GITIGNORE-APPEND.txt', () => {
   // `env` block. RESIDENT.md and claude-settings.json both shipped unignored,
   // the second time a new hermit-dir file missed this template, so the check
   // now tracks the list instead of the two names that happened to be missing.
+  // A directory line ending in `/` covers protected paths under it.
   test('GITIGNORE-APPEND.txt lists every settings-gate protected file', () => {
     for (const name of PROTECTED_FILES) {
-      expect(lines).toContain(`.claude-code-hermit/${name}`);
+      const target = `.claude-code-hermit/${name}`;
+      expect(lines.some((line) =>
+        line === target || (line.endsWith('/') && target.startsWith(line)),
+      )).toBe(true);
     }
   });
 });
