@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `--strict-mcp-config` on `spawn-session` drops plugin and user-scope MCP servers from the helper, passing the project's own `.mcp.json` through when it exists
+- A helper whose watch subscription is declined is reported with its `claude logs` tail naming the state it is in, instead of a bare decline reason
+
 ## [1.4.4] - 2026-09-21
 
 ### Added
