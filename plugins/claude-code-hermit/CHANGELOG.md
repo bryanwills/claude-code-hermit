@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.5] - 2026-09-23
 
 ### Added
 - `--strict-mcp-config` on `spawn-session` drops plugin and user-scope MCP servers from the helper, passing the project's own `.mcp.json` through when it exists
