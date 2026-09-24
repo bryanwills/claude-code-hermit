@@ -105,10 +105,12 @@ const weekResolved = allProposals.filter(p => {
 
 // --- Metrics ---
 const sessionsCount = weekSessions.length;
-const totalCost = weekSessions.reduce((sum, s) => sum + Number(s.fm.cost_usd || 0), 0);
-const avgCost = sessionsCount > 0 ? totalCost / sessionsCount : 0;
+const attributedCost = weekSessions.reduce((sum, s) => sum + Number(s.fm.cost_usd || 0), 0);
+const avgCost = sessionsCount > 0 ? attributedCost / sessionsCount : 0;
 
-// Task reports carry cost; token totals come from the week's cost-log rows.
+// Task reports carry only the cost attributed to each task; the week's spend and
+// token totals come from the cost-log rows, so they hold when no task closed.
+let totalCost = 0;
 let totalTokens = 0;
 const weekCostLog = costLogPath(hermitDir);
 const weekStartStr = weekStart.toISOString().slice(0, 10);
@@ -120,7 +122,10 @@ try {
     try {
       const e = JSON.parse(line);
       const d = (e.timestamp || '').slice(0, 10);
-      if (d >= weekStartStr && d < weekEndStr) totalTokens += e.total_tokens || 0;
+      if (d >= weekStartStr && d < weekEndStr) {
+        totalCost += e.estimated_cost_usd || 0;
+        totalTokens += e.total_tokens || 0;
+      }
     } catch {}
   }
 } catch {}
@@ -441,11 +446,12 @@ const dateRange = weekDateRange(currentYear, currentWeek);
 let body = `## Week of ${dateRange}\n\n`;
 
 // Sessions
+const weekSpend = `Week spend $${totalCost.toFixed(2)} (${formatTokens(totalTokens)}).`;
 if (sessionsCount > 0) {
   body += `### Tasks\n`;
-  body += `${sessionsCount} task${sessionsCount !== 1 ? 's' : ''}, $${totalCost.toFixed(2)} (${formatTokens(totalTokens)}) total ($${avgCost.toFixed(2)} avg).\n\n`;
+  body += `${sessionsCount} task${sessionsCount !== 1 ? 's' : ''} closed ($${avgCost.toFixed(2)} avg attributed). ${weekSpend}\n\n`;
 } else {
-  body += `### Tasks\nNo closed tasks this week.\n\n`;
+  body += `### Tasks\nNo closed tasks this week. ${weekSpend}\n\n`;
 }
 
 body += '### By person\n';
