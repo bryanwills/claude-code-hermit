@@ -5,6 +5,9 @@
 ### Changed
 - `spawn-session` triggers on "spawn a new session" phrasing, with or without `--model` and `--effort`, and its description names it as the launch path a hand-built `claude --bg` bypasses
 
+### Fixed
+- Weekly review `total_cost_usd` is the week's spend from the cost log instead of the cost attributed to tasks closed that week, so it no longer reads $0 when no task closed; the attributed figure stays as `avg_task_cost_usd`. The first review after this upgrade compares against a prior week measured on the old basis
+
 ## [1.4.5] - 2026-09-23
 
 ### Added
