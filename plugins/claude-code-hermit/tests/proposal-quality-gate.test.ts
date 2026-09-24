@@ -295,10 +295,9 @@ describe('CLI contract', () => {
 // ------------------------------------------------------ single ownership
 
 describe('proposal-act delegates the decision (no second copy of the rubric)', () => {
-  const skill = fs.readFileSync(
-    path.join(import.meta.dir, '..', 'skills', 'proposal-act', 'SKILL.md'),
-    'utf8',
-  );
+  const skill = ['SKILL.md', 'branches.md']
+    .map((f) => fs.readFileSync(path.join(import.meta.dir, '..', 'skills', 'proposal-act', f), 'utf8'))
+    .join('\n');
 
   test('all three implementation paths route through the verb', () => {
     // dispatched subagent, in-main e.5, and the queued queued record note.

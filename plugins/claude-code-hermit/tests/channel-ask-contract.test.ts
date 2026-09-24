@@ -120,7 +120,8 @@ describe('suggestion cards: channel-facing proposal vocabulary stays plain', () 
   });
 
   test('proposal-act/SKILL.md confirms accept/defer/dismiss in plain voice on a channel-tagged turn', () => {
-    const content = skillContent.get('proposal-act')!;
+    const content = skillContent.get('proposal-act')! + '\n'
+      + fs.readFileSync(path.join(SKILLS_DIR, 'proposal-act', 'branches.md'), 'utf-8');
     expect(content).toContain('Got it — starting on Suggestion #N.');
     expect(content).toContain('Held Suggestion #N for later.');
     expect(content).toContain('Dropped Suggestion #N.');

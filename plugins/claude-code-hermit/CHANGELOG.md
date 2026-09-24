@@ -3,8 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- `proposal-act` keeps its guards, accept steps, defer, dismiss and resolve in `SKILL.md` and reads the accept options and channel re-entry from `branches.md`
+- `spawn-session` launches helpers in the project folder by default, or in another folder with `--cwd <abs-dir>`, and leaves edit isolation to Claude Code's `worktree.bgIsolation`; `--worktree` gives a helper its own worktree from the start
 - `spawn-session` triggers on "spawn a new session" phrasing, with or without `--model` and `--effort`, and its description names it as the launch path a hand-built `claude --bg` bypasses
 - Accepting a proposal a spawned helper investigated sends the implementation to that helper, resuming it by name when it is no longer running, instead of briefing a fresh agent; the helper lands it as a pull request from its worktree, and the watch relay records its report as implementation rather than triage
+
+### Fixed
+- Weekly review `total_cost_usd` is the week's spend from the cost log instead of the cost attributed to tasks closed that week, so it no longer reads $0 when no task closed; the attributed figure stays as `avg_task_cost_usd`. The first review after this upgrade compares against a prior week measured on the old basis
 
 ## [1.4.5] - 2026-09-23
 

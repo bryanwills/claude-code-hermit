@@ -422,7 +422,8 @@ describe('proposal.ts patch', () => {
 
   test('no free-text value rides --set argv in either SKILL.md', () => {
     const proposalCreate = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'proposal-create', 'SKILL.md'), 'utf-8');
-    const proposalAct = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'SKILL.md'), 'utf-8');
+    const proposalAct = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'SKILL.md'), 'utf-8')
+      + '\n' + fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'branches.md'), 'utf-8');
     // success_signal predicates are free text (multi-word, `<`/`>` operators) — they
     // must travel via the stdin `Set:` line, never argv `--set`.
     expect(proposalCreate).not.toMatch(/--set\s+success_signal=/);

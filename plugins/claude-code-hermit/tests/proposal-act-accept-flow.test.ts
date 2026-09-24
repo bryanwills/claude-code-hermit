@@ -14,7 +14,14 @@ import { PLUGIN_ROOT } from './helpers/run';
 const SKILL_PATH = path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'SKILL.md');
 const TEMPLATE_PATH = path.join(PLUGIN_ROOT, 'state-templates', 'PROPOSAL.md.template');
 
-const skill = fs.readFileSync(SKILL_PATH, 'utf-8');
+const BRANCHES_PATH = path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'branches.md');
+
+// The accept options and channel re-entry live in
+// branches.md (the rare-branch procedures file); assert against the combined
+// surface, and against `front` alone for what must survive a compaction cut.
+const front = fs.readFileSync(SKILL_PATH, 'utf-8');
+const branches = fs.readFileSync(BRANCHES_PATH, 'utf-8');
+const skill = front + '\n' + branches;
 
 // Lines strictly between the opening --- and the second --- (awk '/^---$/{c++; next} c==1').
 function frontmatterOf(content: string): string {
@@ -161,29 +168,35 @@ describe('proposal-act accept flow', () => {
 // channel-tagged branch on step 4, and the --answer re-entry path.
 describe('PROP-017 channel-safe approvals', () => {
   test('Step 0 channel-reply marker present', () => {
-    expect(skill).toContain('Step 0 — Channel reply');
+    expect(front).toContain('Step 0 — Channel reply');
   });
 
   test('step 4 channel branch queues the three option labels', () => {
-    expect(skill).toContain('"implement now"');
-    expect(skill).toContain('"queued task"');
-    expect(skill).toContain('"manual"');
+    expect(front).toContain('"implement now"');
+    expect(front).toContain('"queued task"');
+    expect(front).toContain('"manual"');
   });
 
-  test('channel re-entry section present', () => {
-    expect(skill).toContain('--answer');
-    expect(skill).toContain('Channel re-entry');
+  test('channel re-entry skips steps 1-3a before the accept flow runs', () => {
+    const accept = front.slice(front.indexOf('## Accept Flow'), front.indexOf('\n1. Resolve the proposal file'));
+    expect(accept).toContain('--answer');
+    expect(accept).toContain('skip steps 1-3a entirely');
+    expect(branches).toContain('\n## Channel re-entry (`--answer`)\n');
+  });
+
+  test('step 4 carries --no-artifacts into on_resolve at queue time', () => {
+    expect(front).toContain('--answer {answer} --no-artifacts');
   });
 
   test('MP entry carries an on_resolve invocation with the {answer} placeholder', () => {
-    expect(skill).toContain('on_resolve');
-    expect(skill).toContain('{answer}');
+    expect(front).toContain('on_resolve');
+    expect(front).toContain('{answer}');
   });
 });
 
 // Frontmatter description specifically (between the opening --- and the second ---).
 test("frontmatter description mentions 'start implementing now'", () => {
-  expect(frontmatterOf(skill)).toMatch(/^description:.*start implementing now/m);
+  expect(frontmatterOf(front)).toMatch(/^description:.*start implementing now/m);
 });
 
 // Step 2's success_signal bullet: capture and validation.
@@ -219,5 +232,35 @@ describe('PROPOSAL.md.template', () => {
 
   test('PROPOSAL.md.template: Success Signal section present', () => {
     expect(template).toContain('## Success Signal');
+  });
+});
+
+// SKILL.md is what every invocation pays for and what survives a compaction
+// cut; each branch it dispatches to must exist under the name it uses.
+describe('proposal-act branches.md dispatch', () => {
+  const SECTIONS = [
+    'Start implementing now',
+    'Queue a task',
+    'Channel re-entry (`--answer`)',
+  ];
+
+  for (const section of SECTIONS) {
+    test(`SKILL.md points at branches.md § ${section} and the section exists`, () => {
+      expect(front).toContain(`branches.md § ${section}`);
+      expect(branches).toContain(`\n## ${section}\n`);
+    });
+  }
+
+  test('defer, dismiss and resolve stay inline in SKILL.md', () => {
+    for (const flow of ['Defer Flow', 'Dismiss Flow', 'Resolve Flow']) {
+      expect(front).toContain(`\n## ${flow}\n`);
+      expect(branches).not.toContain(`## ${flow}`);
+    }
+  });
+
+  test('front page keeps the option labels the micro-proposal queue needs', () => {
+    expect(front).toContain('"Start implementing now"');
+    expect(front).toContain('"Queue a task"');
+    expect(front).toContain("I'll handle it manually");
   });
 });

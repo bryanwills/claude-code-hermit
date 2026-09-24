@@ -5,8 +5,9 @@ falsification gate and Dispatch, when the proposal's `## Operator Decision`
 carries a `spawn-session --proposal` hand-off line:
 `Handed to helper <n> on <date>; record <T-id>`. The latest such line names
 the helper. It already paid for reading the proposal and its cited files, so
-the implementation tail goes to it. The helper works in its own worktree, so
-what it implements lands as a pull request from that branch.
+the implementation tail goes to it. Claude Code fences a helper's edits in
+the main checkout until it enters a worktree, so what it implements lands as
+a pull request from that branch.
 
 **Instructions.** The numbered instructions of the Dispatch prompt, spelled as
 message text with the absolute proposal path written out (an `@` path attaches
@@ -35,7 +36,7 @@ nothing across sessions), with two changes:
   the project root run `claude --bg --resume <n> '<the instructions>'` with no
   other flag: the saved options include the helper system prompt, and any
   extra flag starts a copy that drops them all, name, permission mode and
-  worktree included. The instructions are one single-quoted
+  folder included. The instructions are one single-quoted
   argument, so replace every `'` in them with `'\''` first, as spawn-session's
   limits require. Then invoke
   `/claude-code-hermit:watch session <n> "Implement PROP-NNN" --record <id> --proposal PROP-NNN --implement`,
