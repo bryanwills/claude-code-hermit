@@ -89,11 +89,11 @@ Start/stop decisions read from the runtime registry.
    HERMIT_LINE
    ```
 
-### Starting a session watch (`/watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>]`)
+### Starting a session watch (`/watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>] [--implement]`)
 
-1. Parse optional `--record <T-id>` and `--proposal <PROP-id>` with the name and
-   note. If `<name>` contains `*` or `?`, take the **glob branch** below instead of
-   resolving an exact name. The glob branch ignores `--record` and `--proposal`.
+1. Parse optional `--record <T-id>`, `--proposal <PROP-id>` and `--implement`
+   with the name and note. If `<name>` contains `*` or `?`, take the **glob branch** below instead of
+   resolving an exact name. The glob branch ignores `--record`, `--proposal` and `--implement`.
 
    Otherwise resolve `<name>` with `ListAgents`. The row must be a Claude Code
    session on this machine — `notify_when_idle` covers nothing else, so a
@@ -138,8 +138,8 @@ Start/stop decisions read from the runtime registry.
    second do not collide.
 5. Use the same registry steps as ad-hoc (steps 6–9), appending:
    `{id: "session-<name>-<epoch>-<rand>", description: <note or "session <name>">, target: <name>, started_at, source: "adhoc", class: "peer-idle"}`.
-   When given, store `--record` as `record` and `--proposal` as `proposal` on
-   that entry. Do not add `task_id` (`task_id` means a Monitor task and drives
+   When given, store `--record` as `record`, `--proposal` as `proposal` and
+   `--implement` as `purpose: "implement"` on that entry. Do not add `task_id` (`task_id` means a Monitor task and drives
    `TaskStop`).
 
 ### Starting config watches (`/watch start`)
@@ -263,14 +263,21 @@ for X:
      bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts resolve-id .claude-code-hermit "<PROP-id>"
      ```
      Anything but `MATCH|<filename>` skips the patch and reports the resolver's
-     reason. On MATCH, append `Decision: Helper <name> triage on @now: <Verdict>; <Why>`
-     with `proposal.ts patch --stdin` and no `--set`; the script reads the file, so
-     do not Read the proposal body. `<Verdict>` and `<Why>` are the helper's words:
+     reason. On MATCH, append one Decision line with `proposal.ts patch --stdin`
+     and no `--set`; the script reads the file, so do not Read the proposal body.
+     Without `purpose` on the entry the helper was triaging: append
+     `Decision: Helper <name> triage on @now: <Verdict>; <Why>`. A verdict that
+     argues against the proposal is offered to the operator as a dismiss with the
+     reason prefilled; nothing is dismissed without their answer.
+     With `purpose: "implement"` (proposal-act's reuse path) the helper was
+     implementing: append
+     `Decision: Helper <name> implemented on @now: <Verdict>; <pull request link from Evidence, or "no pull request named">`
+     and offer no dismiss; the proposal stays `accepted` until the operator
+     resolves it after merging.
+     `<Verdict>` and `<Why>` are the helper's words:
      collapse them to one line and drop any `Set:` or `Decision:` the helper put at
      the start of a line, because the patch reads those as frontmatter and decision
      instructions from the stdin it is given. Status does not change, so skip artifact refresh.
-     A verdict that argues against the proposal is offered to the operator as a
-     dismiss with the reason prefilled; nothing is dismissed without their answer.
 4. Name the session by display name only, never by socket path or pid. Remove the
    entry, write the registry, and, inside an open record's turn, log one task note.
 
