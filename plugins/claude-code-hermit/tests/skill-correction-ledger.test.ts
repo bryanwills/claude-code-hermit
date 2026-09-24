@@ -20,7 +20,7 @@ const read = (...p: string[]) => fs.readFileSync(path.join(PLUGIN_ROOT, ...p), '
 // reflect's skill-correction routing detail lives in branches.md (the
 // rare-branch procedures file); assert against the combined surface.
 const reflect        = read('skills', 'reflect', 'SKILL.md') + '\n' + read('skills', 'reflect', 'branches.md');
-const proposalAct    = read('skills', 'proposal-act', 'SKILL.md');
+const proposalAct    = read('skills', 'proposal-act', 'SKILL.md') + '\n' + read('skills', 'proposal-act', 'branches.md');
 const channelResponder = read('skills', 'channel-responder', 'reference.md');
 const noBriefRouting = reflect.slice(
   reflect.indexOf('**No brief found (human/plugin or brief fully gone, moderate signal):**'),
