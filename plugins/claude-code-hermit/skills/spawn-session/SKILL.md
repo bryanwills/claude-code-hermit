@@ -1,6 +1,6 @@
 ---
 name: spawn-session
-description: Spawn a background Claude Code helper in its own git worktree, watch it until idle, and relay its report to the operator. Use when the operator says "spawn a helper", "spawn-session", "run this in a background session", or names `/spawn-session`.
+description: Spawns a background Claude Code helper in its own git worktree with the configured Remote Control and the boot-written helper system prompt that a hand-built `claude --bg` omits, watches it until idle, and relays its report to the operator. Use when the operator says "spawn a helper", "spawn a new session", "run this in a background session", asks for a new session with `--model` or `--effort`, or names `/spawn-session`.
 ---
 
 # Spawn Session
