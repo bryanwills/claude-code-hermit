@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { runScript } from './helpers/run';
 import { readFileWithFrontmatter } from '../scripts/lib/frontmatter';
+import { costLogPath } from '../scripts/lib/cc-compat';
 
 function makeHermitDir(): { hermitDir: string; cleanup(): void } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-weekly-review-'));
@@ -74,7 +75,39 @@ describe('weekly-review task records', () => {
     expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
     expect(readReview(dir).fm.open_loops_count).toBe('0');
   }));
+  test('week spend comes from cost-log rows even with no closed task', withHermitDir(async dir => {
+    writeWeekCostLog(dir);
+    expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
+    const { fm, body } = readReview(dir);
+    expect(fm.tasks_count).toBe('0');
+    expect(fm.total_cost_usd).toBe('3.75');
+    expect(fm.total_tokens).toBe('4000');
+    expect(body).toContain('No closed tasks this week. Week spend $3.75');
+  }));
+  test('week spend stays separate from the cost attributed to closed tasks', withHermitDir(async dir => {
+    writeWeekCostLog(dir);
+    await writeCompletedTask(dir, 'Unattributed work');
+    expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
+    const { fm, body } = readReview(dir);
+    expect(fm.tasks_count).toBe('1');
+    expect(fm.total_cost_usd).toBe('3.75');
+    expect(fm.avg_task_cost_usd).toBe('0.00');
+    expect(body).toContain('1 task closed ($0.00 avg attributed). Week spend $3.75');
+  }));
 });
+
+// Two rows in the current week ($3.75, 4000 tokens) and one two weeks back that must be ignored.
+function writeWeekCostLog(hermitDir: string): void {
+  const log = costLogPath(hermitDir);
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  const now = new Date().toISOString();
+  const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString();
+  fs.writeFileSync(log, [
+    JSON.stringify({ timestamp: now, estimated_cost_usd: 1.25, total_tokens: 1000, source: 'main' }),
+    JSON.stringify({ timestamp: now, estimated_cost_usd: 2.5, total_tokens: 3000, source: 'main' }),
+    JSON.stringify({ timestamp: twoWeeksAgo, estimated_cost_usd: 100, total_tokens: 999999, source: 'main' }),
+  ].join('\n') + '\n');
+}
 
 // -------------------------------------------------------------------------
 // Usage section — usage-metrics.jsonl → "no tracked use" suggestions.
