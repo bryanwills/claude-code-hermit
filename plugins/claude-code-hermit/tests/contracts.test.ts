@@ -36,6 +36,8 @@ const TEMPLATES = path.join(PLUGIN_ROOT, 'state-templates');
 
 const read = (p: string) => fs.readFileSync(p, 'utf-8');
 const readJson = (p: string) => JSON.parse(read(p));
+// proposal-act's action procedures live in branches.md; assert against the combined surface.
+const PROPOSAL_ACT = read(path.join(SKILLS, 'proposal-act', 'SKILL.md')) + '\n' + read(path.join(SKILLS, 'proposal-act', 'branches.md'));
 
 // ---------- tempdir harness (port of _TempDirTest, no chdir needed: cwd is
 // passed to spawned processes instead) ----------
@@ -2279,7 +2281,7 @@ describe('reference.md plugin-root contract', () => {
 // ============================================================
 
 describe('proposal-act dispatch contract', () => {
-  const skill = read(path.join(SKILLS, 'proposal-act', 'SKILL.md'));
+  const skill = PROPOSAL_ACT;
 
   test('falsification gate runs for every code-edit implementation', () => {
     expect(skill).toContain('You are a read-only falsification gate. Verify every cited path and symbol against the current code. For a cited compiled/ or raw/ doc missing at its original path, search for the same basename under that directory\'s .archive/ and, on a match, treat the citation as present and verify against the archived copy; a doc absent from both locations is a real stale-paths.');
@@ -2315,7 +2317,7 @@ describe('proposal-act dispatch contract', () => {
     // Queued work is consumed in a later turn, so step (e) never
     // runs again — the guards have to travel in the bullet or the queued path can resurrect a
     // target deleted after queueing, or rewrite one already fixed
-    const queued = skill.slice(skill.indexOf('- **"Queue a task"**'), skill.indexOf('- **"I\'ll handle it manually"**'));
+    const queued = skill.slice(skill.indexOf('\n## Queue a task\n'), skill.indexOf('\n## Channel re-entry'));
     expect(queued).toContain('For a cited compiled/ or raw/ doc missing at its original path, search for the same basename under that directory\'s .archive/ and, on a match, treat the citation as present and verify against the archived copy; a doc absent from both locations is a real stale-paths.');
     expect(queued).toContain('If it exists, read it before writing and author only the behaviors from the ## Skill Improvement body that are not already present');
     expect(queued).toContain('never write into the plugin cache, and create a file at that name only after the operator explicitly confirms');
@@ -3856,7 +3858,7 @@ describe('determinized lifecycle wiring contract', () => {
 
 describe('proposal lifecycle: no tool-mediated state writes', () => {
   const proposalCreate = read(path.join(SKILLS, 'proposal-create', 'SKILL.md'));
-  const proposalAct = read(path.join(SKILLS, 'proposal-act', 'SKILL.md'));
+  const proposalAct = PROPOSAL_ACT;
 
   test('proposal-create/SKILL.md invokes proposal.ts create instead of the Write tool', () => {
     expect(proposalCreate).toContain('proposal.ts create');

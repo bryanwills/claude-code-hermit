@@ -28,7 +28,7 @@ const reference = fs.readFileSync(path.join(path.dirname(SKILL_PATH), 'reference
 
 // ~/.agents/probe-results/cc-skill-truncation-after-compaction-and-reinvoke.md
 // records a 20,000-character rendered retention limit; leave room for growth.
-for (const name of ['channel-responder', 'task']) {
+for (const name of ['channel-responder', 'task', 'proposal-act']) {
   test(`${name} fits the rendered retention budget`, () => {
     const text = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', name, 'SKILL.md'), 'utf-8');
     const rendered = text.replaceAll('${CLAUDE_PLUGIN_ROOT}', '/' + 'p'.repeat(99));
