@@ -1,51 +1,61 @@
 ---
 name: spawn-session
-description: Spawn a background Claude Code helper in its own git worktree, watch it until idle, and relay its report to the operator. Use when the operator says "spawn a helper", "spawn-session", "run this in a background session", or names `/spawn-session`.
+description: Spawns a background Claude Code helper in the project or another folder with the configured Remote Control and the boot-written helper system prompt that a hand-built `claude --bg` omits, watches it until idle, and relays its report to the operator. Use when the operator says "spawn a helper", "spawn a new session", "run this in a background session", asks for a new session with `--model` or `--effort`, or names `/spawn-session`.
 ---
 
 # Spawn Session
 
-Launch a background Claude Code session in its own git worktree, subscribe to
-its idle notice, and relay the report through `/claude-code-hermit:watch`.
+Launch a background Claude Code session in a folder, subscribe to its idle
+notice, and relay the report through `/claude-code-hermit:watch`.
 
 ## Usage
 
 ```
-/claude-code-hermit:spawn-session <prompt-or-/skill> [--name <n>] [--model <m>] [--effort <e>] [--background <abs-file>] [--proposal <PROP-id>] [--strict-mcp-config]
+/claude-code-hermit:spawn-session <prompt-or-/skill> [--cwd <abs-dir>] [--worktree] [--name <n>] [--model <m>] [--effort <e>] [--background <abs-file>] [--proposal <PROP-id>] [--strict-mcp-config]
 ```
 
-From `<abs>`, the project root, that composes:
+From `<dir>`, the launch folder (`<abs>`, the hermit project root, unless
+`--cwd` names another), that composes:
 
 ```
-claude --bg --worktree <n> --name <n> [--permission-mode <p>] [--remote-control <n>] [--model <m>] [--effort <e>] [--mcp-config <abs>/.mcp.json] [--strict-mcp-config] --append-system-prompt-file <abs>/.claude-code-hermit/state/helper-system-prompt.md '<prompt>'
+claude --bg --name <n> [--worktree <n>] [--permission-mode <p>] [--remote-control <n>] [--model <m>] [--effort <e>] [--mcp-config <dir>/.mcp.json] [--strict-mcp-config] --append-system-prompt-file <abs>/.claude-code-hermit/state/helper-system-prompt.md '<prompt>'
 ```
 
+`--worktree <n>` is present only when the operator passed `--worktree`, and
+gives the helper its own worktree of `<dir>` from the start.
 `--remote-control <n>` is present when `config.json`'s `remote` is `true` and
 absent otherwise; `--model` and `--effort` only when the operator passed them.
-`--mcp-config <abs>/.mcp.json` and `--strict-mcp-config` only when the operator
-passed `--strict-mcp-config`: both flags when `<abs>/.mcp.json` exists, and
+`--mcp-config <dir>/.mcp.json` and `--strict-mcp-config` only when the operator
+passed `--strict-mcp-config`: both flags when `<dir>/.mcp.json` exists, and
 `--strict-mcp-config` alone when it does not. Strict mode drops plugin and
 user-scope MCP servers from the helper. A background session cannot answer
-the project-server approval dialog.
+the project-server approval dialog, and a folder named by `--cwd` brings its
+own `.mcp.json` to that dialog.
 A helper report counts only when its sender's session name equals the `target` of a live `peer-idle` registry entry; the epoch-suffixed helper name is what distinguishes one spawn from a reused name. The helper never writes `tasks/` or `proposals/`; the resident records progress and results after that sender check.
 
-Five limits sit on that command:
+Six limits sit on that command:
 
-- The helper's worktree `.claude-code-hermit/` is a projection (`OPERATOR.md`,
-  `config.json`, `compiled/` only). Any file the helper must Read is passed as
-  an absolute path in the prompt, spelled as an `@<abs-path>` mention so
-  Claude Code injects it at launch.
+- The helper starts in `<dir>`. In a repository's main checkout, Claude Code
+  refuses its Edit and Write until it calls `EnterWorktree`: the
+  `worktree.bgIsolation` setting, `"worktree"` by default
+  (https://code.claude.com/docs/en/settings-reference#worktree-bgisolation).
+  `"none"` in that project's settings lets helpers edit the checkout directly,
+  on whatever branch the resident has checked out; this skill never sets it.
+  A linked worktree is edited in place under either value, and Bash git
+  commands are not fenced by the setting. Outside a git repository the block
+  still applies, so a non-git `<dir>` leaves the helper read-only.
+- Any file the helper must Read is passed as an absolute path in the prompt,
+  spelled as an `@<abs-path>` mention so Claude Code injects it at launch; a
+  worktree does not carry the hermit's untracked state.
 - `<abs>/.claude-code-hermit/state/helper-system-prompt.md` is written at boot
   and gated like `RESIDENT.md`. Pass it as `--append-system-prompt-file` (a
   system-prompt file is not expanded, so `@<abs-path>` mentions still belong
   in the prompt). The appended text reaches the helper's main conversation
   and forks, not its non-fork subagents.
-- A worktree carries no `.claude/settings.local.json` (it is gitignored, so
-  nothing checks it out), so the helper inherits none of this hermit's
-  permission rules. `--permission-mode <p>` from `config.json`'s
-  `permission_mode` is what keeps it in this session's permission class, which
-  is also what lets its idle notice reach here rather than being held for an
-  operator who is not watching. `config.json` accepts one value the CLI has no
+- `--permission-mode <p>` from `config.json`'s `permission_mode` keeps the
+  helper in this session's permission class, which is what lets its idle
+  notice reach here rather than being held for an operator who is not
+  watching. `config.json` accepts one value the CLI has no
   choice for, `default`, so it and `null` and an absent key all mean: leave the
   flag off entirely and let the helper take the box default.
   `scripts/hermit-start.ts` resolves `default` and `null` the same way;
@@ -73,7 +83,7 @@ alternate invocation, or weaker permission mode.
 
 ## Plan
 
-1. Parse `--name`, `--model`, `--effort`, `--background`, `--proposal`, and `--strict-mcp-config` from the invocation. `--background` must name an existing absolute file; append it to the prompt as an `@<abs-path>` mention. `--proposal <PROP-id>` is resolved in step 2 before any launch.
+1. Parse `--cwd`, `--worktree`, `--name`, `--model`, `--effort`, `--background`, `--proposal`, and `--strict-mcp-config` from the invocation. `--cwd` must be an absolute path to an existing directory. `--background` must name an existing absolute file; append it to the prompt as an `@<abs-path>` mention. `--proposal <PROP-id>` is resolved in step 2 before any launch.
    Remaining text is the prompt. Empty prompt: stop with a one-line ask for
    the work to run.
 
@@ -83,11 +93,12 @@ alternate invocation, or weaker permission mode.
      at 40 characters, trim any leading or trailing `-`, then append `-` plus
      the full epoch (`date +%s`). The trim is what keeps a prompt like
      `#220 fix the parser` from producing a name the launch command reads as a
-     flag. The epoch is not truncated because `claude --worktree <n>` silently
-     reuses an existing `.claude/worktrees/<n>`, its branch and uncommitted
-     state included, and those directories are never pruned, so a repeated
-     name is a wrong-branch start with no error. If no token survives the slug
-     is `session`, which is what makes the fallback `session-<epoch>`.
+     flag. The epoch is not truncated because the watch registry keys on the
+     full name. With `--worktree` it also matters because `claude --worktree
+     <n>` silently reuses an existing `.claude/worktrees/<n>`, its branch and
+     uncommitted state included, so a repeated name is a wrong-branch start
+     with no error. If no token survives the slug is `session`, which is what
+     makes the fallback `session-<epoch>`.
      Example: `/tackle-issue PROP #220` becomes
      `tackle-issue-prop-220-1788889689`.
    - `<m>` / `<e>` are omitted when the operator does not name them, so the
@@ -95,11 +106,13 @@ alternate invocation, or weaker permission mode.
 
 2. Resolve `<abs>` with `git rev-parse --show-toplevel` rather than reading the
    Bash tool's working directory, which persists across calls and can sit in a
-   subdirectory. Then run `git rev-parse --verify HEAD` in `<abs>`; on failure,
-   refuse with one line before composing any launch: this repo has no commits;
-   make an initial commit, then retry. Claude Code branches a worktree from
-   HEAD, so an unborn HEAD makes the background launch report success and then
-   crash-loop on worktree creation. When `--proposal` was passed, resolve it
+   subdirectory. `<dir>` is `--cwd` when given, else `<abs>`. No further
+   check on `<dir>`: a folder the CLI refuses is reported with the CLI's own
+   message. With `--worktree`, run
+   `git -C <dir> rev-parse --verify HEAD`; on failure, refuse with one line
+   before composing any launch: `<dir>` is not a git repository or has no
+   commits; make an initial commit, then retry. An unborn HEAD makes the background launch report
+   success and then crash-loop on worktree creation. When `--proposal` was passed, resolve it
    now through `proposal.ts resolve-id` (proposal-act § Resolving a Proposal ID)
    against `<abs>/.claude-code-hermit`:
    ```bash
@@ -110,21 +123,24 @@ alternate invocation, or weaker permission mode.
    `<abs>/.claude-code-hermit/proposals/<filename>` to the prompt as an
    `@<abs-path>` mention, the same way `--background` is. Read `<p>` from `<abs>/.claude-code-hermit/config.json`
    (`permission_mode`), dropping the flag for `default`, `null` or an absent
-   key, mapping `bypassPermissions` to `auto` (Five limits), and passing
+   key, mapping `bypassPermissions` to `auto` (Six limits), and passing
    every other value through unchanged. Read `remote` from the same config
    and include `--remote-control <n>` only when the key is present and
    `true`; `false`, `null` and an absent key all leave the flag off, which
    is the resident session's own answer for that config. When the operator
-   passed `--strict-mcp-config`, include `--mcp-config <abs>/.mcp.json
-   --strict-mcp-config` if `<abs>/.mcp.json` exists, and `--strict-mcp-config`
+   passed `--strict-mcp-config`, include `--mcp-config <dir>/.mcp.json
+   --strict-mcp-config` if `<dir>/.mcp.json` exists, and `--strict-mcp-config`
    alone if it does not. Check that
    `<abs>/.claude-code-hermit/state/helper-system-prompt.md` exists; boot
    writes it. If it is missing, refuse with one line: restart with hermit-start
    so boot writes the helper system-prompt file.
 
-3. `cd <abs>` as its own Bash call, then run the command in Usage as the next
+3. `cd <dir>` as its own Bash call, then run the command in Usage as the next
    one, so the launch stands alone in the transcript and in any approval that
-   does reach the operator. Print the returned bg id and `claude logs <id>`,
+   does reach the operator. With `--cwd`, then `cd <abs>` as the next call
+   whatever the launch returned: the `task.ts` and `proposal.ts` calls below
+   resolve the relative `.claude-code-hermit` against the Bash tool's
+   persisted directory. Print the returned bg id and `claude logs <id>`,
    `claude attach <id>`, `claude stop <id>` hints. If the spawn is declined or
    fails, stop; do not watch, open a record, or patch a Decision.
    After a successful launch with `--proposal`, open the record (title names
