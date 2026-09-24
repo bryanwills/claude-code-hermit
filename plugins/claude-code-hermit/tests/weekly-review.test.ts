@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { runScript } from './helpers/run';
 import { readFileWithFrontmatter } from '../scripts/lib/frontmatter';
+import { costLogPath } from '../scripts/lib/cc-compat';
 
 function makeHermitDir(): { hermitDir: string; cleanup(): void } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-weekly-review-'));
@@ -97,11 +98,11 @@ describe('weekly-review task records', () => {
 
 // Two rows in the current week ($3.75, 4000 tokens) and one two weeks back that must be ignored.
 function writeWeekCostLog(hermitDir: string): void {
-  const costLogDir = path.join(path.dirname(hermitDir), '.claude');
-  fs.mkdirSync(costLogDir, { recursive: true });
+  const log = costLogPath(hermitDir);
+  fs.mkdirSync(path.dirname(log), { recursive: true });
   const now = new Date().toISOString();
   const twoWeeksAgo = new Date(Date.now() - 14 * 86400000).toISOString();
-  fs.writeFileSync(path.join(costLogDir, 'cost-log.jsonl'), [
+  fs.writeFileSync(log, [
     JSON.stringify({ timestamp: now, estimated_cost_usd: 1.25, total_tokens: 1000, source: 'main' }),
     JSON.stringify({ timestamp: now, estimated_cost_usd: 2.5, total_tokens: 3000, source: 'main' }),
     JSON.stringify({ timestamp: twoWeeksAgo, estimated_cost_usd: 100, total_tokens: 999999, source: 'main' }),
