@@ -16,7 +16,7 @@ const TEMPLATE_PATH = path.join(PLUGIN_ROOT, 'state-templates', 'PROPOSAL.md.tem
 
 const BRANCHES_PATH = path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'branches.md');
 
-// The accept options, defer, dismiss, resolve and channel re-entry live in
+// The accept options and channel re-entry live in
 // branches.md (the rare-branch procedures file); assert against the combined
 // surface, and against `front` alone for what must survive a compaction cut.
 const front = fs.readFileSync(SKILL_PATH, 'utf-8');
@@ -177,9 +177,15 @@ describe('PROP-017 channel-safe approvals', () => {
     expect(front).toContain('"manual"');
   });
 
-  test('channel re-entry section present', () => {
-    expect(front).toContain('--answer');
-    expect(front).toContain('Channel re-entry');
+  test('channel re-entry skips steps 1-3a before the accept flow runs', () => {
+    const accept = front.slice(front.indexOf('## Accept Flow'), front.indexOf('\n1. Resolve the proposal file'));
+    expect(accept).toContain('--answer');
+    expect(accept).toContain('skip steps 1-3a entirely');
+    expect(branches).toContain('\n## Channel re-entry (`--answer`)\n');
+  });
+
+  test('step 4 carries --no-artifacts into on_resolve at queue time', () => {
+    expect(front).toContain('--answer {answer} --no-artifacts');
   });
 
   test('MP entry carries an on_resolve invocation with the {answer} placeholder', () => {
@@ -236,9 +242,6 @@ describe('proposal-act branches.md dispatch', () => {
     'Start implementing now',
     'Queue a task',
     'Channel re-entry (`--answer`)',
-    'Defer Flow',
-    'Dismiss Flow',
-    'Resolve Flow',
   ];
 
   for (const section of SECTIONS) {
@@ -247,6 +250,13 @@ describe('proposal-act branches.md dispatch', () => {
       expect(branches).toContain(`\n## ${section}\n`);
     });
   }
+
+  test('defer, dismiss and resolve stay inline in SKILL.md', () => {
+    for (const flow of ['Defer Flow', 'Dismiss Flow', 'Resolve Flow']) {
+      expect(front).toContain(`\n## ${flow}\n`);
+      expect(branches).not.toContain(`## ${flow}`);
+    }
+  });
 
   test('front page keeps the option labels the micro-proposal queue needs', () => {
     expect(front).toContain('"Start implementing now"');
