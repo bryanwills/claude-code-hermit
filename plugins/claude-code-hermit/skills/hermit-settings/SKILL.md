@@ -66,7 +66,13 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.js
 
 **Every write goes through these verbs — never edit `config.json` with Edit/Write.** The script preserves siblings, refuses a change that would make the config invalid, and records the change in the audit ledger that `history` reads. A hand-edit bypasses all three.
 
-### 2. Show or modify
+### 2. Write config
+
+Every branch persists through `settings-edit` verbs — `apply-known` for the registry table, `set`/`unset`/`toggle` everywhere else (arrays and objects are expressible: the value is JSON-parsed). Nothing in this skill edits `config.json` with the Edit/Write tools: the script preserves siblings, refuses a change that would leave the config invalid, and records every mutation in the audit ledger. If a verb refuses a write, relay its error to the operator instead of falling back to a direct edit.
+
+Confirm the change to the operator.
+
+### 3. Show or modify
 
 **If no argument** (or argument is "all"):
 
@@ -389,9 +395,3 @@ On answer "Authorize" (or "on"/"yes"): run `settings-edit ... set artifacts.publ
 On answer "Bank first publishes" (or "off"/"no"/"decline"): run `settings-edit ... set artifacts.publish_authorized false`. Reply: "Recorded: publishing declined. The standing permission is removed at the next boot from every settings file this install wrote it to, not from this session. An undecided (`null`) flag leaves an existing entry alone. First publish of each enabled page must happen in an attended session (`docs/artifacts.md` § refresh procedure); refreshes then reuse the same URL without prompting."
 **Channel-tagged turn:** send the same prompt via the channel reply tool with the two options numbered, AND queue a pending micro-proposal entry per `reflect` § Queuing procedure: `options: ["authorize", "bank first publishes"]`, `tier: 1`, `on_resolve: "/claude-code-hermit:hermit-settings artifact-authorization --answer {answer}"`. Note in the message that "Bank first publishes" still needs a terminal session later to do the banking itself — only the decision travels over the channel.
 **Channel re-entry:** if invoked as `artifact-authorization --answer "<label>"` (channel-responder resolving a micro-proposal queued by `hermit-evolve`'s Step 10 deferred-migration relay), skip the Ask above and match `<label>` case-insensitively by prefix against `Authorize` / `Bank first publishes`, then run the matching `settings-edit` command and reply exactly as above. This branch is deliberately channel-reachable — the flag is a decision record, not a permission — so it does not raise the native prompt the rest of `artifacts.*` policy sits behind.
-
-### 3. Write config
-
-Every branch persists through `settings-edit` verbs — `apply-known` for the registry table, `set`/`unset`/`toggle` everywhere else (arrays and objects are expressible: the value is JSON-parsed). Nothing in this skill edits `config.json` with the Edit/Write tools: the script preserves siblings, refuses a change that would leave the config invalid, and records every mutation in the audit ledger. If a verb refuses a write, relay its error to the operator instead of falling back to a direct edit.
-
-Confirm the change to the operator.

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- `proposal-act` keeps its guards, accept steps and dispatch in `SKILL.md` and reads each action's procedure from `branches.md`; `hermit-settings` states the write rule before the per-setting branches
 - `spawn-session` launches helpers in the project folder by default, or in another folder with `--cwd <abs-dir>`, and leaves edit isolation to Claude Code's `worktree.bgIsolation`; `--worktree` gives a helper its own worktree from the start
 - `spawn-session` triggers on "spawn a new session" phrasing, with or without `--model` and `--effort`, and its description names it as the launch path a hand-built `claude --bg` bypasses
 

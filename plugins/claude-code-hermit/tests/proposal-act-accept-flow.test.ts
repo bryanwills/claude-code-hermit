@@ -14,7 +14,14 @@ import { PLUGIN_ROOT } from './helpers/run';
 const SKILL_PATH = path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'SKILL.md');
 const TEMPLATE_PATH = path.join(PLUGIN_ROOT, 'state-templates', 'PROPOSAL.md.template');
 
-const skill = fs.readFileSync(SKILL_PATH, 'utf-8');
+const BRANCHES_PATH = path.join(PLUGIN_ROOT, 'skills', 'proposal-act', 'branches.md');
+
+// The accept options, defer, dismiss, resolve and channel re-entry live in
+// branches.md (the rare-branch procedures file); assert against the combined
+// surface, and against `front` alone for what must survive a compaction cut.
+const front = fs.readFileSync(SKILL_PATH, 'utf-8');
+const branches = fs.readFileSync(BRANCHES_PATH, 'utf-8');
+const skill = front + '\n' + branches;
 
 // Lines strictly between the opening --- and the second --- (awk '/^---$/{c++; next} c==1').
 function frontmatterOf(content: string): string {
@@ -161,29 +168,29 @@ describe('proposal-act accept flow', () => {
 // channel-tagged branch on step 4, and the --answer re-entry path.
 describe('PROP-017 channel-safe approvals', () => {
   test('Step 0 channel-reply marker present', () => {
-    expect(skill).toContain('Step 0 — Channel reply');
+    expect(front).toContain('Step 0 — Channel reply');
   });
 
   test('step 4 channel branch queues the three option labels', () => {
-    expect(skill).toContain('"implement now"');
-    expect(skill).toContain('"queued task"');
-    expect(skill).toContain('"manual"');
+    expect(front).toContain('"implement now"');
+    expect(front).toContain('"queued task"');
+    expect(front).toContain('"manual"');
   });
 
   test('channel re-entry section present', () => {
-    expect(skill).toContain('--answer');
-    expect(skill).toContain('Channel re-entry');
+    expect(front).toContain('--answer');
+    expect(front).toContain('Channel re-entry');
   });
 
   test('MP entry carries an on_resolve invocation with the {answer} placeholder', () => {
-    expect(skill).toContain('on_resolve');
-    expect(skill).toContain('{answer}');
+    expect(front).toContain('on_resolve');
+    expect(front).toContain('{answer}');
   });
 });
 
 // Frontmatter description specifically (between the opening --- and the second ---).
 test("frontmatter description mentions 'start implementing now'", () => {
-  expect(frontmatterOf(skill)).toMatch(/^description:.*start implementing now/m);
+  expect(frontmatterOf(front)).toMatch(/^description:.*start implementing now/m);
 });
 
 // Step 2's success_signal bullet: capture and validation.
@@ -219,5 +226,31 @@ describe('PROPOSAL.md.template', () => {
 
   test('PROPOSAL.md.template: Success Signal section present', () => {
     expect(template).toContain('## Success Signal');
+  });
+});
+
+// SKILL.md is what every invocation pays for and what survives a compaction
+// cut; each branch it dispatches to must exist under the name it uses.
+describe('proposal-act branches.md dispatch', () => {
+  const SECTIONS = [
+    'Start implementing now',
+    'Queue a task',
+    'Channel re-entry (`--answer`)',
+    'Defer Flow',
+    'Dismiss Flow',
+    'Resolve Flow',
+  ];
+
+  for (const section of SECTIONS) {
+    test(`SKILL.md points at branches.md § ${section} and the section exists`, () => {
+      expect(front).toContain(`branches.md § ${section}`);
+      expect(branches).toContain(`\n## ${section}\n`);
+    });
+  }
+
+  test('front page keeps the option labels the micro-proposal queue needs', () => {
+    expect(front).toContain('"Start implementing now"');
+    expect(front).toContain('"Queue a task"');
+    expect(front).toContain("I'll handle it manually");
   });
 });
