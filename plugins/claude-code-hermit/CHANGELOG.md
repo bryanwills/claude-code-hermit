@@ -4,7 +4,7 @@
 
 ### Changed
 - `spawn-session` triggers on "spawn a new session" phrasing, with or without `--model` and `--effort`, and its description names it as the launch path a hand-built `claude --bg` bypasses
-- Accepting a proposal a spawned helper investigated sends the implementation to that helper, resuming it by name when it is no longer running, instead of briefing a fresh agent
+- Accepting a proposal a spawned helper investigated sends the implementation to that helper, resuming it by name when it is no longer running, instead of briefing a fresh agent; the helper lands it as a pull request from its worktree, and the watch relay records its report as implementation rather than triage
 
 ## [1.4.5] - 2026-09-23
 
