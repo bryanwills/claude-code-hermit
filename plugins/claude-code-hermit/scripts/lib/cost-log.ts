@@ -565,7 +565,7 @@ function isOpusModel(model: unknown): boolean {
 }
 
 // Counts JSONL lines flagged model_unpriced:true (cost-tracker.ts marks a turn this way
-// when resolvePricing(raw).exact is false — still priced at sonnet-5 rates, but flagged
+// when resolvePricing(raw).exact is false; still priced via resolvePricing's fallback, but flagged
 // so the drift is auditable). Mirrors scanAutomatedOpus's date-filtered scan shape.
 function scanUnpricedModels(costLogFile: string, sinceDateInclusive: string, timezone: string = 'UTC'): { count: number; cost: number } {
   let count = 0;

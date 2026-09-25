@@ -717,7 +717,7 @@ async function run(data: Json): Promise<string | null> {
     const config: Json = readSettledConfig(HERMIT_DIR);
     const timezone = typeof config.timezone === 'string' && config.timezone ? config.timezone : 'UTC';
 
-    // Unknown model string → still priced at the sonnet-5 rate (refusing would zero the
+    // Unknown model string → still priced via resolvePricing's fallback (refusing would zero the
     // log), but flagged so the drift is auditable instead of a silent mis-bill. A
     // falsy/absent rawModel is a different, unflagged case (no model info at all, not
     // an unrecognized one).
