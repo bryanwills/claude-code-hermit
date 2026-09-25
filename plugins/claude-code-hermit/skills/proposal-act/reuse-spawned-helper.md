@@ -3,11 +3,11 @@
 Read from proposal-act's "Start implementing now" branch, before the
 falsification gate and Dispatch, when the proposal's `## Operator Decision`
 carries a `spawn-session --proposal` hand-off line:
-`Handed to helper <n> on <date>; record <T-id>`. The latest such line names
-the helper. It already paid for reading the proposal and its cited files, so
-the implementation tail goes to it. Claude Code fences a helper's edits in
-the main checkout until it enters a worktree, so what it implements lands as
-a pull request from that branch.
+`Handed to helper <n> (<sid>) on <date>; record <T-id>`. The latest such line
+names the helper and its session id. It already paid for reading the
+proposal and its cited files, so the implementation tail goes to it. Claude
+Code fences a helper's edits in the main checkout until it enters a worktree,
+so what it implements lands as a pull request from that branch.
 
 **Instructions.** The numbered instructions of the Dispatch prompt, spelled as
 message text with the absolute proposal path written out (an `@` path attaches
@@ -32,11 +32,19 @@ nothing across sessions), with two changes:
   `implement`, so the idle-notice relay records the report as implementation
   rather than triage.
 - No row (watch § Handling idle notices leaves an idle helper for the
-  supervisor to reclaim): its transcript still resumes by the saved name. From
-  the project root run `claude --bg --resume <n> '<the instructions>'` with no
-  other flag: the saved options include the helper system prompt, and any
-  extra flag starts a copy that drops them all, name, permission mode and
-  folder included. The instructions are one single-quoted
+  supervisor to reclaim): a line with no `(<sid>)` has no resume handle, so
+  take the Fallback. `ListAgents` omits a helper stalled at boot or blocked on
+  a prompt, so first run
+  `claude agents --json | jq -r --arg sid <sid> '.[] | select(.id==($sid|.[0:8])) | .id'`
+  (the bg id is the sid's first 8 characters and survives a `/clear`, which
+  changes the listed `sessionId`): any line means it is still running but unreachable, and resuming it would
+  start a copy, so take the Fallback. Otherwise its transcript still resumes
+  by the line's `<sid>`. From the project root run
+  `claude --bg --resume <sid> '<the instructions>'` with no other flag: the
+  saved options include the helper system prompt, and any extra flag starts a
+  copy that drops them all, name, permission mode and folder included. A
+  listed session is messaged, not resumed, because resuming a running session
+  starts a copy. The instructions are one single-quoted
   argument, so replace every `'` in them with `'\''` first, as spawn-session's
   limits require. Then invoke
   `/claude-code-hermit:watch session <n> "Implement PROP-NNN" --record <id> --proposal PROP-NNN --implement`,
