@@ -7,13 +7,13 @@ A fitness/training domain layer for `claude-code-hermit`: skills, a Strava data 
 - `skills/`: `hatch`, `fitness-brief` (`--morning|--evening|--slot <name>`; owns Strava connectivity, activity sync, RPE binding, and the Run deep-dive), `activity-deep-dive`, `capture-activity-rpe` (auto-triggered from channel replies), `set-rpe`, `weekly-coaching-patterns`, `weekly-load-review` (weekly training load vs. rolling baseline), `monday-planning` (weekly training plan suggestion), `domain-brainstorm` (operator-invoked only)
 - `agents/strava-data-cruncher.md`: Haiku bulk-aggregation subagent; owns the per-invocation API-call cap
 - `state-templates/CLAUDE-APPEND.md`: the Fitness Workflow block
-- `settings.json`: pre-approved permissions for read-class Strava MCP tools and hermit state writes
+- Permissions: native asks are installed by hatch via `scripts/native-permissions.ts`
 - `docs/knowledge-schema.md`: work-product types, state-file owners and shapes, retention
 
 ## Rules
 
 - Never commit real Strava OAuth credentials; `.env` and `.mcp.json` are gitignored. The hatch skill reads `.env` with the `Read` tool, never `cat`/`grep`/`echo` (`Bash(cat .env*)` is a seeded native deny, and credential values must not land in the transcript).
-- The MCP server key is `strava` (written to `.mcp.json` by `hatch`, tool IDs `mcp__strava__*`); skill text and `settings.json` matchers depend on that name. Provided by `@r-huijts/strava-mcp-server` via `npx`, unpinned; operators can pin in their own `.mcp.json`.
+- The MCP server key is `strava` (written to `.mcp.json` by `hatch`, tool IDs `mcp__strava__*`); skill text and `state-templates/native-permissions.json` depend on that name. Provided by `@r-huijts/strava-mcp-server` via `npx`, unpinned; operators can pin in their own `.mcp.json`.
 - Every Strava workflow calls `mcp__strava__check-strava-connection` first.
 - No persona or agent name copy ships here; those come from the consumer's `config.json`.
 

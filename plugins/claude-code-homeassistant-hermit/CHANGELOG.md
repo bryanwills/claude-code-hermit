@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- Plugin-root `settings.json` permission list, which Claude Code never applied; native rules are installed into project settings.
+
 ## [0.4.16] - 2026-09-16
 
 ### Changed
