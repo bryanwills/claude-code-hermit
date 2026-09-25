@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Install this plugin's fixed native asks without changing operator settings.
+// Install this plugin's fixed native asks and denies without changing operator settings.
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -9,7 +9,8 @@ if (!target || !['settings.json', 'settings.local.json'].includes(path.basename(
 }
 const settingsPath = path.resolve(target);
 if (path.basename(path.dirname(settingsPath)) !== '.claude') throw new Error('Expected a project .claude settings file');
-const rules: string[] = JSON.parse(fs.readFileSync(path.join(import.meta.dir, '../state-templates/native-permissions.json'), 'utf8')).ask;
+const template: { ask: string[]; deny: string[] } = JSON.parse(fs.readFileSync(path.join(import.meta.dir, '../state-templates/native-permissions.json'), 'utf8'));
+const rules = template.ask;
 function read(file: string): any {
   let value: any;
   try { value = JSON.parse(fs.readFileSync(file, 'utf8')); }
@@ -29,6 +30,7 @@ validate(settings);
 const before = JSON.stringify(settings);
 settings.permissions ??= {};
 settings.permissions.ask = [...new Set([...(settings.permissions.ask ?? []), ...rules])];
+settings.permissions.deny = [...new Set([...(settings.permissions.deny ?? []), ...template.deny])];
 if (JSON.stringify(settings) !== before) {
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');

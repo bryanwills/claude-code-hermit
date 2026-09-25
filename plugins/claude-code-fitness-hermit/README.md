@@ -129,8 +129,7 @@ claude-code-fitness-hermit (this plugin)
   ├── skills/             hatch, fitness-brief, activity-deep-dive, capture-activity-rpe, set-rpe
   ├── agents/             strava-data-cruncher (Haiku bulk aggregator)
   ├── state-templates/    CLAUDE-APPEND.md + gate scripts (installed by hatch)
-  ├── docs/               knowledge-schema.md
-  └── settings.json       Strava read allow-list, write tools blocked
+  └── docs/               knowledge-schema.md
 
 claude-code-hermit (core, required ≥ 1.3.3)
   └── Session lifecycle, routines, channels, memory, cost tracking

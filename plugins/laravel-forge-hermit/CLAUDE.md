@@ -9,7 +9,7 @@ A Laravel Forge domain layer for `claude-code-hermit`: deployment skills, server
 - `php/forge-operation.php`: the write gateway: request capture, canonicalization, plan store, hash-checked execution
 - `php/forge-lib.php`: derived predicates (`isEndpointMethod`, `takesOrgFirst`), deny tiers, policy loading, output scrubber
 - `php/composer.json` + `php/composer.lock`: shipped; `php/vendor/` is gitignored
-- `state-templates/CLAUDE-APPEND.md`: Forge Workflow block injected by hatch; `settings.json`: pre-approved Bash and hermit-state permissions; `DOCKER.md`: apt deps + DNS allowlist for `/docker-setup`
+- `state-templates/CLAUDE-APPEND.md`: Forge Workflow block injected by hatch; `DOCKER.md`: apt deps + DNS allowlist for `/docker-setup`
 
 ## Architecture
 
@@ -34,4 +34,4 @@ Core's `scripts/domain-hatch.ts` owns target resolution and `hatch-options.json`
 
 From the repo root, `bun run dev <target-project>`, hatch core, then `/laravel-forge-hermit:hatch`. Tests: `bash tests/run-all.sh` from this directory, with PHP and Composer available; the runner installs the SDK fixture into `php/vendor/` itself, then runs `php/tests/run.php`, the CLI and permission tests, and the structural lints separately. Plain `bun test` is not a substitute: the structural files call `process.exit()` and can end its runner early.
 
-The native-permissions installer adds missing project ask rules without changing operator settings.
+The native-permissions installer adds missing project ask rules and the `Edit(.env)` deny without changing operator settings.

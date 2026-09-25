@@ -1,5 +1,24 @@
 # Changelog — laravel-forge-hermit
 
+## [Unreleased]
+
+### Added
+
+- Hatch installs a native `Edit(.env)` deny, so the agent cannot lift Forge policy tiers through `.env`.
+
+### Removed
+
+- Plugin-root `settings.json` permission list, which Claude Code never applied; native rules are installed into project settings.
+
+### Upgrade Instructions
+
+Set `DOMAIN_PLUGIN_ROOT` to this installed plugin's absolute directory and re-run the native-permissions installer from the project root. It adds the `Edit(.env)` deny to the resolved project settings file and preserves existing operator rules.
+
+```bash
+native_settings=$(.claude-code-hermit/bin/hermit-run domain-hatch preflight laravel-forge-hermit | bun -e 'const p = await Bun.stdin.json(); if (!p.ok || !["local", "committed"].includes(p.target)) throw new Error("Resolve the domain hatch target first"); console.log(p.target === "local" ? ".claude/settings.local.json" : ".claude/settings.json");') &&
+bun "${DOMAIN_PLUGIN_ROOT:?Set the installed plugin directory}/scripts/native-permissions.ts" "$native_settings"
+```
+
 ## [0.0.16] - 2026-09-16
 
 ### Changed

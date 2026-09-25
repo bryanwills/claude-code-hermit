@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 const dirs: string[] = [];
 afterAll(() => { for (const dir of dirs) rmSync(dir, { recursive: true, force: true }); });
 const script = join(import.meta.dir, 'native-permissions.ts');
-const rules: string[] = JSON.parse(readFileSync(join(import.meta.dir, '../state-templates/native-permissions.json'), 'utf8')).ask;
+const template: { ask: string[]; deny: string[] } = JSON.parse(readFileSync(join(import.meta.dir, '../state-templates/native-permissions.json'), 'utf8'));
+const rules = template.ask;
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'native-permissions-')); dirs.push(root);
   mkdirSync(join(root, '.claude')); mkdirSync(join(root, '.claude-code-hermit'));
@@ -19,7 +20,7 @@ test('install preserves unrelated settings and denies; repeated seeding is stabl
   writeFileSync(file, JSON.stringify({ env: { KEEP: 'yes' }, permissions: { deny: ['Bash(custom *)'], ask: ['Read(private)'] } }));
   expect(run(root).exitCode).toBe(0);
   const once = readFileSync(file, 'utf8'), data = JSON.parse(once);
-  expect(data.env.KEEP).toBe('yes'); expect(data.permissions.deny).toEqual(['Bash(custom *)']);
+  expect(data.env.KEEP).toBe('yes'); expect(data.permissions.deny).toEqual(['Bash(custom *)', 'Edit(.env)']);
   for (const rule of rules) expect(data.permissions.ask).toContain(rule);
   expect(run(root).exitCode).toBe(0); expect(readFileSync(file, 'utf8')).toBe(once);
 });
@@ -41,7 +42,7 @@ test('fresh installation reports target denies and writes nothing outside the ta
   const result = run(root);
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).toContain('Existing denies remain:');
-  expect(JSON.parse(readFileSync(file, 'utf8')).permissions.deny).toEqual(rules);
+  expect(JSON.parse(readFileSync(file, 'utf8')).permissions.deny).toEqual([...rules, ...template.deny]);
   expect(existsSync(join(root, '.claude-code-hermit/state'))).toBe(false);
 });
 test('malformed permission arrays are not overwritten', () => {
