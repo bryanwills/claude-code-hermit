@@ -27,7 +27,7 @@ A Claude Code plugin that turns any Claude Code instance into a self-improving p
                                  |
  +-------------------------------v----------------------------------+
  |                    LAYER 4: SKILLS + HOOKS                       |
- |   skills       3 hook phases    3 profiles (minimal/standard/strict)   |
+ |   skills       9 hook events    3 profiles (minimal/standard/strict)   |
  +-------------------------------|----------------------------------+
                                  |
  +-------------------------------v----------------------------------+
@@ -99,19 +99,30 @@ Skills are namespaced `/claude-code-hermit:*`; the full set is listed in the plu
 
 ### Hooks
 
-The plugin manifest registers 14 shared hooks. The four resident-only hooks (`pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify`) ride the resident's launch overlay with absolute script paths. Claude Code reads this overlay at launch only, so a rewritten overlay needs a resident restart. Guest and helper sessions launched without it never load the four hooks. `hermit-start` seeds workspace trust before launch and refuses to boot without a written overlay; `hermit-doctor` checks the overlay and trust configuration with `overlay-hooks`.
+The plugin manifest registers 16 shared hooks. The four resident-only hooks (`pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify`) ride the resident's launch overlay with absolute script paths. Claude Code reads this overlay at launch only, so a rewritten overlay needs a resident restart. Guest and helper sessions launched without it never load the four hooks. `hermit-start` seeds workspace trust before launch and refuses to boot without a written overlay; `hermit-doctor` checks the overlay and trust configuration with `overlay-hooks`.
 
-| Hook                | Trigger      | Profile   | What it does                                           |
-| ------------------- | ------------ | --------- | ------------------------------------------------------ |
-| Channel hook        | PostToolUse  | strict    | Forwards tool events to configured channel             |
-| Heartbeat touch     | PostToolUse  | strict    | Marks activity for heartbeat gap detection             |
-| Contract tests      | PostToolUse  | strict    | Runs plugin contract tests after changes               |
-| Config validator    | PostToolUse  | strict    | Validates config.json after mutations                  |
-| Context loader      | SessionStart | all       | Loads OPERATOR.md, TASKS.md, open task records, cost data; on a managed session (`HERMIT_MANAGED=1`) also stamps the launch env into `runtime.json` |
-| Cost tracker        | Stop         | all       | Logs tokens/cost                                       |
-| PermissionDenied notify | PermissionDenied (launch overlay) | managed unattended | Maintainer diagnostic (tool + reason), one 30-min window per tool with a suppressed count; maintainer chat, else primary chat on a technical profile, else Findings; no client message |
-| Stop pipeline       | Stop         | all       | Cost tracking, session diff, evaluation, heartbeat |
-| StopFailure stamp   | StopFailure  | all       | Records the turn's typed upstream failure to `state/stop-failure.json`; the watchdog classifies from it and notifies |
+| Hook | Event and matcher | What it does |
+| ---- | ----------------- | ------------ |
+| Helper report relay | PreToolUse `.*reply$` | Replaces a `[[helper-report <id>]]` reply with that report from `helper-reports/`, refusing the send unless exactly one open record owns the chat |
+| Cache edit guard | PreToolUse `Edit\|Write` | Warns (or blocks) when Edit/Write targets a marketplace cache copy |
+| Settings gate | PreToolUse `Bash\|Edit\|Write` | Raises Claude Code's native permission prompt for execution-adjacent hermit settings, channel enrollment, and direct `config.json` edits |
+| Artifact backend guard | PreToolUse `Artifact` | Denies a native Artifact publish when `artifacts.backend` is not claude, with a reason that names the backend |
+| Channel responder invoked | PostToolUse `Skill` | Resident-only evidence that the channel responder was invoked |
+| Helper report relay | PostToolUse `.*reply$` | Fails the reply when a `[[helper-report <id>]]` placeholder was not substituted |
+| Channel hook | PostToolUse `(discord\|telegram\|imessage).*reply` | Captures outbound reply text and persists `dm_channel_id` only for replies to a matching inbound message |
+| Config validator | PostToolUse `Edit\|Write` | Validates `config.json`'s required keys, types, routine time formats, and channel structure |
+| Summary generator | PostToolUse `Edit\|Write` | Regenerates `state-summary.md` when a `state/` file is edited |
+| Usage tracker | PostToolUse `Read` | Appends a usage event to `state/usage-metrics.jsonl` when a `compiled/` artifact is read |
+| Prompt pipeline | UserPromptSubmit | Records the operator action, injects time and the channel reply reminder, then applies pause, harness-command, shutdown, and status in explicit precedence |
+| Context loader | SessionStart | Classifies residency, seeds resident activity when absent, and loads session context; on a managed session (`HERMIT_MANAGED=1`) also stamps the launch env into `runtime.json` |
+| Stop pipeline | Stop | Runs cost tracking, harness commands, and the heartbeat stamp; a channel checkpoint (intake or reply) may block the stop |
+| StopFailure stamp | StopFailure | Records the turn's typed upstream failure to `state/stop-failure.json`; the watchdog classifies from it and notifies |
+| Subagent cost | SubagentStop | Captures async-dispatched subagent token cost from the subagent transcript |
+| PreCompact stamp | PreCompact | Marks the resident execution unknown and stamps its context reset |
+| Pause gate | PreToolUse `*` (launch overlay) | Binding pause/stop/resume gate: while `state/pause.json` says paused, denies every tool call except channel `reply` and PushNotification |
+| Ask gate | PreToolUse `AskUserQuestion` (launch overlay) | Denies AskUserQuestion on unattended sessions with a redirect to the channel reply tool and the micro-proposal bridge |
+| PermissionDenied notify | PermissionDenied `*` (launch overlay) | Maintainer diagnostic (tool + reason), one 30-min window per tool with a suppressed count; maintainer chat, else primary chat on a technical profile, else Findings; no client message |
+| Component privacy | PostToolUse `Edit\|Write` (launch overlay) | Keeps a hermit-created skill or agent private to this install when the operator chose gitignored hatch outputs |
 
 Hermits may add hooks at `strict` (e.g., git-push-guard). Profile-gated hooks check `AGENT_HOOK_PROFILE` internally and return early when the active profile doesn't match.
 
@@ -320,7 +331,7 @@ Hermit provides the **timing infrastructure** (when to reflect), the **proposal 
 Morning routine (configurable time, default: active hours start + 30m): brief, proposal review, priority check, pending micro-proposals surfaced.
 Evening routine (configurable time, default: active hours end - 30m): task outcomes, reflection, preparation for tomorrow.
 
-Both are managed by `/claude-code-hermit:hermit-routines`. Where the Monitor tool is available, one native plugin monitor started by the activation skill evaluates every enabled routine's schedule outside the session ; a skipped fire costs zero model tokens, and routines due in the same poll batch into one wake. Eligibility gating defers only while an operator turn is genuinely open (a Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) ; coarser than CronCreate's harness turn-level idle gate: a routine wake can still interject into an active conversation. `heartbeat-restart` stays a CronCreate **re-arm anchor**, firing daily at 4am to re-invoke `load` (re-arming the monitor) and, unless `heartbeat.enabled` is explicitly false, activate the native heartbeat monitor. Where Monitor is unavailable (Bedrock/Google Cloud Agent Platform/Foundry, `DISABLE_TELEMETRY`), `load` falls back to per-routine CronCreate registrations, idle-gated at the harness turn level and re-armed daily by the same anchor before the 7-day expiry cliff.
+Both are managed by `/claude-code-hermit:hermit-routines`. Where the Monitor tool is available, one native plugin monitor started by the activation skill evaluates every enabled routine's schedule outside the session ; a skipped fire costs zero model tokens, and routines due in the same poll batch into one wake. Eligibility gating defers only while an operator turn is genuinely open (a Stop-cleared `state/operator-turn-open.json` marker, 60-min TTL backstop) ; coarser than CronCreate's harness turn-level idle gate: a routine wake can still interject into an active conversation. `heartbeat-restart` stays a CronCreate **re-arm anchor**, firing daily at 4am to re-invoke `load` (re-arming the monitor) and, unless `heartbeat.enabled` is explicitly false, activate the native heartbeat monitor. Where Monitor is unavailable (Bedrock/Google Cloud Agent Platform/Foundry, `DISABLE_TELEMETRY`/`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`), `load` falls back to per-routine CronCreate registrations, idle-gated at the harness turn level and re-armed daily by the same anchor before the 7-day expiry cliff.
 
 ### Scheduling ownership boundaries
 
