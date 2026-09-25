@@ -72,7 +72,7 @@
       "name": "claude-code-fitness-hermit",
       "source": "./plugins/claude-code-fitness-hermit",
       "description": "Fitness coaching for Hermit, with read-only Strava access, activity analysis, training plans, and recovery flags.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "category": "fitness",
       "author": {
         "name": "gtapps",

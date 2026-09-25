@@ -1,10 +1,10 @@
 {
   "name": "claude-code-fitness-hermit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "dependencies": [
     {
       "name": "claude-code-hermit",
-      "version": "^1.4.0"
+      "version": "^1.4.6"
     }
   ],
   "description": "Fitness coaching for Hermit, with read-only Strava access, activity analysis, training plans, and recovery flags.",
