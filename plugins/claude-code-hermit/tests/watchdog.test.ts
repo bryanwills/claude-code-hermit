@@ -19,7 +19,7 @@ import { transcriptDirFor } from '../scripts/lib/cc-compat';
 import {
   inActiveHours, composeRestartMessage, composeWedgeMessage, composeStallQuestionMessage, composeSessionWedgedMessage, composePauseMessage, hasPendingQuestion, hasLapsedLogin, classifyQueueTail, classifyApiFailureTail, classifyStopFailureStamp, composeCompactSteeringMessage,
   rearmDamperOpen, passesLifecycleGuards, setHygieneEval, stampHygieneEval,
-  maybeContextClear, maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
+  maybeContextCompact, MONITOR_REARM_DAMPER_SECS, type World,
 } from '../scripts/hermit-watchdog';
 import { startHttpStub, type Stub } from './helpers/http-stub';
 import { localIdentity } from './helpers/registry-fixture';
@@ -3048,7 +3048,7 @@ test('doctor checkWatchdog: disabled → ok', withHermit(async (h) => {
   // settle to template defaults (on), which would mean the tick is needed.
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
     JSON.stringify({
-      watchdog: { enabled: false, context_clear_tokens: null },
+      watchdog: { enabled: false },
       context_hygiene: { clear: { enabled: false }, compact: { enabled: false } }, ...DOCTOR_BASE,
     }, null, 2) + '\n');
   const w = await doctorWatchdogCheck(h);
@@ -3079,7 +3079,7 @@ test('run stamps last_run before the enabled gate (enabled:false)', withHermit(a
   // Hygiene tiers explicitly off: absent keys now settle to template defaults
   // (on), which would send this minimal fixture down tmux-dependent paths.
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'),
-    '{"watchdog": {"enabled": false, "context_clear_tokens": null}, "context_hygiene": {"compact": {"enabled": false}}}\n');
+    '{"watchdog": {"enabled": false}, "context_hygiene": {"compact": {"enabled": false}}}\n');
   const r = await watchdog(h, 'run');
   expect(r.exitCode).toBe(0);
   const ws = readWatchdogStateFile(h);
@@ -3206,7 +3206,7 @@ test('doctor checkWatchdog: last_hygiene_eval surfaces in the ok detail', withHe
   expect(w.detail).toContain('compact/fired');
 }));
 
-test('doctor checkWatchdog: per-mechanism last_hygiene_eval surfaces the most-recent tier',
+test('doctor checkWatchdog: a leftover clear-tier eval never surfaces, only compact',
   withHermit(async (h) => {
     writeDoctorConfig(h);
     const older = new Date(Date.now() - 3 * 60 * 1000).toISOString();
@@ -3214,12 +3214,15 @@ test('doctor checkWatchdog: per-mechanism last_hygiene_eval surfaces the most-re
     fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
       last_run: new Date().toISOString(),
       last_hygiene_eval: {
-        clear: { ts: older, outcome: 'skip:under-threshold', prompt_tokens: 300000 },
-        compact: { ts: newer, outcome: 'fired', prompt_tokens: 300000 },
+        clear: { ts: newer, outcome: 'skip:under-threshold', prompt_tokens: 300000 },
+        compact: { ts: older, outcome: 'fired', prompt_tokens: 300000 },
       },
+      hygiene_eval_counts: { since: older, clear: { 'skip:under-threshold': 3 }, compact: { fired: 1 } },
     }) + '\n');
     const w = await doctorWatchdogCheck(h);
-    expect(w.detail).toContain('compact/fired'); // newer of the two wins
+    expect(w.detail).toContain('compact/fired');
+    expect(w.detail).not.toContain('clear/');
+    expect(w.detail).not.toContain('clear first-blockers');
   }));
 
 test('doctor checkWatchdog: stale scheduler + stuck shutdown stamp → not-firing wins',
@@ -3739,14 +3742,6 @@ function writeCostLog(h: Hermit, entries: {
   fs.writeFileSync(path.join(dir, 'cost-log.jsonl'), lines);
 }
 
-/** Write config with context_clear_tokens enabled and watchdog.enabled: false (pre-enabled gate). */
-function writeContextClearConfig(h: Hermit, threshold = 700000): void {
-  fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
-    watchdog: { enabled: false, context_clear_tokens: threshold },
-    heartbeat: { enabled: true, every: '2h', active_hours: { start: '00:00', end: '23:59' } },
-  }, null, 2) + '\n');
-}
-
 /** Write runtime.json for an always-on hermit.
  *  `cc_session_id` is what the hygiene tiers resolve on (startup-context.ts stamps it
  *  under HERMIT_MANAGED); `session_id` is the S-NNN arc label, kept because other
@@ -3755,89 +3750,17 @@ function writeAlwaysOnRuntime(h: Hermit): void {
   patchRuntime(h, { runtime_mode: 'tmux', session_id: SESSION_ID, cc_session_id: CC_SESSION_ID });
 }
 
-/** Write watchdog-state with a specific last_pane_hash_ctx (simulates second tick). */
-function primeContextHash(h: Hermit, hash: string): void {
-  const p = state(h, 'watchdog-state.json');
-  const existing = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf-8')) : {};
-  fs.writeFileSync(p, JSON.stringify({ ...existing, last_pane_hash_ctx: hash }) + '\n');
-}
-
-test('context_clear: bloated idle + quiescent + operator silent → /clear sent on 2nd tick',
-  withHermit(async (h) => {
-    writeContextClearConfig(h);
-    writeAlwaysOnRuntime(h);
-    // Bloated: 850K prompt-side tokens
-    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000 }]);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-    const snapshotPath = path.join(h.dir, 'runtime-at-clear.json');
-    // Fake tmux returns deterministic pane content so hash matches across both ticks
-    writeFakeTmux(h, 0, 'static pane content', snapshotPath);
-    writeFakePgrep(h, 1);
-
-    // Tick 1: hash recorded, no /clear yet
-    const r1 = await watchdog(h, 'run');
-    expect(r1.exitCode).toBe(0);
-    expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
-
-    // Tick 2: same hash → /clear fires
-    const r2 = await watchdog(h, 'run');
-    expect(r2.exitCode).toBe(0);
-    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/clear');
-    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('context-clear');
-    const runtimeAtClear = readJson(snapshotPath);
-    expect(runtimeAtClear.context_cleared).toBe(true);
-  }));
-
-test('context_clear: no archived record is needed for the safety /clear',
-  withHermit(async (h) => {
-    writeContextClearConfig(h);
-    writeAlwaysOnRuntime(h);
-    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000 }]);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-
-    writeFakeTmux(h, 0, 'static pane content');
-    writeFakePgrep(h, 1);
-
-    await watchdog(h, 'run'); // tick 1
-    const r2 = await watchdog(h, 'run'); // tick 2: /clear should still fire
-
-    expect(r2.exitCode).toBe(0);
-    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/clear');
-    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('context-clear');
-  }));
-
-test('context_clear: fires with watchdog.enabled: false (independent of restart path)',
-  withHermit(async (h) => {
-    // config has enabled: false — verifies context-clear runs before the enabled gate
-    writeContextClearConfig(h);
-    writeAlwaysOnRuntime(h);
-    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000 }]);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-    writeFakeTmux(h, 0, 'static pane content');
-    writeFakePgrep(h, 1);
-
-    await watchdog(h, 'run'); // tick 1
-    const r2 = await watchdog(h, 'run'); // tick 2
-    expect(r2.exitCode).toBe(0);
-    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/clear');
-  }));
-
 // -------------------------------------------------------
 // context-compact tests (PROP-011 commit 3: maybeContextCompact)
 // -------------------------------------------------------
 
 /** Write config with context_hygiene.compact enabled and watchdog.enabled: false (pre-enabled gate). */
 function writeContextCompactConfig(h: Hermit, opts: {
-  minContextTokens?: number; minInterval?: string; clearTokens?: number;
+  minContextTokens?: number; minInterval?: string;
   routines?: unknown[]; timezone?: string;
 } = {}): void {
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
-    // Explicit null when unconfigured: an absent context_clear_tokens now
-    // settles to the template default (700000).
-    watchdog: { enabled: false, context_clear_tokens: opts.clearTokens ?? null },
+    watchdog: { enabled: false },
     context_hygiene: {
       compact: {
         enabled: true,
@@ -3888,63 +3811,6 @@ test('context_compact: bloated idle + quiescent + operator silent → /compact s
     // context_cleared is context_clear's marker only — compact must never touch it.
     const runtimeAtCompact = readJson(snapshotPath);
     expect(runtimeAtCompact.context_cleared).not.toBe(true);
-  }));
-
-test('context_clear takes precedence over compact on the same tick (both thresholds crossed)',
-  withHermit(async (h) => {
-    writeContextCompactConfig(h, { minContextTokens: 150000, clearTokens: 700000 });
-    writeAlwaysOnRuntime(h);
-    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000 }]);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-    writeFakeTmux(h, 0, 'static pane content');
-    writeFakePgrep(h, 1);
-
-    await watchdog(h, 'run'); // tick 1: both trackers prime their hashes
-    const r2 = await watchdog(h, 'run'); // tick 2: clear fires first and exits before compact runs
-    expect(r2.exitCode).toBe(0);
-    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/clear');
-    expect(tmuxLog).not.toContain('/compact');
-    const events = fs.readFileSync(eventsFile(h), 'utf-8');
-    expect(events).toContain('context-clear');
-    expect(events).not.toContain('context-compact');
-  }));
-
-test('context_clear (mid-arc emergency clear) cross-stamps compact idempotence so the destroyed entry cannot re-trigger a spurious compact',
-  withHermit(async (h) => {
-    writeContextCompactConfig(h, { minContextTokens: 150000, minInterval: '4h', clearTokens: 700000 });
-    writeAlwaysOnRuntime(h); // arc open: runtime.session_id = SESSION_ID — resolveHygieneSessionId short-circuits, cache deletion alone can't help
-    const entryTimestamp = '2026-01-01T00:00:00.000Z';
-    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000, timestamp: entryTimestamp }]);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-    writeFakeTmux(h, 0, 'static pane content');
-    writeFakePgrep(h, 1);
-
-    await watchdog(h, 'run'); // tick 1: both trackers prime their hashes
-    const r2 = await watchdog(h, 'run'); // tick 2: /clear fires and exits before compact runs
-    expect(r2.exitCode).toBe(0);
-    const tmuxLog2 = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog2).toContain('/clear');
-    expect(tmuxLog2).not.toContain('/compact');
-
-    // Cross-stamp: the emergency clear must mark this cost entry as already
-    // compacted too — deleting sessions/.status.json alone cannot protect this
-    // path, since runtime.session_id (arc still open) short-circuits the fallback.
-    const wsAfterClear = readJson(state(h, 'watchdog-state.json'));
-    expect(wsAfterClear.last_compacted_cost_ts).toBe(entryTimestamp);
-
-    const r3 = await watchdog(h, 'run'); // tick 3: clear is idempotent; compact must see the cross-stamp
-    expect(r3.exitCode).toBe(0);
-    const tmuxLog3 = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog3).not.toContain('/compact');
-    const events3 = fs.readFileSync(eventsFile(h), 'utf-8');
-    expect(events3).not.toContain('context-compact');
-    // Two independent guards now cover this entry: the clear stamped last_context_reset_at,
-    // so the poisoned-entry check rejects it as stale before the idempotence cross-stamp is
-    // even consulted. Both are kept — the cross-stamp above still protects an entry the
-    // reset stamp can't date (no timestamp at all).
-    const wsAfterTick3 = readJson(state(h, 'watchdog-state.json'));
-    expect(wsAfterTick3.last_hygiene_eval?.compact?.outcome).toBe('skip:stale-entry');
   }));
 
 test('context_compact: boundary marker waives min_interval but not the 60k floor',
@@ -4107,51 +3973,25 @@ test('context_compact: another session in the folder cannot drive the resident\'
     expect(ws.last_hygiene_eval?.compact?.cc_session_id).toBe(CC_SESSION_ID);
   }));
 
-test('context_clear: legacy multi-call entry averages down — no destructive misfire; still compact-eligible',
+test('context_compact: legacy multi-call entry averages down and stays compact-eligible',
   withHermit(async (h) => {
     // Old semantics summed every API call in the turn: a 5-call turn at a real ~300k
-    // context logged 1.5M "prompt tokens" and blew straight through the 700k emergency
-    // clear threshold. The average (still the pre-max_prompt_tokens fallback, since
-    // this entry predates that field) keeps it out of the destructive tier while
-    // correctly landing above the 150k compact threshold.
-    writeContextCompactConfig(h, { minContextTokens: 150000, clearTokens: 700000 });
+    // context logged 1.5M "prompt tokens". The average (still the pre-max_prompt_tokens
+    // fallback, since this entry predates that field) lands above the 150k compact
+    // threshold.
+    writeContextCompactConfig(h, { minContextTokens: 150000 });
     writeAlwaysOnRuntime(h);
     writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 1500000, cache_write_tokens: 0, cache_read_tokens: 0, api_calls: 5 }]);
     fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
     writeFakeTmux(h, 0, 'static pane content');
     writeFakePgrep(h, 1);
 
-    await watchdog(h, 'run'); // tick 1: both trackers prime their hashes
+    await watchdog(h, 'run'); // tick 1: tracker primes its hash
     const r2 = await watchdog(h, 'run'); // tick 2
     expect(r2.exitCode).toBe(0);
     const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).not.toContain('/clear');
     expect(tmuxLog).toContain('/compact');
-    const events = fs.readFileSync(eventsFile(h), 'utf-8');
-    expect(events).not.toContain('context-clear');
-    expect(events).toContain('context-compact');
-    // The destructive /clear declines the multi-call legacy estimate outright rather
-    // than acting on the per-call mean; the compact tier still uses it.
-    const ws = readJson(state(h, 'watchdog-state.json'));
-    expect(ws.last_hygiene_eval?.clear?.outcome).toBe('skip:estimate-only');
-  }));
-
-test('context_clear: max_prompt_tokens field takes precedence over the per-turn sum',
-  withHermit(async (h) => {
-    writeContextClearConfig(h, 700000);
-    writeAlwaysOnRuntime(h);
-    // Small literal input/cache fields (100k sum) but max_prompt_tokens says the
-    // real single-call context was 900k — the field must win.
-    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 50000, max_prompt_tokens: 900000 }]);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-    writeFakeTmux(h, 0, 'static pane content');
-    writeFakePgrep(h, 1);
-
-    await watchdog(h, 'run');
-    const r2 = await watchdog(h, 'run');
-    expect(r2.exitCode).toBe(0);
-    const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
-    expect(tmuxLog).toContain('/clear');
+    expect(fs.readFileSync(eventsFile(h), 'utf-8')).toContain('context-compact');
   }));
 
 test('context_compact: last_hygiene_eval records the fire outcome and prompt token count',
@@ -4262,21 +4102,6 @@ describe('pause enforcement', () => {
       expect(events).toContain('pause-enforced');
       const tmuxLog = fs.readFileSync(path.join(h.dir, 'tmux-calls.log'), 'utf-8');
       expect(tmuxLog).not.toContain('heartbeat run');
-    }));
-
-  test('context_clear suppressed while paused (shared passesLifecycleGuards gate)',
-    withHermit(async (h) => {
-      writeContextClearConfig(h);
-      writeAlwaysOnRuntime(h);
-      writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 50000, cache_write_tokens: 0, cache_read_tokens: 800000 }]);
-      fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-      writeFakeTmux(h, 0, 'static pane content');
-      writeFakePgrep(h, 1);
-      writePauseFlag(h);
-      await watchdog(h, 'run'); // tick 1
-      const r2 = await watchdog(h, 'run'); // tick 2 — would normally fire /clear
-      expect(r2.exitCode).toBe(0);
-      expect(fs.existsSync(path.join(h.dir, 'tmux-calls.log'))).toBe(false);
     }));
 
   test('Escape sent once when paused mid-turn (execution in flight, live tmux)', withHermit(async (h) => {
@@ -4396,8 +4221,8 @@ describe('inActiveHours (timezone)', () => {
 
 describe('composeRestartMessage / composeWedgeMessage / composePauseMessage', () => {
   test('restart message distinguishes dead-process from pane-frozen', () => {
-    expect(composeRestartMessage('dead-process', 'UTC')).toContain("wasn't running");
-    expect(composeRestartMessage('pane-frozen', 'UTC')).toContain('had frozen');
+    expect(composeRestartMessage('dead-process', true, 'UTC')).toContain("wasn't running");
+    expect(composeRestartMessage('pane-frozen', true, 'UTC')).toContain('had frozen');
   });
 
   test('wedge message names the check-in time', () => {
@@ -4589,24 +4414,31 @@ describe('state backup (step 0e)', () => {
 
 describe('watchdog message localization', () => {
   test('composeRestartMessage en describes an attempt (both causes)', () => {
-    expect(composeRestartMessage('dead-process', 'UTC', 'en')).toMatch(
-      /^Attempting to restart your agent at \d{2}:\d{2}: it wasn't running\.$/);
-    expect(composeRestartMessage('pane-frozen', 'UTC', 'en')).toMatch(
-      /^Attempting to restart your agent at \d{2}:\d{2}: it had frozen\.$/);
+    expect(composeRestartMessage('dead-process', true, 'UTC', 'en')).toMatch(
+      /^Attempting to restart your agent at \d{2}:\d{2}: it wasn't running\. Its conversation is restored where possible, but work in flight since the last save may not have carried over, so it will re-check its work before continuing\.$/);
+    expect(composeRestartMessage('pane-frozen', true, 'UTC', 'en')).toMatch(
+      /^Attempting to restart your agent at \d{2}:\d{2}: it had frozen\. Its conversation is restored where possible, but work in flight since the last save may not have carried over, so it will re-check its work before continuing\.$/);
+  });
+
+  test('composeRestartMessage never promises a restored conversation on a fresh start', () => {
+    expect(composeRestartMessage('dead-process', false, 'UTC', 'en')).toMatch(
+      /^Attempting to restart your agent at \d{2}:\d{2}: it wasn't running\. It starts a fresh conversation, so work in flight since the last save is lost and it picks up from its saved work\.$/);
+    expect(composeRestartMessage('dead-process', false, 'UTC', 'pt-PT')).toMatch(
+      /^A tentar reiniciar o seu agente às \d{2}:\d{2}: não estava a correr\. Começa uma conversa nova, por isso o trabalho em curso desde o último registo perde-se e o agente retoma a partir do trabalho guardado\.$/);
   });
 
   test('composeRestartMessage pt-PT', () => {
-    expect(composeRestartMessage('dead-process', 'UTC', 'pt-PT')).toMatch(
-      /^A tentar reiniciar o seu agente às \d{2}:\d{2}: não estava a correr\.$/);
-    expect(composeRestartMessage('pane-frozen', 'UTC', 'pt-PT')).toMatch(
-      /^A tentar reiniciar o seu agente às \d{2}:\d{2}: tinha bloqueado\.$/);
+    expect(composeRestartMessage('dead-process', true, 'UTC', 'pt-PT')).toMatch(
+      /^A tentar reiniciar o seu agente às \d{2}:\d{2}: não estava a correr\. A conversa é retomada sempre que possível, mas o trabalho em curso desde o último registo pode não ter sido mantido, por isso o agente volta a verificar o seu trabalho antes de continuar\.$/);
+    expect(composeRestartMessage('pane-frozen', true, 'UTC', 'pt-PT')).toMatch(
+      /^A tentar reiniciar o seu agente às \d{2}:\d{2}: tinha bloqueado\. A conversa é retomada sempre que possível, mas o trabalho em curso desde o último registo pode não ter sido mantido, por isso o agente volta a verificar o seu trabalho antes de continuar\.$/);
   });
 
   test('composeWedgeMessage en / pt-PT', () => {
     expect(composeWedgeMessage('UTC', 'en')).toMatch(
-      /^Your agent hasn't responded in a while — checking on it now \(\d{2}:\d{2}\)\.$/);
+      /^Your agent hasn't responded in a while — checking on it now \(\d{2}:\d{2}\)\. If it has to be restarted, work in flight may be lost\.$/);
     expect(composeWedgeMessage('UTC', 'pt-PT')).toMatch(
-      /^O seu agente não responde há algum tempo — estou a verificá-lo agora \(\d{2}:\d{2}\)\.$/);
+      /^O seu agente não responde há algum tempo — estou a verificá-lo agora \(\d{2}:\d{2}\)\. Se tiver de ser reiniciado, o trabalho em curso pode perder-se\.$/);
   });
 
   test('composeStallQuestionMessage en / pt-PT', () => {
@@ -4772,33 +4604,8 @@ test('hygiene_eval_counts: monotonic first-blocker counters keyed per mechanism 
     const ws2 = readWdState(h);
     expect(ws2.hygiene_eval_counts.compact['skip:below-floor']).toBe(2);
     expect(ws2.hygiene_eval_counts.since).toBe(ws1.hygiene_eval_counts.since);
-    // clear tier is unconfigured (no context_clear_tokens) → silent, never counted
-    expect(Object.keys(ws2.hygiene_eval_counts.clear ?? {}).length).toBe(0);
-  }));
-
-test('hygiene_eval_counts: a clear-tier fire exits the tick before compact ever stamps (first-blocker semantics)',
-  withHermit(async (h) => {
-    writeContextCompactConfig(h, { minContextTokens: 100000, clearTokens: 700000 });
-    writeAlwaysOnRuntime(h);
-    // 800k total: over the 700k clear threshold AND the compact threshold
-    writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 0, cache_write_tokens: 0, cache_read_tokens: 800000, max_prompt_tokens: 800000, api_calls: 1 }]);
-    fs.writeFileSync(state(h, 'last-operator-action.json'), JSON.stringify({ at: isoAgo(1) }) + '\n');
-    writeFakeTmux(h, 0, 'static pane content');
-    writeFakePgrep(h, 1);
-
-    await watchdog(h, 'run'); // tick 1: clear quiescence-pending, then compact also stamps
-    const ws1 = readWdState(h);
-    expect(ws1.hygiene_eval_counts.clear['skip:quiescence-pending']).toBe(1);
-    const compactTick1 = Object.values(ws1.hygiene_eval_counts.compact as Record<string, number>).reduce((a: number, b: any) => a + b, 0);
-    expect(compactTick1).toBe(1);
-
-    const r2 = await watchdog(h, 'run'); // tick 2: clear FIRES and process.exit(0)s the tick
-    expect(r2.exitCode).toBe(0);
-    const ws2 = readWdState(h);
-    expect(ws2.hygiene_eval_counts.clear.fired).toBe(1);
-    // compact never ran on the firing tick — its counters are untouched since tick 1
-    const compactTick2 = Object.values(ws2.hygiene_eval_counts.compact as Record<string, number>).reduce((a: number, b: any) => a + b, 0);
-    expect(compactTick2).toBe(compactTick1);
+    // only the compact tier records evaluations
+    expect(ws2.hygiene_eval_counts.clear).toBeUndefined();
   }));
 
 // ============================================================================
@@ -4902,7 +4709,7 @@ function patchCascadeRuntime(c: Cascade, patch: Record<string, unknown>): void {
 }
 
 /** One cost-log entry for the fixture session. Defaults to a real (non-estimate)
- *  900k reading, which is over the clear threshold and well over the compact one. */
+ *  900k reading, well over the compact threshold. */
 function writeCostEntry(c: Cascade, over: Record<string, unknown> = {}): void {
   const entry = {
     session_id: 'S-001',
@@ -4917,7 +4724,6 @@ function writeCostEntry(c: Cascade, over: Record<string, unknown> = {}): void {
   fs.writeFileSync(c.world.paths.costLog, JSON.stringify(entry) + '\n');
 }
 
-const CLEAR_CONFIG = { watchdog: { context_clear_tokens: 700_000 } };
 const COMPACT_CONFIG = {
   timezone: 'UTC',
   context_hygiene: { compact: { enabled: true, min_context_tokens: 100_000, min_interval: '4h' } },
@@ -5010,20 +4816,20 @@ describe('passesLifecycleGuards (in-process) — every reason reachable', () => 
 describe('hygiene stamping (in-process)', () => {
   test('first stamp initialises both records off the world clock', withCascade((c) => {
     const ws: any = {};
-    setHygieneEval(c.world, ws, 'clear', 'skip:under-threshold', 123);
-    expect(ws.last_hygiene_eval.clear).toEqual({
+    setHygieneEval(c.world, ws, 'skip:under-threshold', 123);
+    expect(ws.last_hygiene_eval.compact).toEqual({
       ts: '2026-08-14T12:00:00Z', outcome: 'skip:under-threshold', prompt_tokens: 123,
     });
     expect(ws.hygiene_eval_counts.since).toBe('2026-08-14T12:00:00Z');
-    expect(ws.hygiene_eval_counts.clear['skip:under-threshold']).toBe(1);
-    expect(ws.hygiene_eval_counts.compact).toEqual({});
+    expect(ws.hygiene_eval_counts.compact).toEqual({ 'skip:under-threshold': 1 });
+    expect(ws.hygiene_eval_counts.clear).toBeUndefined();
   }));
 
   test('repeat outcomes increment rather than overwrite', withCascade((c) => {
     const ws: any = {};
-    setHygieneEval(c.world, ws, 'compact', 'skip:below-floor', 90_000, 40_000);
-    setHygieneEval(c.world, ws, 'compact', 'skip:below-floor', 91_000, 41_000);
-    setHygieneEval(c.world, ws, 'compact', 'fired', 92_000, 42_000);
+    setHygieneEval(c.world, ws, 'skip:below-floor', 90_000, 40_000);
+    setHygieneEval(c.world, ws, 'skip:below-floor', 91_000, 41_000);
+    setHygieneEval(c.world, ws, 'fired', 92_000, 42_000);
     expect(ws.hygiene_eval_counts.compact).toEqual({ 'skip:below-floor': 2, fired: 1 });
     // last_hygiene_eval holds only the most recent evaluation for the mechanism
     expect(ws.last_hygiene_eval.compact.outcome).toBe('fired');
@@ -5032,147 +4838,17 @@ describe('hygiene stamping (in-process)', () => {
 
   test('token fields are omitted when not supplied', withCascade((c) => {
     const ws: any = {};
-    setHygieneEval(c.world, ws, 'clear', 'skip:no-cost-entry');
-    expect(ws.last_hygiene_eval.clear).toEqual({ ts: '2026-08-14T12:00:00Z', outcome: 'skip:no-cost-entry' });
-  }));
-
-  test('the two mechanisms keep separate slots', withCascade((c) => {
-    const ws: any = {};
-    setHygieneEval(c.world, ws, 'clear', 'skip:estimate-only');
-    setHygieneEval(c.world, ws, 'compact', 'skip:under-threshold', 5);
-    expect(ws.last_hygiene_eval.clear.outcome).toBe('skip:estimate-only');
-    expect(ws.last_hygiene_eval.compact.outcome).toBe('skip:under-threshold');
+    setHygieneEval(c.world, ws, 'skip:no-cost-entry');
+    expect(ws.last_hygiene_eval.compact).toEqual({ ts: '2026-08-14T12:00:00Z', outcome: 'skip:no-cost-entry' });
   }));
 
   test('stampHygieneEval round-trips through the state file', withCascade((c) => {
-    stampHygieneEval(c.world, 'clear', 'skip:lock-held', 700);
-    stampHygieneEval(c.world, 'clear', 'skip:lock-held', 701);
+    stampHygieneEval(c.world, 'skip:lock-held', 700);
+    stampHygieneEval(c.world, 'skip:lock-held', 701);
     const ws = c.wdState();
-    expect(ws.last_hygiene_eval.clear.outcome).toBe('skip:lock-held');
-    expect(ws.hygiene_eval_counts.clear['skip:lock-held']).toBe(2);
+    expect(ws.last_hygiene_eval.compact.outcome).toBe('skip:lock-held');
+    expect(ws.hygiene_eval_counts.compact['skip:lock-held']).toBe(2);
     expect(ws.last_check_at).toBe('2026-08-14T12:00:00Z');
-  }));
-});
-
-describe('maybeContextClear (in-process) — outcome per gate', () => {
-  test('no outcome at all when the tier is unconfigured', withCascade((c) => {
-    expect(maybeContextClear({}, c.world)).toBeNull();
-    expect(maybeContextClear({ watchdog: { context_clear_tokens: 0 } }, c.world)).toBeNull();
-    expect(c.wdState().last_hygiene_eval).toBeUndefined();
-  }));
-
-  test('no outcome when runtime.json is missing', withCascade((c) => {
-    fs.rmSync(path.join(c.world.paths.stateDir, 'runtime.json'));
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBeNull();
-  }));
-
-  test('lifecycle reason travels into the outcome', withCascade((c) => {
-    c.setAlive(false);
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:lifecycle:no-tmux');
-    expect(c.wdState().last_hygiene_eval.clear.outcome).toBe('skip:lifecycle:no-tmux');
-  }));
-
-  test('no-session-id', withCascade((c) => {
-    // An S-NNN arc label is not an identity: only cc_session_id is.
-    patchCascadeRuntime(c, { cc_session_id: '' });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-session-id');
-  }));
-
-  test('no-session-id: an arc label without cc_session_id resolves nothing', withCascade((c) => {
-    // The pre-#916 shape — S-NNN present, no harness id stamped. A bloated row keyed on
-    // that label must not be readable, or the drift the fix removes comes straight back.
-    const { cc_session_id: _dropped, ...rest } = c.runtime();
-    c.world.files.writeJson(path.join(c.world.paths.stateDir, 'runtime.json'), { ...rest, session_id: 'S-001' });
-    writeCostEntry(c, { cc_session_id: undefined });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-session-id');
-  }));
-
-  test('no-cost-entry when the log has nothing for this session', withCascade((c) => {
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-cost-entry');
-    writeCostEntry(c, { cc_session_id: 'cc-other-session' });
-    c.world.memo.costLogEntry = undefined; // new tick
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-cost-entry');
-  }));
-
-  test('no-cost-entry: a guest row carrying the resident id is ignored', withCascade((c) => {
-    // A guest in the same folder cannot borrow the resident's identity.
-    writeCostEntry(c, { guest: true });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:no-cost-entry');
-  }));
-
-  test('stale-entry when the reading predates the last context reset', withCascade((c) => {
-    writeCostEntry(c, { observed_at: agoISO(600) });
-    patchCascadeRuntime(c, { last_context_reset_at: agoISO(300) });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:stale-entry');
-  }));
-
-  test('aberrant-reading above the plausible ceiling', withCascade((c) => {
-    writeCostEntry(c, { last_call_prompt_tokens: 6_500_000, max_prompt_tokens: 6_500_000 });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:aberrant-reading');
-  }));
-
-  test('estimate-only never drives the destructive tier', withCascade((c) => {
-    writeCostEntry(c, { max_prompt_tokens: undefined, api_calls: 4 });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:estimate-only');
-  }));
-
-  test('under-threshold', withCascade((c) => {
-    writeCostEntry(c, { last_call_prompt_tokens: 500_000, max_prompt_tokens: 500_000 });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:under-threshold');
-    expect(c.wdState().last_hygiene_eval.clear.prompt_tokens).toBe(500_000);
-  }));
-
-  test('already-processed once the entry has been cleared', withCascade((c) => {
-    writeCostEntry(c);
-    c.world.files.writeJson(path.join(c.world.paths.stateDir, 'watchdog-state.json'),
-      { last_cleared_cost_ts: agoISO(60) });
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:already-processed');
-    expect(c.sent).toEqual([]);
-  }));
-
-  test('quiescence-pending on the first qualifying tick', withCascade((c) => {
-    writeCostEntry(c);
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:quiescence-pending');
-    expect(c.sent).toEqual([]);
-    expect(c.wdState().last_pane_hash_ctx).toBeTruthy();
-  }));
-
-  test('quiescence re-arms when the pane moves between ticks', withCascade((c) => {
-    writeCostEntry(c);
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:quiescence-pending');
-    c.setPane('operator typed something');
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:quiescence-pending');
-    expect(c.sent).toEqual([]);
-  }));
-
-  test('lock-held defers the fire without touching the pane', withCascade((c) => {
-    writeCostEntry(c);
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:quiescence-pending');
-    // A bare, live, foreign PID — acquireLock treats own-PID or unparseable
-    // content as a stale lock it may claim.
-    fs.writeFileSync(path.join(c.world.paths.stateDir, '.lifecycle.lock'), String(process.ppid));
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:lock-held');
-    expect(c.sent).toEqual([]);
-  }));
-
-  test('fires on the second stable tick and marks the entry consumed', withCascade((c) => {
-    writeCostEntry(c);
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('skip:quiescence-pending');
-    expect(maybeContextClear(CLEAR_CONFIG, c.world)).toBe('fired');
-
-    expect(c.sent).toEqual([{ session: 'hermit-test', text: '/clear' }]);
-    const ws = c.wdState();
-    expect(ws.last_hygiene_eval.clear).toEqual({
-      ts: '2026-08-14T12:00:00Z', outcome: 'fired', cc_session_id: CC_SESSION_ID, prompt_tokens: 900_000,
-    });
-    expect(ws.last_cleared_cost_ts).toBe(agoISO(60));
-    // cross-stamped so the compact tier can't act on the same destroyed context
-    expect(ws.last_compacted_cost_ts).toBe(agoISO(60));
-    expect(ws.last_pane_hash_ctx).toBeNull();
-    // the reset breadcrumb lands before the keystroke, on the same hermit root
-    expect(c.runtime().context_cleared).toBe(true);
-    const events = fs.readFileSync(path.join(c.world.paths.stateDir, 'watchdog-events.jsonl'), 'utf-8');
-    expect(events).toContain('context-clear');
   }));
 });
 
@@ -5181,6 +4857,39 @@ describe('maybeContextCompact (in-process) — outcome per gate', () => {
     expect(maybeContextCompact({}, c.world)).toBeNull();
     expect(maybeContextCompact({ context_hygiene: { compact: { enabled: false, min_context_tokens: 100 } } }, c.world)).toBeNull();
     expect(maybeContextCompact({ context_hygiene: { compact: { enabled: true, min_context_tokens: 0 } } }, c.world)).toBeNull();
+  }));
+
+  test('lifecycle reason travels into the outcome', withCascade((c) => {
+    c.setAlive(false);
+    expect(maybeContextCompact(COMPACT_CONFIG, c.world)).toBe('skip:lifecycle:no-tmux');
+    expect(c.wdState().last_hygiene_eval.compact.outcome).toBe('skip:lifecycle:no-tmux');
+  }));
+
+  test('no-session-id: an arc label without cc_session_id resolves nothing', withCascade((c) => {
+    // The pre-#916 shape: S-NNN present, no harness id stamped. A bloated row keyed on
+    // that label must not be readable, or the drift the fix removes comes straight back.
+    const { cc_session_id: _dropped, ...rest } = c.runtime();
+    c.world.files.writeJson(path.join(c.world.paths.stateDir, 'runtime.json'), { ...rest, session_id: 'S-001' });
+    writeCostEntry(c, { cc_session_id: undefined });
+    expect(maybeContextCompact(COMPACT_CONFIG, c.world)).toBe('skip:no-session-id');
+  }));
+
+  test('no-cost-entry: another session or a guest row carrying the resident id is ignored', withCascade((c) => {
+    writeCostEntry(c, { cc_session_id: 'cc-other-session' });
+    expect(maybeContextCompact(COMPACT_CONFIG, c.world)).toBe('skip:no-cost-entry');
+    writeCostEntry(c, { guest: true });
+    expect(maybeContextCompact(COMPACT_CONFIG, c.world)).toBe('skip:no-cost-entry');
+  }));
+
+  test('stale-entry when the reading predates the last context reset', withCascade((c) => {
+    writeCostEntry(c, { observed_at: agoISO(600) });
+    patchCascadeRuntime(c, { last_context_reset_at: agoISO(300) });
+    expect(maybeContextCompact(COMPACT_CONFIG, c.world)).toBe('skip:stale-entry');
+  }));
+
+  test('aberrant-reading above the plausible ceiling', withCascade((c) => {
+    writeCostEntry(c, { last_call_prompt_tokens: 6_500_000, max_prompt_tokens: 6_500_000 });
+    expect(maybeContextCompact(COMPACT_CONFIG, c.world)).toBe('skip:aberrant-reading');
   }));
 
   test('below-floor: a small compactible conversation is never worth summarising', withCascade((c) => {
@@ -5289,29 +4998,44 @@ describe('maybeContextCompact (in-process) — outcome per gate', () => {
 });
 
 describe('restart resume', () => {
-  for (const scenario of ['under', 'over', 'no-cost-entry', 'compact-disabled', 'no-session-id', 'stale-entry', 'aberrant-reading']) {
+  // Watchdog-detected restarts (a dead session on a `run` tick) resume; a restart
+  // someone asked for through the `restart` subcommand always starts fresh.
+  const scenarios: Record<string, { expected: string; via: 'run' | 'restart' }> = {
+    'default': { expected: 'resume', via: 'run' },
+    'no-session-id': { expected: 'fresh: no-session-id', via: 'run' },
+    'recent-restart': { expected: 'fresh: recent-restart', via: 'run' },
+    'compact-off-large-context': { expected: 'resume', via: 'run' },
+    'requested': { expected: 'fresh: requested', via: 'restart' },
+  };
+  for (const [scenario, { expected, via }] of Object.entries(scenarios)) {
     test(scenario, withHermit(async (h) => {
       writeConfig(h);
-      const configPath = path.join(h.dir, '.claude-code-hermit', 'config.json');
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      config.context_hygiene = { compact: { min_context_tokens: 100000, enabled: scenario !== 'compact-disabled' } };
-      fs.writeFileSync(configPath, JSON.stringify(config));
+      if (scenario === 'compact-off-large-context') {
+        const configPath = path.join(h.dir, '.claude-code-hermit', 'config.json');
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        config.context_hygiene = { compact: { min_context_tokens: 100000, enabled: false } };
+        fs.writeFileSync(configPath, JSON.stringify(config));
+        writeCostLog(h, [{ session_id: SESSION_ID, input_tokens: 400000, cache_write_tokens: 0, cache_read_tokens: 0 }]);
+      }
       patchRuntime(h, { cc_session_id: scenario === 'no-session-id' ? null : CC_SESSION_ID });
-      if (scenario === 'stale-entry') patchRuntime(h, { last_context_reset_at: new Date().toISOString() });
-      if (scenario !== 'no-cost-entry') writeCostLog(h, [{
-        session_id: SESSION_ID,
-        input_tokens: scenario === 'aberrant-reading' ? 10000000 : scenario === 'over' ? 100000 : 50000,
-        cache_write_tokens: 0, cache_read_tokens: 0,
-        observed_at: scenario === 'stale-entry' ? '2020-01-01T00:00:00Z' : new Date().toISOString(),
-      }]);
-      writeFakeTmux(h, 0);
+      const priorRestart = isoAgo(5 / 60);
+      fs.writeFileSync(state(h, 'watchdog-state.json'), JSON.stringify({
+        consecutive_stale: 2, last_pane_hash: 'abc',
+        ...(scenario === 'recent-restart' ? { last_restart_at: priorRestart } : {}),
+      }) + '\n');
+      writeFakeTmux(h, via === 'run' ? 1 : 0);
       writeFakePgrep(h, 1);
-      expect((await watchdog(h, 'restart')).exitCode).toBe(0);
+      expect((await watchdog(h, via)).exitCode).toBe(0);
       expect(await waitForStartMarker(h)).toBe(true);
+      const resumes = expected === 'resume';
       expect(fs.readFileSync(path.join(h.dir, 'hermit-start-args'), 'utf8').trim())
-        .toBe(scenario === 'under' ? `--resume ${CC_SESSION_ID}` : '');
-      expect(fs.readFileSync(eventsFile(h), 'utf8')).toContain(scenario === 'under'
-        ? `resume ${CC_SESSION_ID}` : `fresh: ${scenario === 'over' ? 'over-threshold' : scenario}`);
+        .toBe(resumes ? `--resume ${CC_SESSION_ID}` : '');
+      expect(fs.readFileSync(eventsFile(h), 'utf8')).toContain(resumes ? `resume ${CC_SESSION_ID}` : expected);
+      // Every restart stamps its time without clobbering what the caller wrote.
+      const ws = readJson(state(h, 'watchdog-state.json'));
+      expect(Date.parse(ws.last_restart_at)).toBeGreaterThan(Date.parse(priorRestart));
+      expect(ws.consecutive_stale).toBe(2);
+      expect(ws.last_pane_hash).toBe('abc');
     }), 45000);
   }
 });

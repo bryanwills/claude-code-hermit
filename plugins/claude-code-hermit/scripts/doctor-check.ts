@@ -1018,12 +1018,11 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
       return { id: 'watchdog', status: 'ok', detail: 'watchdog: scheduler opted out' };
     }
 
-    // Steps 0a-0c (standalone clear, emergency clear, routine-hygiene compact) run
+    // Steps 0a and 0c (standalone clear, routine-hygiene compact) run
     // independent of watchdog.enabled — a hermit can have the restart tier off and
     // still depend on the scheduler tick for hygiene. Only report the "disabled
     // (opt-in)" all-clear when nothing at all needs that tick.
     const hygieneActive = config.context_hygiene?.clear?.enabled === true
-      || (typeof wCfg.context_clear_tokens === 'number' && wCfg.context_clear_tokens > 0)
       || config.context_hygiene?.compact?.enabled === true;
 
     if (!wCfg.enabled && !hygieneActive) {
@@ -1112,35 +1111,26 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
 
     const parts = [`restarts: ${restarts}`, `nudges: ${nudges}`, `re-arms: ${rearms}`, `clears: ${clears}`, `compacts: ${compacts}`];
     if (consecutive > 0) parts.push(`stale cycles in progress: ${consecutive}`);
-    // last_hygiene_eval is keyed per mechanism ({ clear?, compact? }) so a tick where
-    // both tiers run keeps each tier's own record. Surface whichever ran most recently.
-    const evalMsOf = (r: Json) => { const t = typeof r?.ts === 'string' ? Date.parse(r.ts) : NaN; return Number.isFinite(t) ? t : 0; };
-    let mostRecentHygiene: { mech: string; rec: Json } | null = null;
-    for (const mech of ['clear', 'compact']) {
-      const rec = lastHygieneEval?.[mech];
-      if (!rec || typeof rec.outcome !== 'string') continue;
-      if (!mostRecentHygiene || evalMsOf(rec) > evalMsOf(mostRecentHygiene.rec)) mostRecentHygiene = { mech, rec };
-    }
-    if (mostRecentHygiene) {
-      const evalMs = evalMsOf(mostRecentHygiene.rec);
-      const ageSuffix = evalMs ? `, ${Math.round((Date.now() - evalMs) / 60000)}m ago` : '';
-      parts.push(`last hygiene eval: ${mostRecentHygiene.mech}/${mostRecentHygiene.rec.outcome}${ageSuffix}`);
+    // last_hygiene_eval is keyed per mechanism; only the compact tier records one, so
+    // any other key is ignored.
+    const compactEval = lastHygieneEval?.compact;
+    if (compactEval && typeof compactEval.outcome === 'string') {
+      const t = typeof compactEval.ts === 'string' ? Date.parse(compactEval.ts) : NaN;
+      const ageSuffix = Number.isFinite(t) ? `, ${Math.round((Date.now() - t) / 60000)}m ago` : '';
+      parts.push(`last hygiene eval: compact/${compactEval.outcome}${ageSuffix}`);
     }
     // Durable first-blocker counters (each evaluation records the first guard that
-    // returned, not every binding constraint) — top outcomes per mechanism so the
-    // skip mix is readable from one line without a time series.
-    if (hygieneCounts && typeof hygieneCounts === 'object') {
+    // returned, not every binding constraint): top compact outcomes so the skip mix
+    // is readable from one line without a time series.
+    const compactCounts = hygieneCounts?.compact;
+    if (compactCounts && typeof compactCounts === 'object') {
       const since = typeof hygieneCounts.since === 'string' ? hygieneCounts.since.slice(0, 10) : '?';
-      for (const mech of ['clear', 'compact']) {
-        const counts = hygieneCounts[mech];
-        if (!counts || typeof counts !== 'object') continue;
-        const top = Object.entries(counts)
-          .filter(([, n]) => typeof n === 'number')
-          .sort((a: Json, b: Json) => b[1] - a[1])
-          .slice(0, 4)
-          .map(([k, n]) => `${k.replace(/^skip:/, '')} ${n}`);
-        if (top.length) parts.push(`${mech} first-blockers since ${since}: ${top.join(', ')}`);
-      }
+      const top = Object.entries(compactCounts)
+        .filter(([, n]) => typeof n === 'number')
+        .sort((a: Json, b: Json) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([k, n]) => `${k.replace(/^skip:/, '')} ${n}`);
+      if (top.length) parts.push(`compact first-blockers since ${since}: ${top.join(', ')}`);
     }
     // Recorded fixed-surface upper bound — informational only (the derivation
     // carries wake contamination, so growth between readings is not by itself a
@@ -1236,10 +1226,8 @@ function checkContextAge(p: DoctorPaths = PATHS) {
     // This is a compact-tier tripwire, so it judges the same token count the compact
     // tier acts on: estimated compactible conversation (total prompt minus the recorded
     // fixed-surface upper bound, or the 50k cold-start assumption), with estimate-only
-    // entries averaged (as maybeContextCompact does) rather than skipped. Only the
-    // destructive /clear tier refuses estimate-only entries — mirroring that skip here
-    // would blind the check to a bloated session whose latest turn happens to be a
-    // multi-call estimate, the exact case compact still compacts.
+    // entries averaged (as maybeContextCompact does) rather than skipped, so a bloated
+    // session whose latest turn happens to be a multi-call estimate still counts.
     const prompt = promptTokensOf(lastEntry);
     const compactible = compactibleTokens(lastEntry, readContextSurface(hermitDir)?.surface_upper_bound_tokens ?? null);
     if (compactible <= threshold) {

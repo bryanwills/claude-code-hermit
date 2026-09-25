@@ -115,7 +115,6 @@ const TABLE: Record<string, Spec> = {
     wedge_floor: str('4h'),
     escalate_after: num(3),
     operator_grace: str('15m'),
-    context_clear_tokens: num(700000),
   }),
   budget: shape({
     daily_usd: num(null),
