@@ -143,7 +143,20 @@ alternate invocation, or weaker permission mode.
    persisted directory. Print the returned bg id and `claude logs <id>`,
    `claude attach <id>`, `claude stop <id>` hints. If the spawn is declined or
    fails, stop; do not watch, open a record, or patch a Decision.
-   After a successful launch with `--proposal`, open the record (title names
+   After a successful launch with `--proposal` or inside an open record's
+   turn, read the helper's full session id `<sid>`: the printed bg id is only
+   its first 8 characters and is not a resume handle. Match on the bg id, not
+   the name, since a name can be reused:
+   ```bash
+   claude agents --json | jq -r --arg id <bg-id> '.[] | select(.id==$id) | .sessionId // empty'
+   ```
+   Zero or more than one line means no `<sid>`: say so, and write the lines
+   below without `(<sid>)`. Without `--proposal`, inside an open record's turn,
+   append `Handed to helper <n> (<sid>).` as a progress note by piping it into
+   `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <T-id>`,
+   where `<T-id>` is that open record's id, not the bg id (the note is
+   timestamped for you).
+   With `--proposal`, open the record (title names
    the helper work; requester is the current operator or channel identity). The
    key is `helper:PROP-NNN`, not `proposal:PROP-NNN`: that second key belongs to
    the proposal's implementation record, and reusing it would hang the helper's
@@ -157,7 +170,7 @@ alternate invocation, or weaker permission mode.
    Then append one handoff line with no `--set`:
    ```bash
    bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts patch .claude-code-hermit <filename> --stdin <<'HERMIT_PATCH'
-   Decision: Handed to helper <n> on @now; record <T-id>.
+   Decision: Handed to helper <n> (<sid>) on @now; record <T-id>.
    HERMIT_PATCH
    ```
 
