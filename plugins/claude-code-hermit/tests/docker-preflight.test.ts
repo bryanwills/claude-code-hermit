@@ -103,6 +103,21 @@ describe('docker-preflight.ts', () => {
     expect((await run(dir)).liveOwner).toBe(null);
   });
 
+  // The fake tmux answers only the exact-match target, so this also pins `=name`:
+  // a bare target would let `hermit-demo` match a live `hermit-demo-2`.
+  test('live host tmux session owns the state even when liveness is stale', async () => {
+    const dir = freshDir();
+    seedOwner(dir, { runtime_mode: 'tmux', tmux_session: 'hermit-demo' }, 660);
+    const bin = path.join(dir, 'fake-bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'tmux'),
+      '#!/usr/bin/env bash\n[ "$1 $2 $3" = "has-session -t =hermit-demo" ] && exit 0\nexit 1\n', { mode: 0o755 });
+
+    const out = await run(dir, { PATH: `${bin}:${process.env.PATH}` });
+    expect(out.liveOwner.mode).toBe('tmux');
+    expect(out.liveOwner.ageSecs).toBeGreaterThanOrEqual(660);
+  });
+
   // The older `pwd | sed 's|/|-|g'` scheme replaced slashes only, so any dotted
   // path key diverged from the one CC actually writes and the seed probe missed a
   // memory file that was sitting right there.

@@ -65,6 +65,25 @@ _require_running() {
   fi
 }
 
+# A live host tmux resident owns the state even when its liveness files are
+# stale, and the container's entrypoint cannot see host tmux. `=` is an
+# exact-name match. HERMIT_FORCE_BOOT=1 overrides, as it does in the entrypoint.
+# Every path that (re)boots the container calls this: an inert container left by
+# a boot conflict is still "running", so restart/update reach the entrypoint too.
+_refuse_if_host_tmux_owner() {
+  [ "${HERMIT_FORCE_BOOT:-0}" != "1" ] && [ -f "$RUNTIME_FILE" ] || return 0
+  local host_session
+  host_session=$(bun -e "
+const rt = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+if (rt.runtime_mode && rt.runtime_mode !== 'docker' && typeof rt.tmux_session === 'string') console.log(rt.tmux_session);
+" "$RUNTIME_FILE" 2>/dev/null || true)
+  if [ -n "$host_session" ] && tmux has-session -t "=$host_session" 2>/dev/null; then
+    echo "[hermit] BOOT CONFLICT: host tmux session '$host_session' is running this project's hermit." >&2
+    echo "[hermit] Stop it first (.claude-code-hermit/bin/hermit-stop), or override with HERMIT_FORCE_BOOT=1." >&2
+    exit 1
+  fi
+}
+
 _running_cc_version() {
   cd "$PROJECT_DIR" && "${DC[@]}" exec -T "$SERVICE" claude --version 2>/dev/null \
     | grep -oP '[\d.]+' | head -1 || echo "unknown"
@@ -235,6 +254,7 @@ case "$CMD" in
     # macOS system bash), which would break a plain `hermit-docker up`.
     if [ ${#UP_ARGS[@]} -gt 0 ]; then set -- "${UP_ARGS[@]}"; else set --; fi
     _validate_compose
+    _refuse_if_host_tmux_owner
     echo "[hermit] Starting Docker container..."
     # Clear any stale conflict marker from a prior inert boot before starting, so
     # the poll below only trips on a marker THIS boot's entrypoint writes.
@@ -448,6 +468,7 @@ case "$CMD" in
       exit 2
     fi
     _validate_compose
+    _refuse_if_host_tmux_owner
     if [ "${1:-}" = "--build" ]; then
       CC_PIN=$(_running_cc_version)
       if [ -z "$CC_PIN" ] || [ "$CC_PIN" = "unknown" ]; then
@@ -482,6 +503,7 @@ case "$CMD" in
       { echo "[hermit] --cc-only and --plugins-only are mutually exclusive" >&2; exit 2; }
 
     _require_running
+    [ "$PLUGINS_ONLY" = false ] && _refuse_if_host_tmux_owner
 
     # --plugins-only never rebuilds, so a stale baked entrypoint stays stale — warn.
     # In rebuild modes the build below refreshes it, so no warning is needed there.

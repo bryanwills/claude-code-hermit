@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Changed
-- The watchdog runs its checks as one ordered list over a per-tick snapshot, and re-observes the session after a restart. `install`/`uninstall` live in `scripts/hermit-watchdog-install.ts`
+- The watchdog runs its checks as one ordered list over a per-tick snapshot, and ends the tick after any restart. `install`/`uninstall` live in `scripts/hermit-watchdog-install.ts`
 - Doctor's heartbeat and routine-monitor rows and the watchdog's monitor re-arm share the arming verdict. Doctor fails on registration, launch and anchor drift and an anchor that has not fired in over a day; the watchdog re-arms on registration drift as well as stale liveness
 - `proposal-act` keeps its guards, accept steps, defer, dismiss and resolve in `SKILL.md` and reads the accept options and channel re-entry from `branches.md`
 - `spawn-session` launches helpers in the project folder by default, or in another folder with `--cwd <abs-dir>`, and leaves edit isolation to Claude Code's `worktree.bgIsolation`; `--worktree` gives a helper its own worktree from the start
@@ -19,6 +19,8 @@
 - `/hermit-settings show` no longer prints a Compaction row for the unread top-level `compact` block, which is dropped from new configs
 
 ### Fixed
+- `hermit-docker up`, `restart` and `update` refuse to boot the container while the host tmux hermit for the project is running, even when its liveness files are stale; `/docker-setup` stops for the same case. `HERMIT_FORCE_BOOT=1` overrides
+- tmux session checks match the session name exactly, so a live `hermit-foo-2` no longer makes a dead `hermit-foo` look alive
 - `hermit-stop` no longer reports a detached claude, or exits 1, for a hermit it already stopped cleanly
 - Weekly review `total_cost_usd` is the week's spend from the cost log instead of the cost attributed to tasks closed that week, so it no longer reads $0 when no task closed; the attributed figure stays as `avg_task_cost_usd`. The first review after this upgrade compares against a prior week measured on the old basis
 - `heartbeat.every`, `heartbeat.stale_threshold`, `heartbeat.waiting_timeout`, `heartbeat.clean_recheck_cooldown`, `routine_wake_lint.max_windows` and `storage_drift.ignore` are validated instead of accepted silently

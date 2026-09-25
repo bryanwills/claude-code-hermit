@@ -37,13 +37,13 @@ function staleHeartbeat(f: ReturnType<typeof watchdogWorld>) {
   });
 }
 
-test('heartbeat escalation refreshes liveness before the next decision', async () => {
+test('heartbeat escalation stops the tick after the restart', async () => {
   const f = watchdogWorld();
   try {
     staleHeartbeat(f);
     await tick(f.world);
     expect(f.restarts).toEqual(['pane-frozen']);
-    expect(f.signals.checks).toEqual([true, false]);
+    expect(f.signals.checks).toEqual([true]);
     expect(f.keys).toEqual([]);
   } finally { f.cleanup(); }
 });
