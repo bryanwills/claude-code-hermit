@@ -8,7 +8,7 @@ A Home Assistant domain layer for `claude-code-hermit`: skills, subagents, a saf
 - `agents/`: `ha-safety-reviewer`, `ha-automation-builder`, `ha-pattern-analyst`
 - `hooks/mcp-safety-gate.ts` + `hooks.json`: PreToolUse on `mcp__homeassistant__.*`, the whole server namespace; read-only tools are allow-listed inside the gate
 - `bin/ha-agent-lab` + `src/*.ts`: the CLI (REST client, WebSocket client, policy engine, simulation, apply). `src/policy.ts` is shared by the CLI and the hook.
-- `settings.json`: pre-approved permissions for safe CLI and read-only MCP tools
+- Permissions: native asks are installed by hatch via `scripts/native-permissions.ts`
 - `state-templates/CLAUDE-APPEND.md`: block injected into the target project by `hatch`
 - `.claude-plugin/hermit-meta.json`: `required_core_version`, `requires`, `hermit.boot_skill`
 - `SAFETY.md`: the safety model; `docs/cli-reference.md`: command usage examples

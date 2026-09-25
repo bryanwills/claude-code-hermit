@@ -28,7 +28,7 @@ Then run `/claude-code-dev-hermit:hatch` to activate. Edits to skills, hooks, an
 
 ### Prerequisites
 
-- [Claude Code](https://code.claude.com) v2.1.110+
+- [Claude Code](https://code.claude.com) v2.1.274+
 - [claude-code-hermit](https://github.com/gtapps/claude-code-hermit) core, installed in the target project; `/claude-code-dev-hermit:hatch` enforces the required version from `.claude-plugin/hermit-meta.json`
 - Node.js 24+
 

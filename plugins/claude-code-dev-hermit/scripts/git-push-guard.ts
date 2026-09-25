@@ -16,6 +16,10 @@ import { findHermitDir } from './lib/find-hermit-dir';
 
 const MAX_STDIN = 1024 * 1024;
 
+// A real `git [global opts] push` invocation, not a substring like a `git-push-guard` filename.
+// Option values never start with `-`, so each token parses one way (no exponential backtracking).
+const GIT_PUSH_RE = /(?:^|[\s;&|(])git(?:\s+-[\w-]+(?:[=\s][^\s-]\S*)?)*\s+push\b/i;
+
 function loadProtectedBranches(): string[] {
   try {
     const hermitDir = findHermitDir(process.cwd());
@@ -111,7 +115,7 @@ async function main() {
   if (!command) process.exit(0);
 
   if ((process.env.AGENT_HOOK_PROFILE || 'standard').trim().toLowerCase() !== 'strict') {
-    if (/\bgit\b[\s\S]*\bpush\b/.test(command)) {
+    if (GIT_PUSH_RE.test(command)) {
       console.error("[git-push-guard] notice: AGENT_HOOK_PROFILE is not 'strict' — push guard inactive.");
     }
     process.exit(0);
@@ -122,12 +126,12 @@ async function main() {
   }
 
   const subcmds = command.split(/(?:&&|\|\||;|\|)/);
-  if (!subcmds.some(s => /\bgit\b[\s\S]*\bpush\b/.test(s))) process.exit(0);
+  if (!subcmds.some(s => GIT_PUSH_RE.test(s))) process.exit(0);
 
   const branchRegexes = loadProtectedBranches().map(p => ({ pattern: p, rx: branchRegex(p) }));
 
   for (const subcmd of subcmds) {
-    if (!/\bgit\b[\s\S]*\bpush\b/.test(subcmd)) continue;
+    if (!GIT_PUSH_RE.test(subcmd)) continue;
 
     const hasForceWithLease = /(?:^|\s)--force-with-lease\b/.test(subcmd);
     // `-f` may appear inside a stacked short-flag cluster (e.g. `-fu` = force +

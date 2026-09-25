@@ -176,11 +176,12 @@ function policyLiftHint(string $refusal, string $tier, string $method): string
 /**
  * The effective policy.
  *
- * The two .env variables are the real boundary: `Edit(.env)` is denied in
- * settings.json, so only the operator can widen what is reachable.
+ * The two .env variables are the real boundary: hatch installs an `Edit(.env)`
+ * deny into project settings (state-templates/native-permissions.json), so only
+ * the operator can widen what is reachable.
  *
  * The project file is NOT a boundary and must not be described as one.
- * `Edit(.claude-code-hermit/**)` is granted, so an agent can rewrite
+ * Nothing denies edits under `.claude-code-hermit/`, so an agent can rewrite
  * forge-policy.json to `{"deny": []}` at any time. It exists so an operator can
  * write down "never touch production firewall rules from here" and have the CLI
  * remember it — a note the agent will honour, not a wall it cannot climb.

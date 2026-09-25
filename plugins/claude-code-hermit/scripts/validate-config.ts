@@ -508,11 +508,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     if (wd.wedge_floor !== undefined && typeof wd.wedge_floor !== 'string') {
       warnings.push('watchdog.wedge_floor: should be a duration string (e.g. "4h")');
     }
-    if (wd.context_clear_tokens !== undefined && wd.context_clear_tokens !== null) {
-      if (typeof wd.context_clear_tokens !== 'number' || wd.context_clear_tokens < 0) {
-        warnings.push('watchdog.context_clear_tokens: should be a non-negative number or null (0 or null disables)');
-      }
-    }
   }
 
   if (config.budget && typeof config.budget === 'object') {

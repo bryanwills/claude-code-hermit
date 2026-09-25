@@ -51,13 +51,13 @@ type BootMode = 'interactive' | 'tmux';
  * The hook profile a launch gets when nobody has said otherwise.
  *
  * A managed (tmux) hermit runs unattended, so it defaults to `strict` — the
- * tighter setting for the hooks that still read the profile (stop-pipeline,
- * evaluate-session, and the dev hermit's git-push-guard), and it is what a
- * Docker hermit has always had via its compose environment block. An
- * interactive launch stays `standard`: the operator is present. The profile no
- * longer gates any permission rule — the config.json / OPERATOR.md / settings
- * guards are native `permissions.deny` / `permissions.ask` entries seeded once
- * at hatch, and those reach every session regardless of profile.
+ * tighter setting for the hooks that read the profile (the dev hermit's
+ * git-push-guard), and it is what a Docker hermit has always had via its
+ * compose environment block. An interactive launch stays `standard`: the
+ * operator is present. The profile no longer gates any permission rule — the
+ * config.json / OPERATOR.md / settings guards are native `permissions.deny` /
+ * `permissions.ask` entries seeded once at hatch, and those reach every
+ * session regardless of profile.
  */
 function defaultProfileFor(bootMode: BootMode): string {
   return bootMode === 'tmux' ? 'strict' : 'standard';
@@ -220,7 +220,6 @@ const DEFAULT_CONFIG: Json = {
     stale_factor: 2,
     escalate_after: 3,
     operator_grace: '15m',
-    context_clear_tokens: 700000,
   },
   budget: {
     daily_usd: null,

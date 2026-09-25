@@ -60,10 +60,14 @@ describe('en catalog byte-identity (pre-refactor literals)', () => {
   });
 
   test('WATCHDOG lifecycle messages', () => {
-    expect(WATCHDOG.en.restart('08:30', 'it had frozen')).toBe('Attempting to restart your agent at 08:30: it had frozen.');
+    expect(WATCHDOG.en.restart('08:30', 'it had frozen', true)).toBe(
+      'Attempting to restart your agent at 08:30: it had frozen. Its conversation is restored where possible, but work in flight since the last save may not have carried over, so it will re-check its work before continuing.',
+    );
     expect(WATCHDOG.en.restartCauseNotRunning()).toBe("it wasn't running");
     expect(WATCHDOG.en.restartCauseFrozen()).toBe('it had frozen');
-    expect(WATCHDOG.en.wedge('08:30')).toBe("Your agent hasn't responded in a while — checking on it now (08:30).");
+    expect(WATCHDOG.en.wedge('08:30')).toBe(
+      "Your agent hasn't responded in a while — checking on it now (08:30). If it has to be restarted, work in flight may be lost.",
+    );
     expect(WATCHDOG.en.pauseUntilResume('X')).toBe('Your agent is paused (X) until you resume it.');
     expect(WATCHDOG.en.pauseUntilDate('X', 'B')).toBe('Your agent is paused (X) until B.');
     expect(WATCHDOG.en.stallQuestion('08:30')).toBe(

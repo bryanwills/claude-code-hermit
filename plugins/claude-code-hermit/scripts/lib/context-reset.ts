@@ -8,7 +8,7 @@
 // would have bypassed it.
 //
 // What stays OUT of here on purpose: the cost-log idempotence stamps
-// (last_cleared_cost_ts / last_compacted_cost_ts / last_pane_hash_ctx) and
+// (last_compacted_cost_ts / last_pane_hash_compact) and
 // setHygieneEval. Those exist to stop a *threshold-triggered* reset re-firing against
 // the same cost entry; a reset the operator asked for has no cost entry and no
 // threshold, so they are the watchdog's business, not this lib's. Callers also own

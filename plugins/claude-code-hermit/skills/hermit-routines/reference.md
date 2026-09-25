@@ -49,6 +49,8 @@ Routines (config.json):
 
 ### CronCreate fallback details
 
+Besides the Monitor-unavailable hosts named in `SKILL.md`, the fallback applies when the monitor subprocess never produced a liveness tick.
+
 - **Timezone.** CronCreate flow shifts each cron from `config.timezone` to machine-local (CronCreate only knows machine time) at minute granularity — half-hour/45-minute zones (Kolkata, Adelaide, Kathmandu) work. Null `config.timezone` passes through unchanged. Monitor mode needs no shift — `routines.ts due` evaluates directly in `config.timezone`.
 - **DST.** Recomputed every `load`; `heartbeat-restart`'s daily reload self-corrects within 24h. On the transition day, one fallback-mode fire may land at the wrong hour. Inexpressible-after-shift schedules pass through unchanged with a `WARN:` line.
 - **`durable: false`.** CronCreates die with the session; re-registered on every always-on launch.

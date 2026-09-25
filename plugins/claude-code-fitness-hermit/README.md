@@ -56,7 +56,7 @@ Need a different cadence or a new routine? Just ask — hermit sets it up.
 
 ## Quick Start
 
-> **Prerequisites:** [Claude Code](https://code.claude.com) v2.1.172+, a paid Claude plan (Pro, Max, Teams, or Enterprise), Node.js (for `npx` to launch the Strava MCP server), and a [Strava developer app](https://www.strava.com/settings/api) with four OAuth credentials — `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_ACCESS_TOKEN`, `STRAVA_REFRESH_TOKEN` — and scopes `read,activity:read_all,profile:read_all`. The default `read` scope alone is not enough; activity and stream reads will return 401. See the [Strava OAuth guide](https://developers.strava.com/docs/authentication/) for the full flow.
+> **Prerequisites:** [Claude Code](https://code.claude.com) v2.1.274+, a paid Claude plan (Pro, Max, Teams, or Enterprise), Node.js (for `npx` to launch the Strava MCP server), and a [Strava developer app](https://www.strava.com/settings/api) with four OAuth credentials — `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_ACCESS_TOKEN`, `STRAVA_REFRESH_TOKEN` — and scopes `read,activity:read_all,profile:read_all`. The default `read` scope alone is not enough; activity and stream reads will return 401. See the [Strava OAuth guide](https://developers.strava.com/docs/authentication/) for the full flow.
 
 ### 1. Install
 
@@ -129,8 +129,7 @@ claude-code-fitness-hermit (this plugin)
   ├── skills/             hatch, fitness-brief, activity-deep-dive, capture-activity-rpe, set-rpe
   ├── agents/             strava-data-cruncher (Haiku bulk aggregator)
   ├── state-templates/    CLAUDE-APPEND.md + gate scripts (installed by hatch)
-  ├── docs/               knowledge-schema.md
-  └── settings.json       Strava read allow-list, write tools blocked
+  └── docs/               knowledge-schema.md
 
 claude-code-hermit (core, required ≥ 1.3.3)
   └── Session lifecycle, routines, channels, memory, cost tracking
