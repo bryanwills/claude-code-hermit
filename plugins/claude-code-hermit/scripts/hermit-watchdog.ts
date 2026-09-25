@@ -367,11 +367,17 @@ function getPaneHash(sessionName: string, world: World = REAL_WORLD): string | n
 // the composer rendered below it (probed CC 2.1.260), so the footer anchor misses
 // that case; the registry leg covers it.
 const PENDING_OPTION_RE = /❯\s+\S/;
-// A dialog footer must terminate the visible pane. All three spellings are
-// load-bearing: AskUserQuestion and permission prompts end "· Esc to cancel", a
-// wizard step that cannot be cancelled offers only "Enter to continue", and the
-// held-peer-message dialog (CC 2.1.257, captured live) ends on its own last option
-// with no footer line at all — so that option's text is the anchor.
+// A dialog footer must terminate the visible pane. "Esc to cancel" carries every
+// captured dialog with a footer: AskUserQuestion and permission prompts, the CC 2.1.233
+// setup wizard, and the CC 2.1.282 "Teach auto mode about your environment?" offer
+// (whose footer reads "Enter to confirm · Esc to cancel") all end on it. No shipped
+// capture depends on "Enter to continue"; it stays as the hedge for a dialog with no
+// Esc affordance. The held-peer-message dialog (CC 2.1.257, captured live) ends on its
+// own last option with no footer line at all, so that option's text is the anchor; it
+// is live only when an operator sets `crossSessionInbound: hold` in user settings or
+// managed policy; otherwise the launch overlay's `accept` pre-empts it. A stale anchor
+// degrades to the queue-liveness check (3c), which alerts at best 30 minutes late and
+// not at all if the held message expires before notifications go stale.
 const PENDING_FOOTERS = ['Esc to cancel', 'Enter to continue', 'Deliver this message to Claude'];
 
 // Only the pane TAIL counts: a live blocking modal renders at the bottom of the
