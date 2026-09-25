@@ -1,3 +1,4 @@
+import { readSeedPatterns } from './lib/settings/seed-patterns';
 import { isLoggingEnabled } from './lib/channel-log';
 import { markerOnward } from './evolve-plan';
 // Fail-open: a failing check records "fail" in its own entry; the orchestrator
@@ -768,8 +769,7 @@ function checkPermissionRules(p: DoctorPaths = PATHS) {
       return { id, status: 'warn', detail: `cannot judge permission rules: ${unreadable.join(', ')} unparseable` };
     }
 
-    const seeded = readJson(path.join(p.pluginRoot, 'state-templates', 'deny-patterns.json'));
-    const seededAsk: string[] = Array.isArray(seeded.ask) ? seeded.ask : [];
+    const { ask: seededAsk } = readSeedPatterns(p.pluginRoot);
     // A deny in any scope hard-blocks the rule everywhere, so the deny set is
     // the union; the ask side is tracked per file so the fix names the one that
     // actually carries the inert entries.

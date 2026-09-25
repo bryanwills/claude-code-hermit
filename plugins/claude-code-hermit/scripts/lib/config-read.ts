@@ -29,6 +29,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { ESCALATION, OPERATOR_PROFILE, AUTH_MODE, QUALITY_GATE_TIER, BUDGET_ACTION, VOICE_STYLE } from './settings/enums';
 
 type Json = any;
 
@@ -36,35 +37,35 @@ type Json = any;
 // access throughout the codebase; the reader's contract is behavioral.
 export type SettledConfig = Json;
 
-type Spec =
-  | { kind: 'string'; def: string | null }
+export type Spec =
+  | { kind: 'string'; def: string | null; enum?: readonly string[]; pattern?: 'duration' | 'time'; nullable?: boolean }
   | { kind: 'boolean'; def: boolean | null }
-  | { kind: 'number'; def: number | null }
+  | { kind: 'number'; def: number | null; range?: [number, number]; nullable?: boolean }
   | { kind: 'array' }
   | { kind: 'map' }
   | { kind: 'shape'; sub: Record<string, Spec> };
 
-const str = (def: string | null): Spec => ({ kind: 'string', def });
+const str = (def: string | null, facts: Omit<Extract<Spec, { kind: 'string' }>, 'kind' | 'def'> = {}): Spec => ({ kind: 'string', def, nullable: def === null, ...facts });
 const bool = (def: boolean | null): Spec => ({ kind: 'boolean', def });
-const num = (def: number | null): Spec => ({ kind: 'number', def });
+const num = (def: number | null, facts: Omit<Extract<Spec, { kind: 'number' }>, 'kind' | 'def'> = {}): Spec => ({ kind: 'number', def, nullable: def === null, ...facts });
 const arr: Spec = { kind: 'array' };
 const map: Spec = { kind: 'map' };
 const shape = (sub: Record<string, Spec>): Spec => ({ kind: 'shape', sub });
 
 // One row per top-level template key. Adding a key to the template without a
 // row here fails the template-parity test.
-const TABLE: Record<string, Spec> = {
+export const TABLE: Record<string, Spec> = {
   _hermit_versions: map,
   agent_name: str(null),
   language: str(null),
   timezone: str(null),
-  escalation: str('balanced'),
-  operator_profile: str('technical'),
-  voice: shape({ style: str(null), prose: str(null) }),
+  escalation: str('balanced', { enum: ESCALATION }),
+  operator_profile: str('technical', { enum: OPERATOR_PROFILE }),
+  voice: shape({ style: str(null, { enum: VOICE_STYLE }), prose: str(null) }),
   channels: map,
   remote: bool(true),
-  auth_mode: str(null),
-  model: str('sonnet'),
+  auth_mode: str(null, { enum: AUTH_MODE }),
+  model: str('sonnet', { nullable: true }),
   effort: str(null),
   permission_mode: str('auto'),
   tmux_session_name: str('hermit-{project_name}'),
@@ -81,23 +82,17 @@ const TABLE: Record<string, Spec> = {
   shutdown_skill: str(null),
   scheduled_checks: arr, // Session-triggered checks; preserve operator-authored entry fields.
   docker: shape({ packages: arr, recommended_plugins: arr, fleet_mesh: bool(false) }),
-  compact: shape({
-    monitoring_threshold: num(30),
-    monitoring_keep: num(20),
-    summary_threshold: num(30),
-    summary_keep: num(15),
-  }),
-  tasks: shape({ handle_in_dm: bool(false), duties_open_records: bool(true), queue_nudge_minutes: num(60) }),
+  tasks: shape({ handle_in_dm: bool(false), duties_open_records: bool(true), queue_nudge_minutes: num(60, { range: [1, Infinity] }) }),
   heartbeat: shape({
     enabled: bool(true),
-    every: str('30m'),
-    active_hours: shape({ start: str('08:00'), end: str('23:00') }),
-    stale_threshold: str('2h'),
-    waiting_timeout: str(null),
-    clean_recheck_cooldown: str('6h'),
+    every: str('30m', { pattern: 'duration' }),
+    active_hours: shape({ start: str('08:00', { pattern: 'time' }), end: str('23:00', { pattern: 'time' }) }),
+    stale_threshold: str('2h', { pattern: 'duration' }),
+    waiting_timeout: str(null, { pattern: 'duration' }),
+    clean_recheck_cooldown: str('6h', { pattern: 'duration', nullable: true }),
     model: str('haiku'),
   }),
-  quality_gate: shape({ tier: str('budget') }),
+  quality_gate: shape({ tier: str('budget', { enum: QUALITY_GATE_TIER }) }),
   knowledge: shape({
     raw_retention_days: num(14),
     compiled_budget_chars: num(2500),
@@ -112,15 +107,15 @@ const TABLE: Record<string, Spec> = {
     enabled: bool(false),
     scheduler_enabled: bool(true),
     stale_factor: num(2),
-    wedge_floor: str('4h'),
+    wedge_floor: str('4h', { pattern: 'duration' }),
     escalate_after: num(3),
-    operator_grace: str('15m'),
+    operator_grace: str('15m', { pattern: 'duration' }),
   }),
   budget: shape({
     daily_usd: num(null),
     weekly_usd: num(null),
     monthly_usd: num(null),
-    action: str('alert'),
+    action: str('alert', { enum: BUDGET_ACTION }),
   }),
   telemetry_export: shape({
     enabled: bool(false),
@@ -148,10 +143,22 @@ const TABLE: Record<string, Spec> = {
     compact: shape({ enabled: bool(true), min_context_tokens: num(100000), min_interval: str('4h') }),
   }),
   reflection: shape({ graduation_min_sessions: num(1) }),
-  routine_wake_lint: shape({ max_windows: num(6) }),
-  doctor: shape({ routine_cost_floor_usd: num(2) }),
+  routine_wake_lint: shape({ max_windows: num(6, { range: [1, 48] }) }),
+  doctor: shape({ routine_cost_floor_usd: num(2, { range: [0, Infinity] }) }),
   storage_drift: shape({ ignore: arr }),
 };
+
+export function specAt(dotted: string): Spec | undefined {
+  let rows = TABLE;
+  const parts = dotted.split('.');
+  for (const [index, part] of parts.entries()) {
+    const spec = rows[part];
+    if (!spec || index === parts.length - 1) return spec;
+    if (spec.kind !== 'shape') return undefined;
+    rows = spec.sub;
+  }
+  return undefined;
+}
 
 // For the template-parity test.
 export const SETTLED_KEYS = Object.keys(TABLE);

@@ -88,20 +88,20 @@ Pass the **argument name**, not the dotted path — the script looks the path up
 
 | Argument | Config path | Type | Values | Applies |
 |---|---|---|---|---|
-| `name` | `agent_name` | string, nullable | any | immediately |
-| `timezone` | `timezone` | string, nullable | IANA tz | immediately |
-| `escalation` | `escalation` | enum | `conservative` / `balanced` / `autonomous` | immediately |
-| `remote` | `remote` | boolean | yes / no | next `hermit-start` |
-| `auth-mode` | `auth_mode` | enum, nullable | `login` / `token` | run `/claude-code-hermit:relogin` to sign in with the new method |
-| `model` | `model` | string, nullable | passed straight to `--model` | next `hermit-start` |
-| `boot-skill` | `boot_skill` | string, nullable | namespaced skill | next `hermit-start` |
-| `permissions` | `permission_mode` | enum | `auto` / `acceptEdits` / `default` / `plan` / `dontAsk` / `bypassPermissions` | next `hermit-start` (a channel `!permission-mode auto\|acceptEdits\|default` changes the running session without changing this) |
-| `push-notifications` | `push_notifications` | boolean | on / off | immediately |
-| `reflection` | `reflection.graduation_min_sessions` | integer ≥1 | 1 = surface after one session; 2 = require recurrence | next reflect run |
-| `artifact-dashboard` | `artifacts.dashboard` | boolean | on / off | next refresh |
-| `artifact-proposals` | `artifacts.proposals` | boolean | on / off | next refresh |
-| `artifact-weekly-review` | `artifacts.weekly_review` | boolean | on / off | next refresh |
-| `artifact-backend` | `artifacts.backend` | string | `claude`, or a connected MCP server name | next refresh |
+| `name` | `agent_name` | string, nullable | any; any string, or 'none' to clear | immediately |
+| `timezone` | `timezone` | string, nullable | any; IANA tz (UTC, Europe/Lisbon, America/New_York) | immediately |
+| `escalation` | `escalation` | enum | conservative / balanced / autonomous; how much it acts without asking | immediately |
+| `remote` | `remote` | boolean | yes / no; connect from claude.ai/code or phone | next hermit-start |
+| `auth-mode` | `auth_mode` | enum, nullable | login / token; login (claude.ai sign-in, renew ~monthly) or token (long-lived, renew yearly) | run /relogin to sign in with the new method |
+| `model` | `model` | string, nullable | any; model name passed straight to --model, or 'none' for the Claude Code default | next hermit-start |
+| `boot-skill` | `boot_skill` | string, nullable | any; namespaced skill run at always-on launch, or 'none' for /claude-code-hermit:resident-start | next hermit-start |
+| `permissions` | `permission_mode` | enum | auto / acceptEdits / default / plan / dontAsk / bypassPermissions; how much Claude Code asks before acting | next hermit-start |
+| `push-notifications` | `push_notifications` | boolean | yes / no; doorbell when no channel is reachable | immediately |
+| `reflection` | `reflection.graduation_min_sessions` | integer | any; distinct sessions before a pattern becomes a proposal candidate | next reflect run |
+| `artifact-dashboard` | `artifacts.dashboard` | boolean | yes / no; status, proposal queue, weekly evolution | next refresh |
+| `artifact-proposals` | `artifacts.proposals` | boolean | yes / no; full text of open proposals | next refresh |
+| `artifact-weekly-review` | `artifacts.weekly_review` | boolean | yes / no; the compiled weekly report at a stable URL | next refresh |
+| `artifact-backend` | `artifacts.backend` | string | any; 'claude', or the name of a connected MCP artifact server | next refresh |
 
 The enum values, dotted paths, and "applies" notes come from `scripts/lib/settings/registry.ts` — the same module `show` renders from and `validate-config.ts` shares its enums with. When a setting is added, add the row there; this table mirrors it.
 

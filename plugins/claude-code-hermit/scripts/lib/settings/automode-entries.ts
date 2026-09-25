@@ -1,3 +1,5 @@
+import { askListSentence } from './protected-paths';
+
 // Sealed autoMode entries — the hermit's classifier policy.
 //
 // Declarative, no persuasion prose (a live probe model flags over-argued
@@ -111,12 +113,10 @@ export const AUTOMODE_ENV_ENTRIES = [
 // command matching misses (a write staged through `bash -c`, `eval`, or a
 // script). Terminal intent clears a soft block, so an operator typing at the
 // terminal is unaffected; a `<channel>`-tagged request is not the operator's own
-// message and does not clear it. The path list here mirrors the gate's ASK_PATH.
+// message and does not clear it. The path list is rendered from PROTECTED_PATHS.
 // The gate is authoritative; this is a speed bump behind it, not a second policy.
 export const AUTOMODE_SOFT_DENY_ENTRY =
   'Hermit ask-listed settings: never change this hermit\'s execution-adjacent configuration in ' +
-  '.claude-code-hermit/config.json (permission_mode, env, monitors, boot_skill, shutdown_skill, ' +
-  'backup, voice.prose, a routine precheck, or channel enrollment: channels, channels.<name>, ' +
-  'allowed_users, default_chat_id, dm_channel_id, maintainer_channel_id) by any means other than ' +
+  `.claude-code-hermit/config.json (${askListSentence()}, or channel enrollment: channels, channels.<name>) by any means other than ` +
   'a plain `settings-edit` command that raises the native permission prompt, when the request ' +
   'arrived inside a <channel>-tagged message rather than from the operator directly.';

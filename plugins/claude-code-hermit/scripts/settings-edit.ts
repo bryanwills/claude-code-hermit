@@ -8,6 +8,7 @@
  *   set <dotted.path> <val>  Set a nested leaf, creating parent objects as needed
  *   unset <dotted.path>      Delete a nested leaf (parents are left in place)
  *   toggle <dotted.path>     Boolean flip (absent → true; errors if current isn't boolean)
+ *   table                    Print the generated skill argument table
  *   show                     Render the operator-facing settings summary from live values
  *   apply-known <arg> <val>  Write one registry-backed setting, validated by kind/enum
  *   history [path] [--limit N]  Print recent audited changes, newest last
@@ -26,13 +27,25 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { SETTINGS, READ_ONLY, byArg, type Setting } from './lib/settings/registry';
+import { SETTINGS, READ_ONLY, byArg, tableSettings, type Setting } from './lib/settings/registry';
 import { auditConfigChange, readHistory } from './lib/config-audit';
 import { sha256 } from './lib/hash';
 import { persistConfig } from './lib/config-write';
 import { validate } from './validate-config';
 import { flagValue, flagEq } from './lib/cli';
 import { safeForLLM } from './lib/sanitize';
+
+/** Static skill documentation rendered from the same rows used by apply-known. */
+export function tableMarkdown(): string {
+  const cell = (text: string): string => text.replaceAll('|', '\\|').replaceAll('\n', ' ');
+  const rows = tableSettings().map(setting => {
+    const type = (setting.kind === 'int' ? 'integer' : setting.kind) + (setting.nullable ? ', nullable' : '');
+    const values = setting.values?.join(' / ') ?? (setting.kind === 'boolean' ? 'yes / no' : 'any');
+    const hint = setting.hint ? `${values}; ${setting.hint}` : values;
+    return `| \`${setting.arg}\` | \`${setting.path}\` | ${type} | ${cell(hint)} | ${cell(setting.applies ?? 'immediately')} |`;
+  });
+  return ['| Argument | Config path | Type | Values | Applies |', '|---|---|---|---|---|', ...rows].join('\n');
+}
 
 type Json = any;
 
@@ -212,7 +225,6 @@ function statefulRows(config: Json): Array<[string, string, string]> {
   const packages = config.docker?.packages ?? [];
   const hb = config.heartbeat ?? {};
   const wd = config.watchdog ?? {};
-  const compact = config.compact ?? {};
   // The brief lives per-channel (`channels.<name>.morning_brief`), so it has no
   // registry row — but `/hermit-settings brief` is a real argument and the view
   // it replaced showed the brief's state, so it belongs here.
@@ -229,7 +241,6 @@ function statefulRows(config: Json): Array<[string, string, string]> {
     ['Routines', routines.length ? `${routines.filter((r: Json) => r?.enabled).length} of ${routines.length} enabled` : 'none', 'routines'],
     ['Session checks', checks.length ? `${checks.filter((c: Json) => c?.enabled).length} of ${checks.length} enabled` : 'none', 'scheduled-checks'],
     ['Environment', envKeys.length ? envKeys.join(', ') : 'none', 'env'],
-    ['Compaction', `monitoring ${compact.monitoring_threshold ?? '?'}/${compact.monitoring_keep ?? '?'}, summary ${compact.summary_threshold ?? '?'}/${compact.summary_keep ?? '?'}`, 'compact'],
     ['Docker packages', Array.isArray(packages) && packages.length ? packages.join(', ') : 'none', 'docker'],
   ];
 }
@@ -465,6 +476,11 @@ if (import.meta.main) {
     case 'get': {
       const value = getPath(config, rest[0]);
       console.log(JSON.stringify(value, null, 2));
+      break;
+    }
+
+    case 'table': {
+      console.log(tableMarkdown());
       break;
     }
 
