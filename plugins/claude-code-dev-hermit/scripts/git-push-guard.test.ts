@@ -357,6 +357,35 @@ console.log('\nWorktree projection:');
   }
 }
 
+// --- False positives: "git" and "push" appearing inside a filename/argument,
+// never as an actual `git ... push` invocation ---
+console.log('\nFalse positives (no real git push invocation):');
+{
+  const claudeArgs = "claude --bg --worktree tackle-task-prop-301-1790285463 --name tackle-task-prop-301-1790285463 " +
+    "--permission-mode auto --remote-control tackle-task-prop-301-1790285463 --model fable --effort high " +
+    "--append-system-prompt-file /tmp/helper-system-prompt.md " +
+    "'/tackle-task @/tmp/proposals/PROP-301-tech-debt-git-push-guard-222133.md'";
+  assert(
+    'claude --bg command whose only "git"/"push" occurrence is inside a proposal filename is allowed',
+    run(claudeArgs, { AGENT_HOOK_PROFILE: 'strict' }),
+    0
+  );
+}
+{
+  const cpScript = "set -e\ncp /tmp/src/PROP-301-tech-debt-git-push-guard-222133.md /tmp/dst/\necho done";
+  assert(
+    'multi-line script copying a file named with "git-push-guard" is allowed',
+    run(cpScript, { AGENT_HOOK_PROFILE: 'strict' }),
+    0
+  );
+}
+
+{
+  const start = performance.now();
+  run('git' + ' -a'.repeat(40) + ' status', { AGENT_HOOK_PROFILE: 'strict' });
+  assert('many global flags without push resolves fast (no backtracking blowup)', performance.now() - start < 2000 ? 0 : 1, 0);
+}
+
 // --- Summary ---
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
