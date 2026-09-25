@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.18] - 2026-09-25
 
 ### Fixed
 - `git-push-guard` no longer blocks commands where "git" and "push" only appear inside a file path or quoted argument (e.g. a proposal filename containing `git-push-guard`); it now requires an actual `git ... push` invocation.

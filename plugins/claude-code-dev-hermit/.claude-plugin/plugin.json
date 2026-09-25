@@ -1,10 +1,10 @@
 {
   "name": "claude-code-dev-hermit",
-  "version": "0.4.17",
+  "version": "0.4.18",
   "dependencies": [
     {
       "name": "claude-code-hermit",
-      "version": "^1.4.0"
+      "version": "^1.4.6"
     }
   ],
   "description": "Git safeguards, debugging, and merge-conflict resolution for your Hermit.",
