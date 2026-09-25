@@ -3504,7 +3504,7 @@ test.if(isLinux)('a PATH entry with % survives per-target escaping', withHermit(
 // (load is a no-op on an already-loaded label, so re-running install would silently
 // keep the stale plist).
 test('cmdInstall unloads the launchd label before loading it', () => {
-  const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'hermit-watchdog.ts'), 'utf-8');
+  const src = fs.readFileSync(path.join(SCRIPTS_DIR, 'hermit-watchdog-install.ts'), 'utf-8');
   const install = src.slice(src.indexOf('function cmdInstall'), src.indexOf('function cmdUninstall'));
   const unloadIdx = install.indexOf("'unload'");
   const loadIdx = install.indexOf("'load'");
@@ -4653,6 +4653,11 @@ function setupCascade(): Cascade {
   const sent: Array<{ session: string; text: string }> = [];
 
   const world: World = {
+    liveness: { ageSecs: () => null },
+    registry: { resident: () => null },
+    notify: { operator: () => {}, maintainer: () => {} },
+    actions: { restart: async () => {}, nudge: async () => {}, reauth: () => 'idle' },
+    proc: { heartbeatMonitorDead: () => true },
     clock: { nowMs: () => nowMs },
     tmux: {
       alive: () => alive,

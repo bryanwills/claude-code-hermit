@@ -152,6 +152,8 @@ Out-of-session supervisor that detects dead or wedged sessions and restarts them
 **Decision flow (one `run` cycle):**
 0. Stamp `last_run` (current UTC) into `state/watchdog-state.json` — before any gate or early exit, so it records that the scheduler/loop fired the script even when `enabled: false`. `hermit-doctor` reads this as the watchdog liveness signal (stale/missing ⇒ "enabled but not firing" when recovery is on, "scheduler isn't firing" when only hygiene needs the tick).
 
+Pause enforcement runs next, followed by steps 1–2. Telemetry export (with a 5-second wall cap) and state backup follow step 2, before the recovery config gate. These maintenance checks run even when watchdog recovery is disabled.
+
 Steps 1–2 are **scheduler-owned context-hygiene** — the watchdog script runs them unconditionally, before the `enabled` gate at step 3.
 
 1. If standalone clear is enabled, a quiet/age/policy trigger is due, and the safe execution boundary and two-tick pane check pass, send `/clear`.
@@ -166,7 +168,7 @@ Steps 1–2 are **scheduler-owned context-hygiene** — the watchdog script runs
 8a. If the newest assistant record in that same transcript tail is a harness-emitted API failure (`isApiErrorMessage`, model `<synthetic>`) reporting a usage limit or a 529/500 outage → send one deduplicated `api-failure` alert for the episode. Visibility only: nothing is restarted, nudged or suppressed, because the next scheduled wake re-fires on its own once the outage clears. Auth failures are left to step 6a so one event isn't notified twice; the stamp clears when a healthy assistant record supersedes the failure.
 9. If a dialog is pending → exit before any tier that sends keystrokes or restarts the session. A supervision-only (`idle`) session skips step 10's wedge nudge and pane-frozen restart, but still reaches the monitor re-arm in step 11 — a hermit rests at `idle`, so that is where a dead Monitor has to be recovered from.
 10. If the heartbeat is stale and the operator is quiet and the pane is frozen for `escalate_after` cycles → restart. Before that threshold: nudge (`/claude-code-hermit:heartbeat run`). A nudge that went over the inbox socket is re-checked against the registry on the next tick: a resident still `idle` since before the post was written never read it (refused, held, or declined), so that tick types immediately instead of waiting out the throttle window (`socket undelivered` in the event detail).
-11. If heartbeat or routine Monitor liveness is stale, require the safe execution boundary before recovery. A context clear itself never re-arms monitors.
+11. If heartbeat or routine Monitor liveness is stale, require the safe execution boundary before recovery. After a restart, the tick re-observes session liveness before this decision. A context clear itself never re-arms monitors.
 
 Recovery actions and alerts — including context resets, nudges, restarts, re-arms, `stall-question-detected`, `session-wedged`, and `api-failure` — are appended to `state/watchdog-events.jsonl`. Restarts also set `runtime.json.watchdog_restart_reason`; `resident-start` announces the restart to the operator channel. Restarts the watchdog detects resume the conversation when the session id is known, no other restart happened in the previous hour, and the transcript contains a user turn; a restart requested through `hermit-watchdog restart`, such as a login renewal, starts fresh.
 

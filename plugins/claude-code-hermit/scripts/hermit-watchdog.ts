@@ -5,15 +5,11 @@
  * Runs once per scheduler tick (systemd/launchd/cron), decides, acts, exits.
  * Can't hang or leak — the OS scheduler drives recurrence.
  *
- * Decision flow:
- *   1. Config gate    — exit if watchdog.enabled is false
- *   2. Shutdown gate  — exit if operator stopped the session intentionally
- *   3. Dead detection — restart when tmux session is gone
- *   3b. Stall-question detection — notify once when the pane is stuck on an
- *       un-redirectable dialog (native permission prompt, harness prompt)
- *   4. Wedge detection — nudge-then-escalate when heartbeat is stale
- *   5. Monitor re-arm  — re-arm a heartbeat/routine Monitor whose liveness file
- *                        went stale mid-session (any cause), damped per monitor
+ * Decision flow (declared ids, in order):
+ *   pause-escape → standalone-clear → context-compact → telemetry-export → state-backup
+ *   Config/runtime gates and snapshot
+ *   dead-session → auth → stall-question → queue-wedge → api-failure
+ *   → pending-question-stop → heartbeat-wedge → monitor-rearm
  *
  * Step 0e (state backup) sits with the 0a-0d family above the config gate: it is
  * model-free maintenance that must keep running on a hermit that never enabled
@@ -27,9 +23,9 @@
  *        (invoked by .claude-code-hermit/bin/hermit-watchdog run)
  */
 
+import { cmdInstall, cmdUninstall } from './hermit-watchdog-install';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock, pidAlive } from './lib/lockfile';
@@ -38,12 +34,12 @@ import { contextPolicyHash } from './lib/context-policy';
 import { utcISOStamp as utcStamp, currentHHMM, currentHHMMOrUTC, friendlyBoundary, parseDuration as parseDurationMs } from './lib/time';
 import { writeRuntimeJson, readRuntimeJson, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { anchoredPaneTail, nonBlankTail, tmuxSessionAlive, getSessionName as deriveSessionName, sendKeys } from './lib/tmux';
-import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
-import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { paneRootPids, collectTree, verifyTreeExited } from './lib/proc';
+import { residentLiveness, REAL_LIVENESS_DEPS, type LivenessVerdict } from './lib/resident-liveness';
 import { postToSession } from './lib/peer-post';
 import { findResident, type SessionEntry } from './lib/session-registry';
 import { costLogPath, transcriptDirFor } from './lib/cc-compat';
-import { readSettledConfig, readConfigRaw } from './lib/config-read';
+import { readSettledConfig } from './lib/config-read';
 import { evaluateBackupDue } from './lib/backup';
 import { isPaused, pauseReasonLabel } from './lib/pause';
 import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
@@ -62,7 +58,6 @@ import { resolveMaintainerTarget } from './resolve-outbound-channel';
 type Json = any;
 
 const CONFIG_PATH = '.claude-code-hermit/config.json';
-const HEARTBEAT_FILE = path.join(STATE_DIR, '.heartbeat');
 // Paths the decision cascade reaches through World.paths (watchdog-state.json,
 // watchdog-events.jsonl, last-operator-action.json, compact-requested.json) are
 // joined at their use sites off world.paths.stateDir, not pinned here.
@@ -104,6 +99,11 @@ const REAUTH_SKILL_MARKER_MAX_AGE_MS = 2 * 3600000;
  * lib functions the file already used) and whatever a test constructs.
  */
 export type World = {
+  liveness: { ageSecs(): number | null };
+  registry: { resident(runtime: Json): SessionEntry | null };
+  notify: { operator: typeof pushOperatorMessage; maintainer: typeof pushMaintainerOnly };
+  actions: { restart: typeof doRestart; nudge: typeof doNudge; reauth: typeof evaluateReauth };
+  proc: { heartbeatMonitorDead(): boolean };
   clock: { nowMs(): number };
   tmux: { alive(s: string): boolean; capture(s: string): string | null; send(s: string, text: string): void };
   files: { readJson(p: string): Json | null; readText(p: string): string | null; writeJson(p: string, v: Json): void; rm(p: string): void };
@@ -115,6 +115,11 @@ export type World = {
 };
 
 const REAL_WORLD: World = {
+  liveness: { ageSecs: () => REAL_LIVENESS_DEPS().livenessAgeSecs() },
+  registry: { resident: resolveResident },
+  notify: { operator: pushOperatorMessage, maintainer: pushMaintainerOnly },
+  actions: { restart: doRestart, nudge: doNudge, reauth: evaluateReauth },
+  proc: { heartbeatMonitorDead },
   clock: { nowMs: () => Date.now() },
   tmux: {
     alive: (s) => tmuxSessionAlive(s),
@@ -614,9 +619,9 @@ function tryAcquireLifecycleLock(world: World = REAL_WORLD): boolean {
 // --- State readers ---
 
 /** Seconds since last modification, or null if absent. */
-function getFileAgeSecs(p: string): number | null {
+function getFileAgeSecs(p: string, world: World = REAL_WORLD): number | null {
   try {
-    return (Date.now() - fs.statSync(p).mtimeMs) / 1000;
+    return (world.clock.nowMs() - fs.statSync(p).mtimeMs) / 1000;
   } catch {
     return null;
   }
@@ -835,14 +840,14 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
     // this is empty and the restart proceeds unchanged.)
     const tree = collectTree(paneRootPids(sessionName));
     spawnSync('tmux', ['kill-session', '-t', sessionName], { stdio: 'ignore' });
-    const survivors = await terminateSurvivors(tree.pids);
+    const { orphaned, reportedPids } = await verifyTreeExited(tree);
 
-    if (survivors.length > 0 || tree.capped) {
+    if (orphaned) {
       // The old process survived the kill. Spawning a replacement now would
       // recreate the duplicate-instance incident, so abort and alert instead.
       releaseLock(LIFECYCLE_LOCK);
-      appendEvent('restart-aborted', `survivors: ${(survivors.length ? survivors : tree.pids).join(' ')}`);
-      process.stderr.write(`[watchdog] restart aborted — process survived kill: ${survivors.join(' ')}\n`);
+      appendEvent('restart-aborted', `survivors: ${reportedPids.join(' ')}`);
+      process.stderr.write(`[watchdog] restart aborted — process survived kill: ${reportedPids.join(' ')}\n`);
       pushOperatorMessage(composeOrphanMessage(timezone));
       return;
     }
@@ -1255,10 +1260,11 @@ function monitorLivenessStale(
   runtimeData: Json,
   thresholdSecs: number,
   predatesGraceSecs: number = MONITOR_STARTUP_GRACE_SECS,
+  world: World = REAL_WORLD,
 ): boolean {
   const startedAt: string | null =
     runtimeData && typeof runtimeData.started_at === 'string' ? runtimeData.started_at : null;
-  const liveness = readJson(path.join(STATE_DIR, livenessFile));
+  const liveness = world.files.readJson(path.join(world.paths.stateDir, livenessFile));
   const lastPeekAt: string | null =
     liveness && typeof liveness.last_peek_at === 'string' ? liveness.last_peek_at : null;
   return !monitorFreshness(
@@ -1266,7 +1272,7 @@ function monitorLivenessStale(
     lastPeekAt,
     thresholdSecs,
     MONITOR_STARTUP_GRACE_SECS,
-    Date.now(),
+    world.clock.nowMs(),
     predatesGraceSecs,
   ).fresh;
 }
@@ -1279,19 +1285,19 @@ function monitorLivenessStale(
  * mistaken for one that never re-registered. Absent marker or absent stored id →
  * false, falling through to the plain freshness check (see `bootMismatch`).
  */
-function monitorBootStale(runtimeData: Json): boolean {
-  if (!bootMismatch(runtimeData?.boot_id, readBootId(HERMIT_ROOT))) return false;
-  const markerAgeSecs = getFileAgeSecs(path.join(STATE_DIR, '.boot-id'));
+function monitorBootStale(runtimeData: Json, world: World = REAL_WORLD): boolean {
+  if (!bootMismatch(runtimeData?.boot_id, readBootId(world.paths.hermitRoot))) return false;
+  const markerAgeSecs = getFileAgeSecs(path.join(world.paths.stateDir, '.boot-id'), world);
   return markerAgeSecs !== null && markerAgeSecs >= BOOT_GATE_GRACE_SECS;
 }
 
 /** Heartbeat monitor stale? Gated + thresholded exactly as doctor's checkHeartbeat. */
-function heartbeatMonitorStale(config: Json): boolean {
+function heartbeatMonitorStale(config: Json, world: World = REAL_WORLD): boolean {
   const hbCfg = config?.heartbeat;
   if (!hbCfg || typeof hbCfg !== 'object' || Array.isArray(hbCfg) || !hbCfg.enabled) return false;
   const thresholdSecs = 3 * parseDuration(hbCfg.every ?? '30m');
-  const monRt = readJson(path.join(STATE_DIR, 'heartbeat-monitor.runtime.json'));
-  if (monitorBootStale(monRt)) return true;
+  const monRt = world.files.readJson(path.join(world.paths.stateDir, 'heartbeat-monitor.runtime.json'));
+  if (monitorBootStale(monRt, world)) return true;
   // Grace off the registered cadence, not config's: `every` can be edited without a
   // re-arm, and the running loop still polls at the interval it was started with.
   const interval = typeof monRt?.interval === 'number' && monRt.interval > 0
@@ -1302,23 +1308,24 @@ function heartbeatMonitorStale(config: Json): boolean {
     monRt,
     thresholdSecs,
     heartbeatPredatesGraceSecs(interval),
+    world,
   );
 }
 
 /** Routine monitor stale? Gated + thresholded exactly as doctor's checkRoutineMonitor. */
-function routineMonitorStale(config: Json): boolean {
+function routineMonitorStale(config: Json, world: World = REAL_WORLD): boolean {
   const routines = Array.isArray(config?.routines) ? config.routines : [];
   const anyEnabled = routines.some((r: Json) => r && r.enabled === true && r.id !== 'heartbeat-restart');
   if (!anyEnabled) return false;
-  const monRt = readJson(path.join(STATE_DIR, 'routine-monitor.runtime.json'));
+  const monRt = world.files.readJson(path.join(world.paths.stateDir, 'routine-monitor.runtime.json'));
   if (!monRt) return false; // not loaded — resident-start's job, not the watchdog's
   // Boot gate ahead of the fallback bail: croncreate-fallback writes no liveness file,
   // so the boot id is the only evidence its durable:false crons died with that process.
-  if (monitorBootStale(monRt)) return true;
+  if (monitorBootStale(monRt, world)) return true;
   if (monRt.mode === 'croncreate-fallback') return false; // CronCreate fallback (no Monitor)
   const interval = typeof monRt.interval === 'number' && monRt.interval > 0 ? monRt.interval : 60;
   const thresholdSecs = Math.max(10 * interval, 10 * 60);
-  return monitorLivenessStale('routine-monitor-liveness.json', monRt, thresholdSecs);
+  return monitorLivenessStale('routine-monitor-liveness.json', monRt, thresholdSecs, MONITOR_STARTUP_GRACE_SECS, world);
 }
 
 /** Damper open when the given re-arm timestamp is older than MONITOR_REARM_DAMPER_SECS
@@ -1335,63 +1342,63 @@ export function rearmDamperOpen(lastStamp: unknown, world: World = REAL_WORLD): 
  * record-operator-action's INJECTED_EXACT, so neither stamps the operator-activity
  * clock).
  */
-async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: boolean, operatorGraceSecs: number): Promise<void> {
-  const bootId = readBootId(HERMIT_ROOT);
+async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive: boolean, operatorGraceSecs: number, world: World = REAL_WORLD): Promise<void> {
+  const bootId = readBootId(world.paths.hermitRoot);
   for (const [record, liveness] of [
     ['heartbeat-monitor.runtime.json', 'heartbeat-liveness.json'],
     ['routine-monitor.runtime.json', 'routine-monitor-liveness.json'],
   ]) {
-    const monitor = readJson(path.join(STATE_DIR, record));
-    const live = readJson(path.join(STATE_DIR, liveness));
+    const monitor = world.files.readJson(path.join(world.paths.stateDir, record));
+    const live = world.files.readJson(path.join(world.paths.stateDir, liveness));
     if (monitor?.launch !== 'native' || !bootId || monitor.boot_id !== bootId
       || typeof live?.pid !== 'number' || pidAlive(live.pid)) continue;
-    const runtime = readRuntimeJson();
-    const guard = passesLifecycleGuards(runtime ?? {});
-    const boundary = passesExecutionBoundary(HERMIT_ROOT);
+    const runtime = readRuntimeJson(world.paths.stateDir);
+    const guard = passesLifecycleGuards(runtime ?? {}, world);
+    const boundary = passesExecutionBoundary(world.paths.hermitRoot);
     if (guard.ok && boundary.ok) {
-      await doRestart(sessionName, 'monitor-dead', runtime, config.timezone ?? 'UTC');
-      appendEvent('monitor-restart', `${record} supervisor dead`);
+      await world.actions.restart(sessionName, 'monitor-dead', runtime, config.timezone ?? 'UTC');
+      appendEvent('monitor-restart', `${record} supervisor dead`, world);
     } else {
-      appendEvent('monitor-dead-deferred', guard.ok ? (boundary.ok ? 'idle' : boundary.reason) : guard.reason);
+      appendEvent('monitor-dead-deferred', guard.ok ? (boundary.ok ? 'idle' : boundary.reason) : guard.reason, world);
     }
     return;
   }
-  if (isPaused(HERMIT_ROOT).paused) return;               // no injection while paused (mirrors doNudge)
+  if (isPaused(world.paths.hermitRoot).paused) return;               // no injection while paused (mirrors doNudge)
   if (!sessionAlive) return;                              // dead session belongs to the doRestart path
-  const opAge = getOperatorLastActionAgeSecs();
+  const opAge = getOperatorLastActionAgeSecs(world);
   if (opAge !== null && opAge < operatorGraceSecs) return; // operator mid-conversation — back off
 
-  const heartbeatStale = heartbeatMonitorStale(config);
-  const routineStale = routineMonitorStale(config);
+  const heartbeatStale = heartbeatMonitorStale(config, world);
+  const routineStale = routineMonitorStale(config, world);
   if (!heartbeatStale && !routineStale) return;
 
-  const state = readWatchdogState();
+  const state = readWatchdogState(world);
   const lastRearm =
     state.last_monitor_rearm && typeof state.last_monitor_rearm === 'object' && !Array.isArray(state.last_monitor_rearm)
       ? state.last_monitor_rearm
       : {};
 
-  const doHeartbeat = heartbeatStale && rearmDamperOpen(lastRearm.heartbeat);
-  const doRoutines = routineStale && rearmDamperOpen(lastRearm.routines);
+  const doHeartbeat = heartbeatStale && rearmDamperOpen(lastRearm.heartbeat, world);
+  const doRoutines = routineStale && rearmDamperOpen(lastRearm.routines, world);
   if (!doHeartbeat && !doRoutines) return; // stale but still inside the per-monitor damper window
 
-  if (!passesExecutionBoundary(HERMIT_ROOT).ok) return;
+  if (!passesExecutionBoundary(world.paths.hermitRoot).ok) return;
 
   // `load` arms both monitors, so a both-stale pass is one injection: sending
   // `heartbeat start` behind it would load a second skill body only to be told the
   // leg it re-registers is already FRESH. A heartbeat-only staleness still takes the
   // cheaper single-leg skill.
-  if (doRoutines) sendKeys(sessionName, '/claude-code-hermit:hermit-routines load');
-  else if (doHeartbeat) sendKeys(sessionName, '/claude-code-hermit:heartbeat start');
+  if (doRoutines) world.tmux.send(sessionName, '/claude-code-hermit:hermit-routines load');
+  else if (doHeartbeat) world.tmux.send(sessionName, '/claude-code-hermit:heartbeat start');
 
-  const stamp = utcStamp();
+  const stamp = utcStamp(new Date(world.clock.nowMs()));
   if (doHeartbeat) lastRearm.heartbeat = stamp;
   if (doRoutines) lastRearm.routines = stamp;
   state.last_monitor_rearm = lastRearm;
-  writeWatchdogState(state);
+  writeWatchdogState(state, world);
 
   const targets = [doHeartbeat ? 'heartbeat' : null, doRoutines ? 'routine-monitor' : null].filter(Boolean).join('+');
-  appendEvent('monitor-rearm', `${targets} liveness stale`);
+  appendEvent('monitor-rearm', `${targets} liveness stale`, world);
   process.stderr.write(`[watchdog] monitor re-arm "${sessionName}" (${targets})\n`);
 }
 
@@ -1805,37 +1812,67 @@ function maybeEscapePausedSession(timezone: string): void {
 
 // --- Main decision loop ---
 
-async function main(): Promise<void> {
-  if (!fs.existsSync(CONFIG_PATH)) process.exit(0); // absence: not a hermit project
-  const config: Json = readSettledConfig(HERMIT_ROOT); // malformed settles to defaults
+type DecisionResult = 'continue' | 'stop' | 'restarted';
+type Decision<C> = { id: string; run(ctx: C): DecisionResult | Promise<DecisionResult> };
+type TickContext = { world: World; config: Json; timezone: string };
+type Snapshot = {
+  transcriptTail?: string | null;
+  runtime: Json;
+  sessionName: string;
+  liveness: LivenessVerdict;
+  resident: SessionEntry | null;
+  sessionEnvAuth: boolean | null;
+  paneContent: string | null;
+  authLapsed: boolean;
+  envAuthFailing: boolean;
+  registryWaiting: boolean;
+  pendingQuestion: boolean;
+  watchdogCfg: Json;
+  staleFactor: number;
+  escalateAfter: number;
+  operatorGraceSecs: number;
+};
+type RecoveryContext = TickContext & { snap: Snapshot };
 
-  // 0. Liveness stamp — record that the scheduler/loop invoked us, before any gate or
-  // pre-gate handler (which can process.exit(0)). A fresh last_run proves the watchdog
-  // is firing (systemd/launchd/cron or the Docker entrypoint loop); doctor reads it as
-  // the liveness signal. Stamped even when watchdog.enabled is false.
-  const liveness = readWatchdogState();
-  liveness.last_run = utcStamp();
-  liveness.last_check_at = worldStamp(REAL_WORLD);
-  // Surface storage failures before recovery work so the fatal handler can notify.
-  writeFileAtomic(path.join(STATE_DIR, 'watchdog-state.json'), JSON.stringify(liveness, null, 2) + '\n');
+function observeLiveness(world: World, runtime: Json, sessionName: string): LivenessVerdict {
+  return residentLiveness(runtime, sessionName, {
+    tmuxAlive: (name) => world.tmux.alive(name),
+    livenessAgeSecs: () => world.liveness.ageSecs(),
+  });
+}
 
-  // Pause enforcement (PROP-015) — independent of watchdog.enabled; see
-  // maybeEscapePausedSession for why this doesn't wait for the later
-  // config/runtime gates below.
-  const timezone = config.timezone ?? 'UTC';
-  OPERATOR_LOCALE = resolveLocale(config.language); // pins the locale for every compose call below
-  maybeEscapePausedSession(timezone);
+function buildSnapshot({ world, config }: TickContext): Snapshot | null {
+  const watchdogCfg = config?.watchdog ?? {};
+  if (!watchdogCfg || typeof watchdogCfg !== 'object' || Array.isArray(watchdogCfg) || !watchdogCfg.enabled) return null;
+  const runtime = readRuntimeJson(world.paths.stateDir);
+  if (runtime === null) return null;
+  adoptSessionConfigDir(runtime);
+  const sessionEnvAuth = typeof runtime.env_auth === 'boolean' ? runtime.env_auth : null;
+  const resident = world.registry.resident(runtime);
+  if (runtime.shutdown_requested_at || runtime.shutdown_completed_at) return null;
+  if (runtime.runtime_mode === 'interactive') return null;
+  const sessionName = runtime.tmux_session ?? '';
+  if (!sessionName) return null;
+  const liveness = observeLiveness(world, runtime, sessionName);
+  const paneContent = liveness.state === 'alive' ? world.tmux.capture(sessionName) : null;
+  const paneAuthFailure = paneContent !== null && hasLapsedLogin(paneContent);
+  const authLapsed = paneAuthFailure && !envAuthOwnsCredential(sessionEnvAuth);
+  const envAuthFailing = paneAuthFailure && envAuthOwnsCredential(sessionEnvAuth);
+  const registryWaiting = resident?.status === 'waiting' && world.clock.nowMs() - resident.statusUpdatedAt < 24 * 3600 * 1000;
+  const pendingQuestion = (paneContent !== null && hasPendingQuestion(paneContent)) || registryWaiting;
+  return {
+    runtime, sessionName, liveness, resident, sessionEnvAuth, paneContent,
+    authLapsed, envAuthFailing, registryWaiting, pendingQuestion, watchdogCfg,
+    staleFactor: watchdogCfg.stale_factor ?? 2,
+    escalateAfter: watchdogCfg.escalate_after ?? 3,
+    operatorGraceSecs: parseDuration(watchdogCfg.operator_grace ?? '15m'),
+  };
+}
 
-  // 0a. Standalone clear, independent of watchdog.enabled.
-  maybeStandaloneClear(config);
-
-  // 0c. Routine-hygiene compact — independent of watchdog.enabled; runs on any always-on
-  // hermit.
-  if (maybeContextCompact(config) === 'fired') process.exit(0);
-
+async function telemetryExport({ world, config }: TickContext): Promise<DecisionResult> {
   // 0d. Telemetry export — independent of watchdog.enabled, like 0a-0c; opt-in via
   // config.telemetry_export. Self-gates on enabled + interval and always returns
-  // (never process.exit(0)) so it can't skip steps 1-5 below.
+  // (never return 'stop') so it can't skip steps 1-5 below.
   //
   // Wall-capped so a slow/hung endpoint can't delay dead-session recovery (steps
   // 3-5) — recovery is the core promise; telemetry is a best-effort nicety. The
@@ -1848,7 +1885,7 @@ async function main(): Promise<void> {
   const TELEMETRY_WALL_MS = Number(process.env.HERMIT_TELEMETRY_TIMEOUT_MS) || 5000;
   let wallTimer: ReturnType<typeof setTimeout> | undefined;
   const telemetryResult = await Promise.race([
-    runTelemetryExportIfDue(config, HERMIT_ROOT).finally(() => { if (wallTimer) clearTimeout(wallTimer); }),
+    runTelemetryExportIfDue(config, world.paths.hermitRoot).finally(() => { if (wallTimer) clearTimeout(wallTimer); }),
     new Promise<{ ran: boolean; ok?: boolean; detail?: string }>((resolve) => {
       wallTimer = setTimeout(() => resolve({ ran: false, detail: 'deferred (wall-cap)' }), TELEMETRY_WALL_MS);
       // Don't let the cap timer itself hold the process open when telemetry isn't due.
@@ -1856,88 +1893,59 @@ async function main(): Promise<void> {
     }),
   ]);
   if (telemetryResult.ran) {
-    appendEvent('telemetry-export', telemetryResult.ok ? 'success' : (telemetryResult.detail ?? 'failed'));
+    appendEvent('telemetry-export', telemetryResult.ok ? 'success' : (telemetryResult.detail ?? 'failed'), world);
   }
 
-  // 0e. State backup — independent of watchdog.enabled, like 0a-0d; opt-in via
-  // config.backup. Self-gates on the cron cursor and spawns a detached child, so
-  // a slow push can never delay steps 1-6 below.
-  maybeSpawnBackup(config);
+  return 'continue';
+}
 
-  // 1. Config gate
-  const watchdogCfg = config?.watchdog ?? {};
-  if (!watchdogCfg || typeof watchdogCfg !== 'object' || Array.isArray(watchdogCfg) || !watchdogCfg.enabled) {
-    process.exit(0);
-  }
+const MAINTENANCE: Decision<TickContext>[] = [
+  { id: 'pause-escape', run: ({ timezone }) => {
+    maybeEscapePausedSession(timezone);
+    return 'continue';
+  } },
+  { id: 'standalone-clear', run: ({ world, config }) => {
+    maybeStandaloneClear(config, world);
+    return 'continue';
+  } },
+  { id: 'context-compact', run: ({ world, config }) =>
+    maybeContextCompact(config, world) === 'fired' ? 'stop' : 'continue' },
+  { id: 'telemetry-export', run: telemetryExport },
+  { id: 'state-backup', run: ({ config }) => {
+    maybeSpawnBackup(config);
+    return 'continue';
+  } },
+];
 
-  const staleFactor = watchdogCfg.stale_factor ?? 2;
-  const escalateAfter = watchdogCfg.escalate_after ?? 3;
-  const operatorGraceSecs = parseDuration(watchdogCfg.operator_grace ?? '15m');
-
-  const runtime = readRuntimeJson();
-  if (runtime === null) process.exit(0);
-
-  // The session's launch environment, adopted before any auth decision below.
-  adoptSessionConfigDir(runtime);
-  const sessionEnvAuth = typeof runtime.env_auth === 'boolean' ? runtime.env_auth : null;
-  // Read once per tick, AFTER the config dir is adopted (the registry lives
-  // under it) and shared by 3b and step 4.
-  const resident = resolveResident(runtime);
-
-  if (runtime.shutdown_requested_at || runtime.shutdown_completed_at) process.exit(0);
-  if (runtime.runtime_mode === 'interactive') process.exit(0);
-
-  const sessionName = runtime.tmux_session ?? '';
-  if (!sessionName) process.exit(0);
-
-  // 3. Dead-session detection
-  // Deliberately NOT gated on isPaused() (PROP-015): the channel MCP plugin
-  // lives inside the session, so a dead+paused session can't hear "resume" —
-  // restart must stay live. The PreToolUse gate (pause-gate.ts) keeps the
-  // restarted session inert until resumed.
-  //
-  // The verdict is cached: step 3c below asks the identical `tmux has-session` question
-  // about the same session moments later, and nothing in between mutates tmux state
-  // (evaluateReauth only spawns a detached relay, capturePane is a read-only subcommand).
-  // Recomputing it there would spawn tmux twice per tick on the common alive path.
-  let sessionAlive = tmuxSessionAlive(sessionName);
-  if (!sessionAlive) {
-    // A gone tmux session with FRESH shared-state activity is the orphan shape
-    // (process survived, tmux didn't) — restarting would spawn a second claude
-    // beside the live one. Abort and alert instead; only restart when the
-    // signal is stale, i.e. the old process really is dead.
-    const age = sharedLivenessAgeSecs();
-    const ws = readWatchdogState();
-    const looksAlive = age !== null && age < LIVENESS_FRESH_SECS;
-    if (looksAlive && !ws.orphan_notified) {
-      pushOperatorMessage(composeOrphanMessage(timezone));
-      appendEvent('restart-aborted', 'liveness-fresh-no-tmux');
+async function deadSession({ world, timezone, snap }: RecoveryContext): Promise<DecisionResult> {
+  if (snap.liveness.state === 'alive') return 'continue';
+  const ws = readWatchdogState(world);
+  if (snap.liveness.state === 'orphan') {
+    if (!ws.orphan_notified) {
+      world.notify.operator(composeOrphanMessage(timezone));
+      appendEvent('restart-aborted', 'liveness-fresh-no-tmux', world);
       ws.orphan_notified = true;
-      writeWatchdogState(ws);
+      writeWatchdogState(ws, world);
     }
-    if (looksAlive) process.exit(0);
-    if (ws.orphan_notified) {
-      ws.orphan_notified = false;
-      writeWatchdogState(ws);
-    }
-    await doRestart(sessionName, 'dead-process', runtime, timezone);
-    process.exit(0);
+    return 'stop';
   }
+  if (ws.orphan_notified) {
+    ws.orphan_notified = false;
+    writeWatchdogState(ws, world);
+  }
+  await world.actions.restart(snap.sessionName, 'dead-process', snap.runtime, timezone);
+  return 'stop';
+}
 
-  // The pane is read once here and shared by 3a, 3a-bis and 3b. It has to come before
-  // 3a because the pane carries the only signal that a *token* died early — before the
-  // recorded expiry — which 3a now accepts as a trigger.
-  const paneContent = capturePane(sessionName);
-  const authLapsed =
-    paneContent !== null && hasLapsedLogin(paneContent) && !envAuthOwnsCredential(sessionEnvAuth);
-
+async function auth({ world, config, timezone, snap }: RecoveryContext): Promise<DecisionResult> {
+  const { sessionEnvAuth, paneContent, authLapsed, envAuthFailing } = snap;
   // 3a. Re-auth relay — runs after dead-session restart on purpose (see the
   // block comment above evaluateReauth). While a relay is in flight the session
   // can't do useful work, so the nudge/wedge tiers below are suppressed: they'd
   // be noise, and an escalated restart mid-flow would churn the session the
   // relay is about to bounce itself.
-  const reauth = evaluateReauth(config, authLapsed, sessionEnvAuth);
-  if (reauth === 'spawned' || reauth === 'active') process.exit(0);
+  const reauth = world.actions.reauth(config, authLapsed, sessionEnvAuth);
+  if (reauth === 'spawned' || reauth === 'active') return 'stop';
 
   // 3a-bis. The same lapse on a hermit the relay cannot reach — no channel, or one
   // whose send failed. There is no deterministic recovery there: the sign-in link has
@@ -1956,17 +1964,17 @@ async function main(): Promise<void> {
   // ages out after a day, so a lapse nobody has fixed says so again tomorrow rather
   // than going quiet forever.
   if (authLapsed && reauth === 'unreachable') {
-    const ws = readWatchdogState();
+    const ws = readWatchdogState(world);
     const notifiedAt = typeof ws.lapsed_login_notified_at === 'string' ? ws.lapsed_login_notified_at : null;
-    const age = notifiedAt ? ageSecs(notifiedAt) : null;
+    const age = notifiedAt ? ageSecs(notifiedAt, world) : null;
     const stale = age === null || age > 24 * 3600;
     if (stale) {
-      pushOperatorMessage(composeLapsedLoginMessage(timezone));
-      appendEvent('lapsed-login-detected', notifiedAt ? 'still lapsed after 24h' : 'auth failure on pane, no token to mint');
-      ws.lapsed_login_notified_at = worldStamp(REAL_WORLD);
-      writeWatchdogState(ws);
+      world.notify.operator(composeLapsedLoginMessage(timezone));
+      appendEvent('lapsed-login-detected', notifiedAt ? 'still lapsed after 24h' : 'auth failure on pane, no token to mint', world);
+      ws.lapsed_login_notified_at = worldStamp(world);
+      writeWatchdogState(ws, world);
     }
-    process.exit(0);
+    return 'stop';
   }
 
   // 3a-ter. The session's own environment owns the credential (API key, bearer token,
@@ -1979,21 +1987,19 @@ async function main(): Promise<void> {
   // restarted again on the next escalation: a loop that strips the key and never recovers.
   // Suppressing here is the fix, because the credential lives somewhere the hermit cannot
   // reach — runtime.json stamps a path and a boolean, never a secret.
-  const envAuthFailing =
-    paneContent !== null && hasLapsedLogin(paneContent) && envAuthOwnsCredential(sessionEnvAuth);
   if (envAuthFailing) {
-    const ws = readWatchdogState();
+    const ws = readWatchdogState(world);
     const notifiedAt =
       typeof ws.env_auth_failure_notified_at === 'string' ? ws.env_auth_failure_notified_at : null;
-    const age = notifiedAt ? ageSecs(notifiedAt) : null;
+    const age = notifiedAt ? ageSecs(notifiedAt, world) : null;
     if (age === null || age > 24 * 3600) {
-      pushOperatorMessage(composeEnvAuthFailureMessage(timezone));
-      appendEvent('env-auth-failure-detected', notifiedAt ? 'credential still rejected after 24h' : 'auth failure on pane, credential owned by the session env');
-      ws.env_auth_failure_notified_at = worldStamp(REAL_WORLD);
-      writeWatchdogState(ws);
+      world.notify.operator(composeEnvAuthFailureMessage(timezone));
+      appendEvent('env-auth-failure-detected', notifiedAt ? 'credential still rejected after 24h' : 'auth failure on pane, credential owned by the session env', world);
+      ws.env_auth_failure_notified_at = worldStamp(world);
+      writeWatchdogState(ws, world);
     }
     // Unconditional: the exit IS the suppression, whether or not a notice was due.
-    process.exit(0);
+    return 'stop';
   }
 
   // Both recoveries share one state read. This point is reached on every ordinary healthy
@@ -2005,17 +2011,17 @@ async function main(): Promise<void> {
   // no storedLoginUsable() equivalent for a key held in the operator's shell, which the
   // watchdog cannot see even when it is working.
   if (!authLapsed) {
-    const ws = readWatchdogState();
+    const ws = readWatchdogState(world);
     let recovered = false;
     if (paneContent !== null && !hasLapsedLogin(paneContent) && ws.env_auth_failure_notified_at) {
       delete ws.env_auth_failure_notified_at;
-      appendEvent('env-auth-failure-recovered', 'pane no longer shows an auth failure');
+      appendEvent('env-auth-failure-recovered', 'pane no longer shows an auth failure', world);
       recovered = true;
     }
     const loginUsable = storedLoginUsable(defaultConfigDir());
     if (ws.lapsed_login_notified_at && loginUsable) {
       delete ws.lapsed_login_notified_at;
-      appendEvent('lapsed-login-recovered', 'usable stored login present again');
+      appendEvent('lapsed-login-recovered', 'usable stored login present again', world);
       recovered = true;
     }
     // The unreachable stamp is a suppression, so it has to be cleared by the same
@@ -2028,12 +2034,17 @@ async function main(): Promise<void> {
     // where the login file is parked by construction.
     if (reauth === 'idle') {
       try {
-        fs.unlinkSync(RELAY_UNREACHABLE_JSON);
+        world.files.rm(path.join(world.paths.stateDir, 'relay-unreachable.json'));
       } catch {}
     }
-    if (recovered) writeWatchdogState(ws);
+    if (recovered) writeWatchdogState(ws, world);
   }
 
+  return 'continue';
+}
+
+function stallQuestion({ world, timezone, snap }: RecoveryContext): DecisionResult {
+  const { paneContent, registryWaiting, pendingQuestion } = snap;
   // 3b. Stall-question detection (PROP-024) — catches the un-redirectable remainder
   // the AskUserQuestion PreToolUse gate (ask-gate.ts) can't reach: native permission
   // dialogs and harness-rendered prompts below the tool layer. Notify only, once per
@@ -2052,25 +2063,33 @@ async function main(): Promise<void> {
   // the only thing that ever cleared them on an unattended hermit. `statusUpdatedAt`
   // dates the current state, so it is the dialog's own age: honour it for a day,
   // then let that tier reclaim the session.
-  const registryWaiting =
-    resident?.status === 'waiting' && Date.now() - resident.statusUpdatedAt < 24 * 3600 * 1000;
-  const pendingQuestion = (paneContent !== null && hasPendingQuestion(paneContent)) || registryWaiting;
-  {
-    const watchdogState = readWatchdogState();
-    if (pendingQuestion) {
-      if (!watchdogState.stall_question_notified) {
-        const paneTail = paneContent !== null ? nonBlankTail(paneContent, 8) : undefined;
-        pushOperatorMessage(composeStallQuestionMessage(timezone, OPERATOR_LOCALE, paneTail));
-        appendEvent('stall-question-detected', registryWaiting ? 'pending dialog, session alive — via registry' : 'pending dialog on pane, session alive');
-        watchdogState.stall_question_notified = true;
-        writeWatchdogState(watchdogState);
-      }
-    } else if (watchdogState.stall_question_notified) {
-      watchdogState.stall_question_notified = false;
-      writeWatchdogState(watchdogState);
+  const watchdogState = readWatchdogState(world);
+  if (pendingQuestion) {
+    if (!watchdogState.stall_question_notified) {
+      const paneTail = paneContent !== null ? nonBlankTail(paneContent, 8) : undefined;
+      world.notify.operator(composeStallQuestionMessage(timezone, OPERATOR_LOCALE, paneTail));
+      appendEvent('stall-question-detected', registryWaiting ? 'pending dialog, session alive — via registry' : 'pending dialog on pane, session alive', world);
+      watchdogState.stall_question_notified = true;
+      writeWatchdogState(watchdogState, world);
     }
+  } else if (watchdogState.stall_question_notified) {
+    watchdogState.stall_question_notified = false;
+    writeWatchdogState(watchdogState, world);
   }
 
+  return 'continue';
+}
+
+/** Shared evidence, read only if an alive-session alert tier reaches it. */
+function snapshotTranscript(snap: Snapshot, world: World): string | null {
+  if (snap.transcriptTail === undefined) {
+    const id = typeof snap.runtime.cc_session_id === 'string' ? snap.runtime.cc_session_id : null;
+    snap.transcriptTail = readTranscriptTail(id, world);
+  }
+  return snap.transcriptTail;
+}
+
+function queueWedge({ world, timezone, snap }: RecoveryContext): DecisionResult {
   // 3c. Queue-liveness wedge detection — the shape-independent net behind 3b. Whatever
   // holds stdin (a dialog 3b's pane scanner doesn't recognise, a modal from a future CC
   // release), the harness keeps enqueueing monitor notifications it never dequeues.
@@ -2084,27 +2103,34 @@ async function main(): Promise<void> {
   // condition this tier always documented has to actually be tested. 3b needs no equivalent —
   // capturePane returns null on a dead session and the `paneContent !== null` check catches it.
   // Reuses step 3's has-session verdict.
-  if (sessionAlive) {
+  if (snap.liveness.state === 'alive') {
     // `cc_session_id` — the CC transcript UUID that names the .jsonl file.
-    const transcriptId = typeof runtime.cc_session_id === 'string' ? runtime.cc_session_id : null;
-    const tail = readTranscriptTail(transcriptId);
-    const verdict = tail === null ? 'unknown' : classifyQueueTail(tail, Date.now());
-    const watchdogState = readWatchdogState();
+    const tail = snapshotTranscript(snap, world);
+    const verdict = tail === null ? 'unknown' : classifyQueueTail(tail, world.clock.nowMs());
+    const watchdogState = readWatchdogState(world);
     if (verdict === 'wedged') {
       if (!watchdogState.session_wedged_notified) {
-        pushOperatorMessage(composeSessionWedgedMessage(timezone));
-        appendEvent('session-wedged', 'queued notifications not draining, session alive');
+        world.notify.operator(composeSessionWedgedMessage(timezone));
+        appendEvent('session-wedged', 'queued notifications not draining, session alive', world);
         watchdogState.session_wedged_notified = true;
-        writeWatchdogState(watchdogState);
+        writeWatchdogState(watchdogState, world);
       }
     } else if (watchdogState.session_wedged_notified) {
       // Re-arm on ANY non-wedged verdict, 'unknown' included: a restart starts a fresh
       // transcript with no queue records yet, and holding the flag through that would
       // suppress the NEXT genuine wedge — the silent stall this check exists to prevent.
       watchdogState.session_wedged_notified = false;
-      writeWatchdogState(watchdogState);
+      writeWatchdogState(watchdogState, world);
     }
 
+  }
+  return 'continue';
+}
+
+function apiFailure({ world, timezone, snap }: RecoveryContext): DecisionResult {
+  if (snap.liveness.state === 'alive') {
+    const tail = snapshotTranscript(snap, world);
+    const watchdogState = readWatchdogState(world);
     // 3d. Upstream API failure — visibility only, nothing suppressed or restarted.
     // The agent already recovers on its own (heartbeat-monitor.sh's `--peek` poll is
     // read-only, so a failed turn leaves the next wake due), so this exists purely so
@@ -2117,7 +2143,7 @@ async function main(): Promise<void> {
     // rendered text — but only while a session is alive to fire hooks, so the transcript
     // scan stays the source for a dead-session post-mortem and for any episode that
     // predates the stamp.
-    const stamp = readStopFailureStamp();
+    const stamp = readStopFailureStamp(world);
     const stampAt = stamp ? Date.parse(String(stamp.at ?? '')) : NaN;
     const newestRecord = tail === null ? null : newestAssistantRecord(tail);
     // Compared at whole-second granularity: `at` is a localISOStamp (seconds), while a
@@ -2134,10 +2160,10 @@ async function main(): Promise<void> {
     else apiFailure = verdictFromAssistantRecord(newestRecord.rec);
     if (apiFailure) {
       if (!watchdogState.api_failure_notified_at) {
-        pushOperatorMessage(composeApiFailureMessage(apiFailure, timezone));
-        appendEvent('api-failure', apiFailure.kind);
-        watchdogState.api_failure_notified_at = worldStamp(REAL_WORLD);
-        writeWatchdogState(watchdogState);
+        world.notify.operator(composeApiFailureMessage(apiFailure, timezone));
+        appendEvent('api-failure', apiFailure.kind, world);
+        watchdogState.api_failure_notified_at = worldStamp(world);
+        writeWatchdogState(watchdogState, world);
       }
     } else if (tail !== null && watchdogState.api_failure_notified_at) {
       // Re-arm once a newer, healthy assistant record supersedes the failure, so a later
@@ -2146,10 +2172,14 @@ async function main(): Promise<void> {
       // a file that doesn't exist yet, and clearing the stamp there would push a second
       // notice for the same still-active outage on the very next tick.
       delete watchdogState.api_failure_notified_at;
-      writeWatchdogState(watchdogState);
+      writeWatchdogState(watchdogState, world);
     }
   }
 
+  return 'continue';
+}
+
+function pendingQuestionStop({ snap }: RecoveryContext): DecisionResult {
   // A pane stalled on a pending prompt is not a wedge — the operator has just been
   // notified above (once per episode). Stop here: never fall through to the wedge
   // nudge (step 4) or the monitor re-arm (step 5), both of which send keystrokes
@@ -2157,34 +2187,39 @@ async function main(): Promise<void> {
   // (a command string then Enter) would confirm the highlighted default option, or
   // the pane-frozen restart path would kill the session outright — either way
   // auto-answering a decision that is always the operator's to make.
-  if (pendingQuestion) process.exit(0);
+  if (snap.pendingQuestion) return 'stop';
 
+  return 'continue';
+}
+
+async function heartbeatWedge({ world, config, timezone, snap }: RecoveryContext): Promise<DecisionResult> {
+  const { watchdogCfg, staleFactor, escalateAfter, operatorGraceSecs, sessionName, runtime, resident } = snap;
   const heartbeatCfg = config?.heartbeat ?? {};
   const heartbeatIsObj = heartbeatCfg && typeof heartbeatCfg === 'object' && !Array.isArray(heartbeatCfg);
   if (heartbeatIsObj && ('enabled' in heartbeatCfg ? heartbeatCfg.enabled : true)) {
     const activeHours = heartbeatCfg.active_hours;
     const activeHoursIsObj = activeHours && typeof activeHours === 'object' && !Array.isArray(activeHours);
-    if (!activeHoursIsObj || inActiveHours(activeHours, config.timezone ?? 'UTC')) {
+    if (!activeHoursIsObj || inActiveHours(activeHours, config.timezone ?? 'UTC', new Date(world.clock.nowMs()))) {
       const heartbeatEverySecs = parseDuration(heartbeatCfg.every ?? '30m');
       const wedgeFloorSecs = parseDuration(watchdogCfg.wedge_floor ?? WEDGE_FLOOR_DEFAULT);
       const staleThresholdSecs = Math.max(heartbeatEverySecs * staleFactor, wedgeFloorSecs);
 
-      const heartbeatAge = getFileAgeSecs(HEARTBEAT_FILE);
+      const heartbeatAge = getFileAgeSecs(path.join(world.paths.stateDir, '.heartbeat'), world);
       if (heartbeatAge !== null) {
-        const watchdogState = readWatchdogState();
-        const currentPaneHash = getPaneHash(sessionName);
+        const watchdogState = readWatchdogState(world);
+        const currentPaneHash = getPaneHash(sessionName, world);
 
         if (heartbeatAge > staleThresholdSecs) {
           // Operator-recency guard: back off if operator was active recently
-          const opAge = getOperatorLastActionAgeSecs();
+          const opAge = getOperatorLastActionAgeSecs(world);
           if (opAge !== null && opAge < operatorGraceSecs) {
             watchdogState.consecutive_stale = 0;
             watchdogState.last_pane_hash = currentPaneHash;
-            writeWatchdogState(watchdogState);
-            process.exit(0);
+            writeWatchdogState(watchdogState, world);
+            return 'stop';
           }
 
-          const monitorDead = heartbeatMonitorDead();
+          const monitorDead = world.proc.heartbeatMonitorDead();
 
           const prevHash = watchdogState.last_pane_hash;
           const paneFrozen =
@@ -2197,16 +2232,11 @@ async function main(): Promise<void> {
             // accurately; doRestart re-reads state and only adds last_restart_at.
             watchdogState.consecutive_stale = consecutive;
             watchdogState.last_pane_hash = currentPaneHash;
-            writeWatchdogState(watchdogState);
-            await doRestart(sessionName, 'pane-frozen', runtime, timezone);
-            // doRestart kills the tmux session and spawns a detached replacement, so the
-            // verdict cached at step 3c is stale from here on. Step 5 below sends
-            // keys into this pane and guards on it: reusing the pre-restart `true` would
-            // inject slash commands into a killed (or still-booting) session and burn the
-            // per-monitor re-arm damper for 6h on a send that never landed.
-            sessionAlive = tmuxSessionAlive(sessionName);
+            writeWatchdogState(watchdogState, world);
+            await world.actions.restart(sessionName, 'pane-frozen', runtime, timezone);
+            return 'restarted';
           } else {
-            await doNudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs, { inboxSocket: resolveInboxSocket(runtime), resident });
+            await world.actions.nudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs, { inboxSocket: resolveInboxSocket(runtime), resident });
           }
         } else {
           // Heartbeat recovered — reset the episode and re-arm the wedge push so a
@@ -2222,318 +2252,63 @@ async function main(): Promise<void> {
           // probe should try the socket again, not inherit this one's fallback.
           watchdogState.last_nudge_transport = null;
           watchdogState.last_pane_hash = currentPaneHash;
-          writeWatchdogState(watchdogState);
+          writeWatchdogState(watchdogState, world);
           // Flag cleared before the send, as doNudge does: the all-clear push blocks
           // for up to 12s, and a tick killed inside that window would otherwise leave
           // wedge_escalated set and repeat the all-clear on the next tick.
           if (recovered) {
-            pushMaintainerOnly(composeWedgeRecoveredMessage(timezone));
+            world.notify.maintainer(composeWedgeRecoveredMessage(timezone));
           }
           if (hadNudge) {
-            appendEvent('wedge-recovered', 'heartbeat fresh');
+            appendEvent('wedge-recovered', 'heartbeat fresh', world);
           }
         }
       }
     }
   }
 
-  // 5. Liveness-keyed monitor re-arm: recover a heartbeat/routine Monitor that died
-  // mid-session, detected via its stale liveness file — ground truth the monitors
-  // stamp themselves, never a model-issued routine metric.
-  await maybeMonitorRearm(config, sessionName, sessionAlive, operatorGraceSecs);
+  return 'continue';
 }
 
-// --- Install / uninstall ---
+const RECOVERY: Decision<RecoveryContext>[] = [
+  { id: 'dead-session', run: deadSession },
+  { id: 'auth', run: auth },
+  { id: 'stall-question', run: stallQuestion },
+  { id: 'queue-wedge', run: queueWedge },
+  { id: 'api-failure', run: apiFailure },
+  { id: 'pending-question-stop', run: pendingQuestionStop },
+  { id: 'heartbeat-wedge', run: heartbeatWedge },
+  { id: 'monitor-rearm', run: async ({ world, config, snap }): Promise<DecisionResult> => {
+    await maybeMonitorRearm(config, snap.sessionName, snap.liveness.state === 'alive', snap.operatorGraceSecs, world);
+    return 'continue';
+  } },
+];
 
-/** Read tmux session name from config for install commands. */
-function getSessionName(): string {
-  if (!fs.existsSync(CONFIG_PATH)) return 'hermit';
-  return deriveSessionName(readSettledConfig(HERMIT_ROOT));
-}
-
-/** Locate state-templates/watchdog/ relative to this script's plugin root. */
-function findTemplatesDir(): string | null {
-  const candidate = path.resolve(import.meta.dir, '..', 'state-templates', 'watchdog');
-  try {
-    if (fs.statSync(candidate).isDirectory()) return candidate;
-  } catch {}
-  return null;
-}
-
-/**
- * The PATH to bake into generated units.
- *
- * systemd user services, launchd agents and cron all run with an environment
- * that does not carry ~/.bun/bin, so the bare `bun` at the end of the
- * hermit-watchdog shim exits 127 on every tick — silently, forever. Baking a
- * PATH fixes that, but a hardcoded directory list cannot: it varies by OS, by
- * architecture (Intel vs Apple Silicon homebrew prefixes) and by how the
- * operator installed each tool. Snapshotting the installer's own environment is
- * correct by construction — cmdInstall runs under bun in the operator's shell,
- * so process.execPath is exactly the bun being used and process.env.PATH is an
- * environment where claude and tmux resolve too. The restart path needs those:
- * hermit-start's preflight hard-fails without them.
- */
-function resolveUnitPath(): string {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  // Absolute entries only: a relative one (npm/bun script wrappers prepend
-  // `node_modules/.bin`) would resolve against the unit's WorkingDirectory —
-  // the project root — turning a repo-writable dir into a lookup path the
-  // watchdog consults every five minutes.
-  for (const entry of [path.dirname(process.execPath), ...(process.env.PATH ?? '').split(path.delimiter)]) {
-    if (!entry || !path.isAbsolute(entry) || seen.has(entry)) continue;
-    seen.add(entry);
-    out.push(entry);
+export async function tick(world: World): Promise<void> {
+  if (!fs.existsSync(path.join(world.paths.hermitRoot, 'config.json'))) return;
+  const config: Json = readSettledConfig(world.paths.hermitRoot);
+  const liveness = readWatchdogState(world);
+  liveness.last_run = utcStamp(new Date(world.clock.nowMs()));
+  liveness.last_check_at = worldStamp(world);
+  // Keep the prologue's fail-loud storage contract before any recovery work.
+  writeFileAtomic(path.join(world.paths.stateDir, 'watchdog-state.json'), JSON.stringify(liveness, null, 2) + '\n');
+  const timezone = config.timezone ?? 'UTC';
+  OPERATOR_LOCALE = resolveLocale(config.language);
+  const ctx: TickContext = { world, config, timezone };
+  for (const decision of MAINTENANCE) {
+    if (await decision.run(ctx) === 'stop') return;
   }
-  return out.join(path.delimiter);
-}
-
-// One value, three renderers, three escaping grammars. systemd expands
-// %-specifiers in unit files, so a literal percent must be doubled
-// (systemd.unit(5)). cron converts an unescaped % to a newline and feeds
-// everything after it to the command as stdin, truncating the line
-// (crontab(5)). The plist value sits inside an XML <string>. Applied to every
-// substituted value, not just PATH — a project path can carry the same
-// characters.
-const escapeSystemd = (v: string) => v.replaceAll('%', '%%');
-const escapeCron = (v: string) => v.replaceAll('%', '\\%');
-const escapeXml = (v: string) =>
-  v.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-
-function printCronFallback(root: string, unitPath: string): void {
-  // The assignment must sit on the watchdog invocation itself: a shell
-  // assignment prefix applies only to the single command it precedes, and `cd`
-  // is a builtin, so `PATH=... cd x && cmd` leaves cmd on cron's default PATH.
-  const cronLine =
-    `*/5 * * * * cd "${escapeCron(root)}" && PATH="${escapeCron(unitPath)}" ` +
-    `.claude-code-hermit/bin/hermit-watchdog run ` +
-    `2>>.claude-code-hermit/state/watchdog.log`;
-  console.log('[watchdog] Add the following line via `crontab -e`:');
-  console.log(`  ${cronLine}`);
-  // In the Docker container this same fallback prints from the "systemctl not found"
-  // branch, where /docker-setup has already set enabled: true — so only say it when it
-  // is actually false.
-  if (readWatchdogEnabled() === false) console.log(ENABLE_GUIDANCE);
-}
-
-const run = (cmd: string, args: string[]) => spawnSync(cmd, args, { stdio: 'inherit' });
-
-const ENABLE_GUIDANCE =
-  '[watchdog] Restarts stay off until watchdog.enabled is true — enable it via ' +
-  '`/claude-code-hermit:hermit-settings watchdog`.';
-
-/** The settled watchdog.enabled value, or undefined when the project has no config.json. */
-function readWatchdogEnabled(): boolean | undefined {
-  if (!fs.existsSync(CONFIG_PATH)) return undefined;
-  const config: Json = readSettledConfig(HERMIT_ROOT);
-  return config.watchdog?.enabled === true;
-}
-
-/**
- * Flip a watchdog boolean through the audited settings-edit path (validated, logged
- * to the settings ledger — same call /docker-setup makes). Only called from branches
- * that actually registered or removed a timer; the cron fallback prints guidance
- * instead, since flipping there would claim an activation that never happened.
- * Reads the raw on-disk value so a missing key is written rather than treated as
- * already matching the settled default. No-ops when there is no config, or the
- * raw value already matches.
- */
-function setWatchdogConfig(key: 'enabled' | 'scheduler_enabled', value: boolean): void {
-  if (!fs.existsSync(CONFIG_PATH)) return;
-  const raw = readConfigRaw(HERMIT_ROOT);
-  const current = raw?.watchdog?.[key];
-  if (current === value) return;
-  const r = run(process.execPath, [
-    path.join(import.meta.dir, 'settings-edit.ts'),
-    CONFIG_PATH,
-    'set',
-    `watchdog.${key}`,
-    String(value),
-  ]);
-  if (r.status !== 0) {
-    console.log(`[watchdog] Could not write watchdog.${key} to config.json — set it manually.`);
-    process.exitCode = 1;
-    return;
-  }
-  console.log(`[watchdog] ${value ? 'Enabled' : 'Disabled'} watchdog.${key} in config.json.`);
-}
-
-/**
- * After a successful timer registration: stamp scheduler_enabled true, and turn
- * the restart tier on for a *first* registration only. Re-running install is
- * the doctor's own remedy for a stale tick or an unbaked unit PATH, and hygiene-only
- * (`enabled: false` with the timer installed) is a state the doctor reports as ok — so a
- * repair run reports what is off instead of silently switching restarts on.
- */
-function enableAfterInstall(firstRegistration: boolean): void {
-  setWatchdogConfig('scheduler_enabled', true);
-  if (firstRegistration) setWatchdogConfig('enabled', true);
-  else if (readWatchdogEnabled() === false) console.log(ENABLE_GUIDANCE);
-}
-
-/** Platform-dispatching install: systemd (Linux/WSL), launchd (macOS), cron fallback. */
-function cmdInstall(): void {
-  const root = fs.realpathSync(process.cwd());
-  const name = getSessionName();
-  const templates = findTemplatesDir();
-  const unitPath = resolveUnitPath();
-
-  const render = (templateText: string, escape: (v: string) => string) =>
-    templateText
-      .replaceAll('{{NAME}}', escape(name))
-      .replaceAll('{{ROOT}}', escape(root))
-      .replaceAll('{{UNIT_PATH}}', escape(unitPath));
-
-  if (process.platform === 'linux') {
-    if (!Bun.which('systemctl')) {
-      console.log('[watchdog] systemctl not found — systemd is unavailable on this host.');
-      console.log(
-        '[watchdog] In the hermit Docker container the entrypoint already runs the ' +
-          'watchdog on a ~5 min cycle; no install is needed there.'
-      );
-      printCronFallback(root, unitPath);
-      return;
-    }
-
-    const systemdDir = path.join(os.homedir(), '.config', 'systemd', 'user');
-    fs.mkdirSync(systemdDir, { recursive: true });
-    const serviceName = `hermit-watchdog@${name}`;
-    const firstRegistration = !fs.existsSync(path.join(systemdDir, `${serviceName}.timer`));
-
-    let rendered = true;
-    for (const [tplName, outName] of [
-      ['hermit-watchdog@.service', `${serviceName}.service`],
-      ['hermit-watchdog@.timer', `${serviceName}.timer`],
-    ]) {
-      if (templates) {
-        const tpl = fs.readFileSync(path.join(templates, tplName), 'utf-8');
-        fs.writeFileSync(path.join(systemdDir, outName), render(tpl, escapeSystemd));
-      } else {
-        process.stderr.write(`[watchdog] template ${tplName} not found; skipping\n`);
-        rendered = false;
-      }
-    }
-
-    // `systemctl --user` fails routinely over SSH (no user D-Bus session, no lingering).
-    // Reporting an install that did not happen would leave the operator with a config
-    // flag on and nothing behind it.
-    const reloaded = run('systemctl', ['--user', 'daemon-reload']).status === 0;
-    const registered = run('systemctl', ['--user', 'enable', '--now', `${serviceName}.timer`]).status === 0;
-    if (!rendered || !reloaded || !registered) {
-      console.log(`[watchdog] Failed to install systemd user timer: ${serviceName}.timer`);
-      process.exitCode = 1;
-      return;
-    }
-    console.log(`[watchdog] Installed systemd user timer: ${serviceName}.timer`);
-    enableAfterInstall(firstRegistration);
-    console.log('[watchdog] To persist across reboots without a user session: loginctl enable-linger');
-  } else if (process.platform === 'darwin') {
-    const launchAgents = path.join(os.homedir(), 'Library', 'LaunchAgents');
-    fs.mkdirSync(launchAgents, { recursive: true });
-    const label = `com.hermit.watchdog.${name}`;
-    const plistName = `${label}.plist`;
-    const plistPath = path.join(launchAgents, plistName);
-    const firstRegistration = !fs.existsSync(plistPath);
-
-    let plist: string;
-    if (templates) {
-      const tpl = fs.readFileSync(path.join(templates, 'com.hermit.watchdog.plist'), 'utf-8');
-      plist = render(tpl, escapeXml);
-    } else {
-      process.stderr.write('[watchdog] plist template not found; using inline fallback\n');
-      plist = render(
-        '<?xml version="1.0" encoding="UTF-8"?>\n' +
-          '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" ' +
-          '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
-          '<plist version="1.0"><dict>' +
-          '<key>Label</key><string>com.hermit.watchdog.{{NAME}}</string>' +
-          '<key>ProgramArguments</key><array>' +
-          '<string>{{ROOT}}/.claude-code-hermit/bin/hermit-watchdog</string>' +
-          '<string>run</string></array>' +
-          '<key>WorkingDirectory</key><string>{{ROOT}}</string>' +
-          '<key>EnvironmentVariables</key><dict>' +
-          '<key>PATH</key><string>{{UNIT_PATH}}</string>' +
-          '</dict>' +
-          '<key>StartInterval</key><integer>300</integer>' +
-          '<key>RunAtLoad</key><false/>' +
-          '</dict></plist>\n',
-        escapeXml
-      );
-    }
-
-    // Every surviving tmux boot re-runs install, and a watchdog-ordered restart
-    // spawns that boot from inside the tick itself, so an unconditional reload
-    // unloads the LaunchAgent executing the very restart it was told to make,
-    // cutting the tick off mid-notice. A byte-identical render means there is
-    // nothing to re-register, so leave the running job alone.
-    //
-    // Matching content alone is not enough: the write lands before the load, so a
-    // failed load (or an operator's own unload) leaves the file intact with nothing
-    // running, and re-running install is the documented repair for exactly that.
-    // Ask launchctl whether the label is live before skipping, after the cheap
-    // content compare so a drifted plist never pays for the subprocess.
-    const labelLoaded = () => spawnSync('launchctl', ['list', label], { stdio: 'ignore' }).status === 0;
-    if (REAL_WORLD.files.readText(plistPath) === plist && labelLoaded()) {
-      console.log(`[watchdog] LaunchAgent unchanged: ${plistName}`);
-      enableAfterInstall(firstRegistration);
-      return;
-    }
-
-    fs.writeFileSync(plistPath, plist);
-    // load is a no-op when the label is already loaded, so re-running install —
-    // the documented remedy for a bad unit — would silently keep the old plist.
-    // Ignore output: on a first install there is nothing to unload.
-    spawnSync('launchctl', ['unload', plistPath], { stdio: 'ignore' });
-    if (run('launchctl', ['load', plistPath]).status !== 0) {
-      console.log(`[watchdog] Failed to install LaunchAgent: ${plistName}`);
-      process.exitCode = 1;
-      return;
-    }
-    console.log(`[watchdog] Installed LaunchAgent: ${plistName}`);
-    enableAfterInstall(firstRegistration);
-  } else {
-    console.log('[watchdog] systemd and launchd not available on this platform.');
-    printCronFallback(root, unitPath);
+  const snap = buildSnapshot(ctx);
+  if (!snap) return;
+  for (const decision of RECOVERY) {
+    const result = await decision.run({ ...ctx, snap });
+    if (result === 'stop') return;
+    if (result === 'restarted') snap.liveness = observeLiveness(world, snap.runtime, snap.sessionName);
   }
 }
 
-/** Remove the installed OS timer for this project. */
-function cmdUninstall(): void {
-  const name = getSessionName();
-
-  if (process.platform === 'linux') {
-    if (!Bun.which('systemctl')) {
-      console.log('[watchdog] systemctl not found — no systemd timer to remove.');
-      console.log('[watchdog] In Docker the watchdog runs via the entrypoint loop, not an OS timer.');
-      return;
-    }
-
-    const serviceName = `hermit-watchdog@${name}`;
-    run('systemctl', ['--user', 'disable', '--now', `${serviceName}.timer`]);
-    const systemdDir = path.join(os.homedir(), '.config', 'systemd', 'user');
-    for (const suffix of ['.service', '.timer']) {
-      try {
-        fs.unlinkSync(path.join(systemdDir, `${serviceName}${suffix}`));
-      } catch {}
-    }
-    run('systemctl', ['--user', 'daemon-reload']);
-    console.log(`[watchdog] Removed systemd timer: ${serviceName}.timer`);
-    setWatchdogConfig('scheduler_enabled', false);
-    setWatchdogConfig('enabled', false);
-  } else if (process.platform === 'darwin') {
-    const plistName = `com.hermit.watchdog.${name}.plist`;
-    const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', plistName);
-    if (fs.existsSync(plistPath)) {
-      run('launchctl', ['unload', plistPath]);
-      fs.unlinkSync(plistPath);
-    }
-    console.log(`[watchdog] Removed LaunchAgent: ${plistName}`);
-    setWatchdogConfig('scheduler_enabled', false);
-    setWatchdogConfig('enabled', false);
-  } else {
-    console.log('[watchdog] Cron entries must be removed manually with `crontab -e`.');
-  }
+async function main(): Promise<void> {
+  await tick(REAL_WORLD);
 }
 
 /**

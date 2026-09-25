@@ -31,7 +31,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readRuntimeJson } from './lib/runtime';
-import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { residentLiveness, otherRuntimeLive, REAL_LIVENESS_DEPS } from './lib/resident-liveness';
 import { transcriptDirFor, transcriptPathKey } from './lib/cc-compat';
 
 function dockerVersion(): string | null {
@@ -61,9 +61,9 @@ function liveOwner(projectRoot: string, hermitDir: string) {
     const rt = readRuntimeJson(path.join(hermitRoot, 'state')) as Record<string, unknown> | null;
     const mode = rt && typeof rt.runtime_mode === 'string' ? rt.runtime_mode : '';
     if (!mode || mode === 'docker') return null;
-    if (rt?.shutdown_completed_at) return null;
-    const ageSecs = sharedLivenessAgeSecs(hermitRoot);
-    if (ageSecs === null || ageSecs >= LIVENESS_FRESH_SECS) return null;
+    const sessionName = typeof rt?.tmux_session === 'string' ? rt.tmux_session : '';
+    const ageSecs = otherRuntimeLive(residentLiveness(rt, sessionName, REAL_LIVENESS_DEPS(hermitRoot)), 'docker');
+    if (ageSecs === null) return null;
     return { mode, ageSecs: Math.round(ageSecs) };
   } catch {
     return null;

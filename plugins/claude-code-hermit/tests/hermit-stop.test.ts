@@ -342,3 +342,18 @@ describe('hermit-stop contract', () => {
     }
   });
 });
+
+test('cleanly stopped with fresh liveness exits successfully', async () => {
+  const dir = makeDir();
+  try {
+    writeConfig(dir);
+    writeRuntime(dir, { runtime_mode: 'tmux', shutdown_completed_at: new Date().toISOString() });
+    fs.writeFileSync(path.join(dir, '.claude-code-hermit', 'state', 'routine-monitor-liveness.json'), '{}');
+    const { bin } = installFakeTmux(dir, { hasSession: false });
+    const result = await runStop(dir, [], bin);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('No running session');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
