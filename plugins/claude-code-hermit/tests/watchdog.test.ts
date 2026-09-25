@@ -2244,6 +2244,23 @@ test('wizard pane with the pointer on a checkbox row matches', () => {
   expect(hasPendingQuestion(CHECKBOX_ROW_WIZARD_PANE)).toBe(true);
 });
 
+/** The CC 2.1.282 auto-mode offer block, captured live on 2026-09-25 in a session with
+ *  no `autoMode.environment` entries, rendered below the composer (see PENDING_FOOTERS).
+ *  Only the six-line block was recorded, re-indented to match the sibling fixtures. */
+const AUTO_MODE_OFFER_PANE = [
+  '   Teach auto mode about your environment?',
+  '   Auto mode works better when it knows your environment. Takes about a minute.',
+  '   ❯ 1. Yes',
+  '     2. Not now',
+  "     3. Don't show again",
+  '   Enter to confirm · Esc to cancel',
+].join('\n');
+
+test('the CC 2.1.282 auto-mode offer matches, with or without blank rows below it', () => {
+  expect(hasPendingQuestion(AUTO_MODE_OFFER_PANE)).toBe(true);
+  expect(hasPendingQuestion(`${AUTO_MODE_OFFER_PANE}${'\n'.repeat(20)}`)).toBe(true);
+});
+
 test('idle arc + pending dialog → stall-question-detected and one push', withHermit(async (h) => {
   writeConfig(h);
   configureChannel(h);
