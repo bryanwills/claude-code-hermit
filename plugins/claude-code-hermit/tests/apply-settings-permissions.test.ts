@@ -334,7 +334,7 @@ describe('sealed registries', () => {
   test('the routine monitor command uses an absolute state path without shell expansion', () => {
     const arm = fs.readFileSync(path.join(import.meta.dir, '..', 'scripts', 'lib', 'routines', 'arm.ts'), 'utf8');
     expect(arm).toContain("path.resolve(hermitDirArg)");
-    expect(arm).toContain('bash "${ctx.pluginRoot}"/scripts/monitor-supervisor.sh routines "${ctx.hermitDir}"');
+    expect(arm).toContain('bash "${PLUGIN_ROOT}"/scripts/monitor-supervisor.sh routines "${hermitDir}"');
     expect(arm).not.toContain('$PWD');
   });
 

@@ -8,6 +8,8 @@
 //
 // Usage: bun test tests/hooks.contract.test.ts   (from the plugin root)
 
+import { heartbeatCommand, heartbeatInterval } from '../scripts/lib/heartbeat/monitor-cmd';
+import { routineCommand } from '../scripts/lib/routines/arm';
 import { describe, test, expect } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -71,6 +73,19 @@ const DOCTOR_CONFIG =
 function seedDoctor(dir: string, config: string = DOCTOR_CONFIG): void {
   fs.mkdirSync(hermit(dir, 'proposals'), { recursive: true });
   write(hermit(dir, 'config.json'), config);
+}
+
+/** Current registration identity, with explicit timestamps for each liveness case. */
+function seedMonitor(dir: string, leg: 'heartbeat' | 'routine', runtime: Record<string, unknown>): void {
+  const root = hermit(dir);
+  const config = readJson(hermit(dir, 'config.json'));
+  write(hermit(dir, 'state', `${leg}-monitor.runtime.json`), JSON.stringify({
+    interval: leg === 'heartbeat' ? heartbeatInterval(config) : 60,
+    command: leg === 'heartbeat' ? heartbeatCommand(root, config) : routineCommand(root),
+    launch: 'native',
+    started_at: new Date(Date.now() - 24 * 3600_000).toISOString(),
+    ...runtime,
+  }));
 }
 
 /** Run doctor-check against the workdir's hermit dir and return the parsed report. */
@@ -1542,6 +1557,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: enabled + active session + fresh liveness → ok', withDir(async (dir) => {
     seedDoctor(dir);
+    seedMonitor(dir, 'heartbeat', {});
     write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'heartbeat-liveness.json'), `{"last_peek_at":"${new Date().toISOString()}"}`);
     const c = checkById(await doctorReport(dir), 'heartbeat');
@@ -1551,6 +1567,7 @@ describe('doctor-check', () => {
 
   test('doctor-check heartbeat: enabled + active session + stale liveness → fail', withDir(async (dir) => {
     seedDoctor(dir, '{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"every":"2h"},"routines":[]}');
+    seedMonitor(dir, 'heartbeat', {});
     write(hermit(dir, 'state', 'runtime.json'), '{}');
     // 7h ago — well past 3×2h=6h threshold
     const stale = new Date(Date.now() - 7 * 3600 * 1000).toISOString();
@@ -1564,7 +1581,7 @@ describe('doctor-check', () => {
   test('doctor-check heartbeat: active session + liveness missing + recent started_at → ok (warming up)', withDir(async (dir) => {
     seedDoctor(dir);
     write(hermit(dir, 'state', 'runtime.json'), '{}');
-    write(hermit(dir, 'state', 'heartbeat-monitor.runtime.json'), `{"started_at":"${new Date().toISOString()}"}`);
+    seedMonitor(dir, 'heartbeat', { started_at: new Date().toISOString() });
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('ok');
     expect(c.detail).toContain('warming up');
@@ -1574,16 +1591,16 @@ describe('doctor-check', () => {
     seedDoctor(dir, '{"agent_name":"t","language":"en","timezone":"UTC","escalation":"balanced","channels":{},"env":{},"heartbeat":{"enabled":true,"every":"2h"},"routines":[]}');
     write(hermit(dir, 'state', 'runtime.json'), '{}');
     const old = new Date(Date.now() - 7 * 3600 * 1000).toISOString();
-    write(hermit(dir, 'state', 'heartbeat-monitor.runtime.json'), `{"started_at":"${old}"}`);
+    seedMonitor(dir, 'heartbeat', { started_at: old });
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('fail');
     expect(c.detail).toContain('Monitor subprocess spawn');
   }));
 
-  test('doctor-check heartbeat: active session + liveness missing + no started_at → ok (not yet registered)', withDir(async (dir) => {
+  test('doctor-check heartbeat: active session + liveness missing + new registration → ok (warming up)', withDir(async (dir) => {
     seedDoctor(dir);
     write(hermit(dir, 'state', 'runtime.json'), '{}');
-    // No heartbeat-monitor.runtime.json at all
+    seedMonitor(dir, 'heartbeat', { started_at: new Date().toISOString() });
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('ok');
     expect(c.detail).toContain('warming up');
@@ -1597,7 +1614,7 @@ describe('doctor-check', () => {
     const peek = new Date(Date.now() - 4 * 3600 * 1000).toISOString();
     const started = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
     write(hermit(dir, 'state', 'heartbeat-liveness.json'), `{"last_peek_at":"${peek}"}`);
-    write(hermit(dir, 'state', 'heartbeat-monitor.runtime.json'), `{"started_at":"${started}"}`);
+    seedMonitor(dir, 'heartbeat', { started_at: started });
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('fail');
     expect(c.detail).toContain('another registration');
@@ -1610,7 +1627,7 @@ describe('doctor-check', () => {
     // Started 10m ago — well under the 6h stale threshold but past the short
     // startup grace, so a missing first tick is a real blocked spawn.
     const started = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    write(hermit(dir, 'state', 'heartbeat-monitor.runtime.json'), `{"started_at":"${started}"}`);
+    seedMonitor(dir, 'heartbeat', { started_at: started });
     const c = checkById(await doctorReport(dir), 'heartbeat');
     expect(c.status).toBe('fail');
     expect(c.detail).toContain('Monitor subprocess spawn');
@@ -1702,7 +1719,7 @@ describe('doctor-check', () => {
 
   test('doctor-check routine-precheck: fallback mode says gates cost a wake', withDir(async (dir) => {
     seedDoctor(dir, WITH_GATED);
-    write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"croncreate-fallback"}');
+    seedMonitor(dir, 'routine', { mode: 'croncreate-fallback' });
     const c = checkById(await doctorReport(dir), 'routine-precheck');
     expect(c.status).toBe('ok');
     expect(c.detail).toContain('no zero-token skips');
@@ -1728,7 +1745,7 @@ describe('doctor-check', () => {
 
   test('doctor-check routine-monitor: croncreate-fallback mode → ok', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
-    write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"croncreate-fallback"}');
+    seedMonitor(dir, 'routine', { mode: 'croncreate-fallback' });
     const c = checkById(await doctorReport(dir), 'routine-monitor');
     expect(c.status).toBe('ok');
     expect(c.detail).toContain('croncreate-fallback');
@@ -1736,7 +1753,7 @@ describe('doctor-check', () => {
 
   test('doctor-check routine-monitor: enabled + no runtime state → ok', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
-    write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"monitor","interval":60}');
+    seedMonitor(dir, 'routine', { mode: 'monitor', interval: 60 });
     fs.rmSync(hermit(dir, 'state', 'runtime.json'), { force: true });
     const c = checkById(await doctorReport(dir), 'routine-monitor');
     expect(c.status).toBe('ok');
@@ -1744,7 +1761,7 @@ describe('doctor-check', () => {
 
   test('doctor-check routine-monitor: active session + fresh liveness → ok (ticking)', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
-    write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"monitor","interval":60}');
+    seedMonitor(dir, 'routine', { mode: 'monitor', interval: 60 });
     write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'routine-monitor-liveness.json'), `{"last_peek_at":"${new Date().toISOString()}"}`);
     const c = checkById(await doctorReport(dir), 'routine-monitor');
@@ -1754,7 +1771,7 @@ describe('doctor-check', () => {
 
   test('doctor-check routine-monitor: active session + stale liveness → fail', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
-    write(hermit(dir, 'state', 'routine-monitor.runtime.json'), '{"mode":"monitor","interval":60}');
+    seedMonitor(dir, 'routine', { mode: 'monitor', interval: 60 });
     write(hermit(dir, 'state', 'runtime.json'), '{}');
     // threshold = max(10*60s, 10m) = 10m; 15m ago is well past it
     const stale = new Date(Date.now() - 15 * 60 * 1000).toISOString();
@@ -1766,7 +1783,7 @@ describe('doctor-check', () => {
 
   test('doctor-check routine-monitor: liveness missing + recent started_at → ok (warming up)', withDir(async (dir) => {
     seedDoctor(dir, WITH_ROUTINE);
-    write(hermit(dir, 'state', 'routine-monitor.runtime.json'), `{"mode":"monitor","interval":60,"started_at":"${new Date().toISOString()}"}`);
+    seedMonitor(dir, 'routine', { mode: 'monitor', interval: 60, started_at: new Date().toISOString() });
     write(hermit(dir, 'state', 'runtime.json'), '{}');
     const c = checkById(await doctorReport(dir), 'routine-monitor');
     expect(c.status).toBe('ok');
@@ -1777,7 +1794,7 @@ describe('doctor-check', () => {
     seedDoctor(dir, WITH_ROUTINE);
     const peek = new Date(Date.now() - 4 * 60 * 1000).toISOString();
     const started = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-    write(hermit(dir, 'state', 'routine-monitor.runtime.json'), `{"mode":"monitor","interval":60,"started_at":"${started}"}`);
+    seedMonitor(dir, 'routine', { mode: 'monitor', interval: 60, started_at: started });
     write(hermit(dir, 'state', 'runtime.json'), '{}');
     write(hermit(dir, 'state', 'routine-monitor-liveness.json'), `{"last_peek_at":"${peek}"}`);
     const c = checkById(await doctorReport(dir), 'routine-monitor');

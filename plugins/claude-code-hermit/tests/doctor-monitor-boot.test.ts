@@ -2,76 +2,18 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { checkHeartbeat, checkRoutineMonitor, resolvePaths } from '../scripts/doctor-check';
+import { checkHeartbeat, checkRoutineMonitor } from '../scripts/doctor-check';
 import { freshDirFactory } from './helpers/workdir';
 
-const PLUGIN_ROOT = path.resolve(import.meta.dir, '..');
+import { monitorFixture, type FixtureOpts } from './helpers/monitor-fixture';
 const { freshDir, cleanup } = freshDirFactory('doctor-monitor-boot-');
 afterAll(cleanup);
-
-type FixtureOpts = {
-  bootId?: string | null;
-  heartbeatBootId?: string | null;
-  routineBootId?: string | null;
-  routineMode?: string;
-};
 
 function writeJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, JSON.stringify(value));
 }
 
-/** Per-monitor override wins; explicit null omits boot_id entirely; undefined falls back to the shared id. */
-function resolveBootId(specific: string | null | undefined, fallback: string | null | undefined): string | undefined {
-  if (specific !== null && specific !== undefined) return specific;
-  if (specific === undefined && fallback) return fallback;
-  return undefined;
-}
-
-function fixture(opts: FixtureOpts = {}) {
-  const dir = freshDir();
-  const hermitDir = path.join(dir, '.claude-code-hermit');
-  const stateDir = path.join(hermitDir, 'state');
-  fs.mkdirSync(stateDir, { recursive: true });
-
-  writeJson(path.join(hermitDir, 'config.json'), {
-    heartbeat: { enabled: true, every: '30m' },
-    routines: [
-      { id: 'doctor', enabled: true, schedule: '10 9 * * 1', skill: 'claude-code-hermit:hermit-doctor' },
-    ],
-  });
-  writeJson(path.join(stateDir, 'runtime.json'), {
-    version: 1,
-    runtime_mode: 'interactive',
-  });
-
-  const now = new Date().toISOString();
-  const heartbeatRuntime: Record<string, unknown> = {
-    description: 'heartbeat-monitor',
-    started_at: now,
-    interval: 1800,
-  };
-  const heartbeatBootId = resolveBootId(opts.heartbeatBootId, opts.bootId);
-  if (heartbeatBootId !== undefined) heartbeatRuntime.boot_id = heartbeatBootId;
-  writeJson(path.join(stateDir, 'heartbeat-monitor.runtime.json'), heartbeatRuntime);
-  writeJson(path.join(stateDir, 'heartbeat-liveness.json'), { last_peek_at: now });
-
-  const routineRuntime: Record<string, unknown> = {
-    description: 'routine-monitor',
-    mode: opts.routineMode ?? 'monitor',
-    started_at: now,
-    interval: 60,
-  };
-  const routineBootId = resolveBootId(opts.routineBootId, opts.bootId);
-  if (routineBootId !== undefined) routineRuntime.boot_id = routineBootId;
-  writeJson(path.join(stateDir, 'routine-monitor.runtime.json'), routineRuntime);
-  writeJson(path.join(stateDir, 'routine-monitor-liveness.json'), { last_peek_at: now });
-
-  if (opts.bootId) {
-    fs.writeFileSync(path.join(stateDir, '.boot-id'), opts.bootId + '\n');
-  }
-
-  return resolvePaths(hermitDir, PLUGIN_ROOT);
-}
+const fixture = (opts: FixtureOpts = {}) => monitorFixture(freshDir, opts).paths;
 
 describe('doctor monitor boot gate', () => {
   test('a runtime boot_id from a previous boot fails both checks', () => {
@@ -150,8 +92,12 @@ describe('doctor heartbeat startup graces', () => {
 
   function seed(p: ReturnType<typeof fixture>, startedMinsAgo: number, tickMinsAgo: number | null, interval = 1800) {
     writeJson(path.join(p.stateDir, 'heartbeat-monitor.runtime.json'), {
+      ...JSON.parse(fs.readFileSync(path.join(p.stateDir, 'heartbeat-monitor.runtime.json'), 'utf8')),
       description: 'heartbeat-monitor', started_at: minsAgo(startedMinsAgo), interval,
     });
+    const config = JSON.parse(fs.readFileSync(p.configPath, 'utf8'));
+    config.heartbeat.every = `${interval / 60}m`;
+    writeJson(p.configPath, config);
     const liveness = path.join(p.stateDir, 'heartbeat-liveness.json');
     if (tickMinsAgo === null) fs.rmSync(liveness, { force: true });
     else writeJson(liveness, { last_peek_at: minsAgo(tickMinsAgo) });
@@ -182,13 +128,33 @@ describe('doctor heartbeat startup graces', () => {
     expect(r.detail).toContain('spawn likely blocked');
   });
 
-  // `every` can be edited without re-running `start`; the live loop keeps the cadence it
-  // was registered with, so the grace has to follow the registration. Config says 30m
-  // here (grace 31 min), the registration says 2h (grace 121 min) — at 60 min the
-  // registration wins and it is still warming up.
-  test('the grace follows runtime.interval, not config.every', () => {
+  // Keep config and registration aligned so drift does not pre-empt freshness.
+  // A 2h registration has 121 minutes of predates grace and is warming up at 60.
+  test('the predates grace covers the registered 2h interval', () => {
     const p = fixture();
     seed(p, 60, 70, 7200);
     expect(checkHeartbeat(p).status).toBe('ok');
+  });
+});
+
+describe('doctor monitor registration states', () => {
+  test('an explicitly stopped heartbeat is ok, not a missing registration', () => {
+    const p = fixture();
+    writeJson(path.join(p.stateDir, 'heartbeat-monitor.control.json'), { mode: 'stopped' });
+    writeJson(path.join(p.stateDir, 'heartbeat-monitor.runtime.json'), {});
+    const r = checkHeartbeat(p);
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('stopped');
+  });
+
+  test('a routine tick that predates the registration reads warming up, not ticking', () => {
+    const p = fixture();
+    const runtimePath = path.join(p.stateDir, 'routine-monitor.runtime.json');
+    const runtime = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    writeJson(runtimePath, { ...runtime, started_at: new Date(Date.now() - 30_000).toISOString() });
+    writeJson(path.join(p.stateDir, 'routine-monitor-liveness.json'), { last_peek_at: new Date(Date.now() - 60_000).toISOString() });
+    const r = checkRoutineMonitor(p);
+    expect(r.status).toBe('ok');
+    expect(r.detail).toContain('warming up');
   });
 });

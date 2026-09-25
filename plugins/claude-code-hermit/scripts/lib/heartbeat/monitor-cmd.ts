@@ -45,7 +45,7 @@ export function heartbeatInterval(config: Json): number {
   return Math.max(1, Math.round(parseDuration(config?.heartbeat?.every, 30 * 60_000) / 1000));
 }
 
-const PLUGIN_ROOT = path.resolve(import.meta.dir, '../../..');
+export const PLUGIN_ROOT = path.resolve(import.meta.dir, '../../..');
 
 export function heartbeatCommand(hermitDir: string, config: Json): string {
   return `bash "${PLUGIN_ROOT}"/scripts/monitor-supervisor.sh heartbeat "${hermitDir}"`;
