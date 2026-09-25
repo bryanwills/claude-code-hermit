@@ -15,7 +15,8 @@
 // because `show` must render it, but the skill keeps its prose too — changing it
 // retranslates `state/artifact-strings.json`, which no table can express.
 
-import { AUTH_MODE, ESCALATION, PERMISSION_MODE, QUALITY_GATE_TIER, VOICE_STYLE } from './enums';
+import { PERMISSION_MODE } from './enums';
+import { specAt } from '../config-read';
 
 export type Kind = 'string' | 'boolean' | 'enum' | 'int';
 
@@ -39,58 +40,73 @@ export interface Setting {
   tableExempt?: boolean;
 }
 
-export const SETTINGS: readonly Setting[] = [
-  { arg: 'name', path: 'agent_name', kind: 'string', nullable: true, group: 'Identity',
+type SettingRow = Omit<Setting, 'kind' | 'values' | 'nullable'> & { values?: readonly string[] };
+
+const ROWS: readonly SettingRow[] = [
+  { arg: 'name', path: 'agent_name', group: 'Identity',
     label: 'Agent name', hint: "any string, or 'none' to clear" },
-  { arg: 'language', path: 'language', kind: 'string', nullable: true, group: 'Identity',
+  { arg: 'language', path: 'language', group: 'Identity',
     label: 'Language', hint: 'locale code (en, pt, es, fr)', tableExempt: true,
     applies: 'also regenerates the artifact chrome translation table' },
-  { arg: 'timezone', path: 'timezone', kind: 'string', nullable: true, group: 'Identity',
+  { arg: 'timezone', path: 'timezone', group: 'Identity',
     label: 'Timezone', hint: 'IANA tz (UTC, Europe/Lisbon, America/New_York)' },
-  { arg: 'escalation', path: 'escalation', kind: 'enum', values: ESCALATION, group: 'Identity',
+  { arg: 'escalation', path: 'escalation', group: 'Identity',
     label: 'Escalation', hint: 'how much it acts without asking' },
   // `custom` needs voice.prose written first and renders a file, so the skill keeps
   // its own branch — but the row is real: `show` renders it, and `apply-known voice
   // <style>` is how the branch writes a built-in.
-  { arg: 'voice', path: 'voice.style', kind: 'enum', values: VOICE_STYLE, nullable: true,
+  { arg: 'voice', path: 'voice.style',
     group: 'Identity', label: 'Voice', hint: 'how it talks to you', tableExempt: true,
     applies: 'next session (a terminal run renders it now; boot renders it otherwise)' },
 
-  { arg: 'remote', path: 'remote', kind: 'boolean', group: 'Operational',
+  { arg: 'remote', path: 'remote', group: 'Operational',
     label: 'Remote control', hint: 'connect from claude.ai/code or phone',
     applies: 'next hermit-start' },
-  { arg: 'auth-mode', path: 'auth_mode', kind: 'enum', values: AUTH_MODE, nullable: true,
+  { arg: 'auth-mode', path: 'auth_mode',
     group: 'Operational', label: 'Auth method',
     hint: "login (claude.ai sign-in, renew ~monthly) or token (long-lived, renew yearly)",
     applies: 'run /relogin to sign in with the new method' },
-  { arg: 'model', path: 'model', kind: 'string', nullable: true, group: 'Operational',
+  { arg: 'model', path: 'model', group: 'Operational',
     label: 'Model', hint: "model name passed straight to --model, or 'none' for the Claude Code default",
     applies: 'next hermit-start' },
-  { arg: 'boot-skill', path: 'boot_skill', kind: 'string', nullable: true, group: 'Operational',
+  { arg: 'boot-skill', path: 'boot_skill', group: 'Operational',
     label: 'Boot skill', hint: "namespaced skill run at always-on launch, or 'none' for /claude-code-hermit:resident-start",
     applies: 'next hermit-start' },
-  { arg: 'permissions', path: 'permission_mode', kind: 'enum', values: PERMISSION_MODE,
+  { arg: 'permissions', path: 'permission_mode', values: PERMISSION_MODE,
     group: 'Operational', label: 'Permission mode', hint: 'how much Claude Code asks before acting',
     applies: 'next hermit-start' },
-  { arg: 'push-notifications', path: 'push_notifications', kind: 'boolean', group: 'Operational',
+  { arg: 'push-notifications', path: 'push_notifications', group: 'Operational',
     label: 'Push notifications', hint: 'doorbell when no channel is reachable' },
-  { arg: 'quality-gate', path: 'quality_gate.tier', kind: 'enum', values: QUALITY_GATE_TIER,
+  { arg: 'quality-gate', path: 'quality_gate.tier',
     group: 'Operational', label: 'Quality gate', hint: 'cleanup pass after an accepted-proposal build',
     tableExempt: true },
-  { arg: 'reflection', path: 'reflection.graduation_min_sessions', kind: 'int', group: 'Operational',
+  { arg: 'reflection', path: 'reflection.graduation_min_sessions', group: 'Operational',
     label: 'Graduation threshold', hint: 'distinct sessions before a pattern becomes a proposal candidate',
     applies: 'next reflect run' },
 
-  { arg: 'artifact-dashboard', path: 'artifacts.dashboard', kind: 'boolean', group: 'Artifacts',
-    label: 'Dashboard page', hint: 'status, proposal queue, weekly evolution' },
-  { arg: 'artifact-proposals', path: 'artifacts.proposals', kind: 'boolean', group: 'Artifacts',
-    label: 'Proposals page', hint: 'full text of open proposals' },
-  { arg: 'artifact-weekly-review', path: 'artifacts.weekly_review', kind: 'boolean', group: 'Artifacts',
-    label: 'Weekly-review page', hint: 'the compiled weekly report at a stable URL' },
-  { arg: 'artifact-backend', path: 'artifacts.backend', kind: 'string', group: 'Artifacts',
+  { arg: 'artifact-dashboard', path: 'artifacts.dashboard', group: 'Artifacts',
+    label: 'Dashboard page', hint: 'status, proposal queue, weekly evolution',
+    applies: 'next refresh' },
+  { arg: 'artifact-proposals', path: 'artifacts.proposals', group: 'Artifacts',
+    label: 'Proposals page', hint: 'full text of open proposals',
+    applies: 'next refresh' },
+  { arg: 'artifact-weekly-review', path: 'artifacts.weekly_review', group: 'Artifacts',
+    label: 'Weekly-review page', hint: 'the compiled weekly report at a stable URL',
+    applies: 'next refresh' },
+  { arg: 'artifact-backend', path: 'artifacts.backend', group: 'Artifacts',
     label: 'Artifact backend', hint: "'claude', or the name of a connected MCP artifact server",
     applies: 'next refresh' },
 ];
+
+export const SETTINGS: readonly Setting[] = ROWS.map(row => {
+  const spec = specAt(row.path);
+  if (!spec || !['string', 'boolean', 'number'].includes(spec.kind)) {
+    throw new Error(`Setting ${row.arg} must name a scalar config table leaf: ${row.path}`);
+  }
+  const values = row.values ?? (spec.kind === 'string' ? spec.enum : undefined);
+  const kind: Kind = values ? 'enum' : spec.kind === 'number' ? 'int' : spec.kind as 'string' | 'boolean';
+  return { ...row, kind, values, nullable: 'nullable' in spec ? spec.nullable : false };
+});
 
 /** Read-only rows `show` renders but no argument sets. */
 export const READ_ONLY: ReadonlyArray<{ path: string; group: Setting['group']; label: string }> = [

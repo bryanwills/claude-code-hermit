@@ -2,7 +2,7 @@ import { describe, test, expect, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runScript, PLUGIN_ROOT } from './helpers/run';
-import { getPath, setPath, unsetPath, togglePath, renderShow, applyKnown } from '../scripts/settings-edit';
+import { getPath, setPath, unsetPath, togglePath, renderShow, applyKnown, tableMarkdown } from '../scripts/settings-edit';
 import { SETTINGS, tableSettings } from '../scripts/lib/settings/registry';
 import { freshDirFactory } from './helpers/workdir';
 
@@ -239,9 +239,7 @@ describe('settings registry', () => {
     const skill = fs.readFileSync(
       path.join(PLUGIN_ROOT, 'skills', 'hermit-settings', 'SKILL.md'), 'utf8',
     );
-    for (const s of tableSettings()) {
-      expect(skill).toContain(`| \`${s.arg}\` | \`${s.path}\``);
-    }
+    expect(skill.includes(tableMarkdown())).toBe(true);
     // Exempt rows must NOT be in the table — they do more than write one leaf.
     for (const s of SETTINGS.filter(x => x.tableExempt)) {
       expect(skill).not.toContain(`| \`${s.arg}\` | \`${s.path}\``);

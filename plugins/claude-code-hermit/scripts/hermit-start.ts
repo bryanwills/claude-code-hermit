@@ -172,12 +172,6 @@ const DEFAULT_CONFIG: Json = {
     recommended_plugins: [],
     fleet_mesh: false,
   },
-  compact: {
-    monitoring_threshold: 30,
-    monitoring_keep: 20,
-    summary_threshold: 30,
-    summary_keep: 15,
-  },
   tasks: {
     handle_in_dm: false,
     duties_open_records: true,

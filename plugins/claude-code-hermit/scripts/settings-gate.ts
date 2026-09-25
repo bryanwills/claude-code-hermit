@@ -21,6 +21,7 @@ import { getPath } from './settings-edit';
 import { hermitDir } from './lib/cc-compat';
 import { readConfigRaw } from './lib/config-read';
 import { byArg } from './lib/settings/registry';
+import { askPathRegex } from './lib/settings/protected-paths';
 import { runHook } from './lib/hook-input';
 import { isSecretPath } from './lib/config-audit';
 
@@ -33,8 +34,7 @@ const WRITE_VERBS = new Set(['set', 'unset', 'toggle', 'apply-known']);
 const TAKES_VALUE = new Set(['set', 'apply-known']);
 
 /** Static protected subtrees. Parent replacements compare only this content. */
-const ASK_PATH =
-  /^(permission_mode|operator_profile|env|monitors|boot_skill|shutdown_skill|backup|remote|chrome|auth_mode)(\..+)?$|^voice\.prose(\..+)?$|^channels\.primary$|^channels\.[^.]+\.(allowed_users|default_chat_id|dm_channel_id|maintainer_channel_id|isolate_chats|shared_chats|operators|passive_chats|state_dir|marketplace|enabled)(\..+)?$|^telemetry_export\.(enabled|destination|redact_operator_text)(\..+)?$|^artifacts\.(publish_authorized|backend)(\..+)?$|^docker\.(packages|recommended_plugins|fleet_mesh)(\..+)?$|^routines\.\d+\.precheck(_timeout_s)?$/;
+const ASK_PATH = askPathRegex();
 
 /** Only these unprotected parents can replace protected content. */
 const ASK_CONTAINER = /^(voice|channels|telemetry_export|artifacts|docker)$|^channels\.[^.]+$/;

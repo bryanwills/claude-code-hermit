@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import { TABLE, type Spec } from './lib/config-read';
+import { parseDuration } from './lib/time';
 import path from 'node:path';
 import { safeForLLM } from './lib/sanitize';
 import * as ENUM from './lib/settings/enums';
@@ -31,12 +33,7 @@ const REQUIRED_KEYS: Record<string, string[]> = {
 
 // Enum value sets live in lib/settings/enums.ts so this hook and the
 // `/hermit-settings` registry cannot drift apart on what a valid value is.
-const VALID_ESCALATION = ENUM.ESCALATION;
-const VALID_QUALITY_GATE_TIER = ENUM.QUALITY_GATE_TIER;
 const VALID_ROUTINE_MODEL = ENUM.ROUTINE_MODEL;
-const VALID_OPERATOR_PROFILE = ENUM.OPERATOR_PROFILE;
-const VALID_BUDGET_ACTION = ENUM.BUDGET_ACTION;
-const VALID_VOICE_STYLE: readonly string[] = ENUM.VOICE_STYLE;
 const VALID_TELEMETRY_DEST = ENUM.TELEMETRY_DEST;
 const VALID_BACKUP_MODE: readonly string[] = ENUM.BACKUP_MODE;
 const VALID_BACKUP_INCLUDE: readonly string[] = ENUM.BACKUP_INCLUDE;
@@ -112,14 +109,49 @@ function retiredKeyWarning(key: string): string {
   return `${key} is retired and no longer read; run /claude-code-hermit:hermit-evolve to remove it`;
 }
 
+// Warning-only and specialized grammars retain their existing validation below.
+const LEGACY_OWNED = new Set([
+  'context_hygiene', 'heartbeat.model',
+  'heartbeat.enabled', 'watchdog.enabled', 'watchdog.scheduler_enabled', 'watchdog.stale_factor',
+]);
+
+function validateTable(config: Json, rows: Record<string, Spec>, errors: string[], prefix = ''): void {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return;
+  for (const [key, spec] of Object.entries(rows)) {
+    if (!Object.prototype.hasOwnProperty.call(config, key) || config[key] === null) continue;
+    const dotted = prefix ? `${prefix}.${key}` : key;
+    if (LEGACY_OWNED.has(dotted)) continue;
+    const value = config[key];
+    if (spec.kind === 'shape') {
+      validateTable(value, spec.sub, errors, dotted);
+      continue;
+    }
+    if (spec.kind === 'array' || spec.kind === 'map') {
+      const valid = spec.kind === 'array' ? Array.isArray(value) : typeof value === 'object' && !Array.isArray(value);
+      if (!valid) errors.push(`${dotted}: expected ${spec.kind === 'array' ? 'array' : 'object'}, got ${Array.isArray(value) ? 'array' : typeof value}`);
+      continue;
+    }
+    if (typeof value !== spec.kind) {
+      errors.push(`${dotted}: expected ${spec.kind}, got ${typeof value}`);
+      continue;
+    }
+    if (spec.kind === 'string') {
+      if (spec.enum && !spec.enum.includes(value)) errors.push(`${dotted}: "${value}" not in [${spec.enum.join(', ')}]`);
+      if (spec.pattern === 'duration' && Number.isNaN(parseDuration(value, NaN))) errors.push(`${dotted}: must be a duration string (e.g. "30m")`);
+      if (spec.pattern === 'time' && !TIME_RE.test(value)) errors.push(`${dotted}: invalid time "${value}"`);
+    }
+    if (spec.kind === 'number' && spec.range && (!Number.isFinite(value) || value < spec.range[0] || value > spec.range[1])) {
+      errors.push(`${dotted}: must be in [${spec.range.join(', ')}]`);
+    }
+  }
+}
+
 function validate(config: Json): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (config.tasks !== undefined) {
-    if (!config.tasks || typeof config.tasks !== 'object' || Array.isArray(config.tasks)) errors.push('tasks: expected object');
-    else for (const key of ['handle_in_dm', 'duties_open_records']) {
-      if (config.tasks[key] !== undefined && typeof config.tasks[key] !== 'boolean') errors.push(`tasks.${key}: expected boolean`);
-    }
+  validateTable(config, TABLE, errors);
+  if (config.tasks !== undefined && (!config.tasks || typeof config.tasks !== 'object' || Array.isArray(config.tasks))) {
+    errors.push('tasks: expected object');
   }
 
   for (const [key, types] of Object.entries(REQUIRED_KEYS)) {
@@ -134,33 +166,8 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
     }
   }
 
-  if (config.escalation && !VALID_ESCALATION.includes(config.escalation)) {
-    errors.push(`escalation: "${config.escalation}" not in [${VALID_ESCALATION.join(', ')}]`);
-  }
-
-  // Optional (defaults to 'technical' at every consumer when absent), so only
-  // enum-check when present — existing configs without the key stay valid.
-  if (config.operator_profile !== undefined && config.operator_profile !== null) {
-    if (!VALID_OPERATOR_PROFILE.includes(config.operator_profile)) {
-      errors.push(`operator_profile: "${config.operator_profile}" not in [${VALID_OPERATOR_PROFILE.join(', ')}]`);
-    }
-  }
-
   if (config.settings_permissions !== undefined) {
     warnings.push(retiredKeyWarning('settings_permissions'));
-  }
-
-  if (config.remote !== undefined && typeof config.remote !== 'boolean') {
-    errors.push(`remote: expected boolean, got ${typeof config.remote}`);
-  }
-
-  // null/unset is a real state, not a default: it means "nobody has said", which
-  // resolveAuthMode answers from the credential volume. `external` is derived, never
-  // declared, so it is not accepted here.
-  if (config.auth_mode !== undefined && config.auth_mode !== null) {
-    if (config.auth_mode !== 'login' && config.auth_mode !== 'token') {
-      errors.push(`auth_mode: "${config.auth_mode}" not in [login, token]`);
-    }
   }
 
   // permission_mode's valid set is Claude Code's, not the hermit's — hermit-start.ts
@@ -169,12 +176,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
   if (config.permission_mode !== undefined && config.permission_mode !== null) {
     if (typeof config.permission_mode !== 'string') {
       errors.push(`permission_mode: expected string, got ${typeof config.permission_mode}`);
-    }
-  }
-
-  if (config.quality_gate && typeof config.quality_gate === 'object' && config.quality_gate.tier !== undefined) {
-    if (!VALID_QUALITY_GATE_TIER.includes(config.quality_gate.tier)) {
-      errors.push(`quality_gate.tier: "${config.quality_gate.tier}" not in [${VALID_QUALITY_GATE_TIER.join(', ')}]`);
     }
   }
 
@@ -187,13 +188,7 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       errors.push(`voice: expected object, got ${Array.isArray(config.voice) ? 'array' : typeof config.voice}`);
     } else {
       const style = config.voice.style;
-      if (style !== undefined && style !== null && !VALID_VOICE_STYLE.includes(style)) {
-        errors.push(`voice.style: "${style}" not in [${VALID_VOICE_STYLE.join(', ')}]`);
-      }
       const prose = config.voice.prose;
-      if (prose !== undefined && prose !== null && typeof prose !== 'string') {
-        errors.push(`voice.prose: expected string, got ${typeof prose}`);
-      }
       if (style === 'custom' && (typeof prose !== 'string' || prose.trim() === '')) {
         errors.push('voice.style: "custom" needs voice.prose — set the prose first, then the style');
       }
@@ -462,13 +457,8 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
 
   if (config.heartbeat && typeof config.heartbeat === 'object') {
     const hb = config.heartbeat;
-    if (typeof hb.enabled !== 'boolean') {
+    if (hb.enabled !== undefined && typeof hb.enabled !== 'boolean') {
       warnings.push('heartbeat.enabled: should be boolean');
-    }
-    if (hb.active_hours && typeof hb.active_hours === 'object') {
-      const { start, end } = hb.active_hours;
-      if (start && !TIME_RE.test(start)) errors.push(`heartbeat.active_hours.start: invalid time "${start}"`);
-      if (end && !TIME_RE.test(end)) errors.push(`heartbeat.active_hours.end: invalid time "${end}"`);
     }
     if (hb.model !== undefined && hb.model !== null) {
       if (typeof hb.model !== 'string' || !VALID_ROUTINE_MODEL.includes(hb.model)) {
@@ -502,12 +492,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
         errors.push('watchdog.escalate_after: must be a positive integer');
       }
     }
-    if (wd.operator_grace !== undefined && typeof wd.operator_grace !== 'string') {
-      warnings.push('watchdog.operator_grace: should be a duration string (e.g. "15m")');
-    }
-    if (wd.wedge_floor !== undefined && typeof wd.wedge_floor !== 'string') {
-      warnings.push('watchdog.wedge_floor: should be a duration string (e.g. "4h")');
-    }
   }
 
   if (config.budget && typeof config.budget === 'object') {
@@ -518,9 +502,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
           errors.push(`budget.${capKey}: must be a positive number or null (null disables that cap)`);
         }
       }
-    }
-    if (b.action !== undefined && !VALID_BUDGET_ACTION.includes(b.action)) {
-      errors.push(`budget.action: "${b.action}" not in [${VALID_BUDGET_ACTION.join(', ')}]`);
     }
   }
 
@@ -791,7 +772,6 @@ function validate(config: Json): { errors: string[]; warnings: string[] } {
       }
     }
   }
-  if (config.tasks?.queue_nudge_minutes !== undefined && (!Number.isFinite(config.tasks.queue_nudge_minutes) || config.tasks.queue_nudge_minutes <= 0)) errors.push('tasks.queue_nudge_minutes: must be a positive number');
 
   return { errors, warnings };
 }

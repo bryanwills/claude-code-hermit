@@ -7,7 +7,7 @@
 import { describe, test, expect, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { settleConfig, readSettledConfig, configExists, SETTLED_KEYS } from '../scripts/lib/config-read';
+import { settleConfig, readSettledConfig, configExists, SETTLED_KEYS, TABLE, type Spec } from '../scripts/lib/config-read';
 import { validate } from '../scripts/validate-config';
 import { freshDirFactory } from './helpers/workdir';
 
@@ -37,7 +37,7 @@ describe('settleConfig degenerate inputs', () => {
     ['valid custom string kept', { timezone: 'Europe/Lisbon' }, 'timezone', 'Europe/Lisbon'],
     ['empty-string non-nullable scalar -> default', { escalation: '' }, 'escalation', 'balanced'],
     ['wrong-typed boolean -> default', { remote: 'yes' }, 'remote', true],
-    ['NaN number -> default', { compact: { monitoring_threshold: NaN } }, 'compact.monitoring_threshold', 30],
+    ['NaN number -> default', { knowledge: { raw_retention_days: NaN } }, 'knowledge.raw_retention_days', 14],
     ['string where number expected -> default', { context_hygiene: { compact: { min_context_tokens: '100' } } }, 'context_hygiene.compact.min_context_tokens', 100000],
     ['nullable number malformed -> null', { budget: { daily_usd: '5' } }, 'budget.daily_usd', null],
     ['wrong-typed nested block -> default block', { heartbeat: 'yes' }, 'heartbeat.every', '30m'],
@@ -191,6 +191,25 @@ describe('template parity', () => {
       }
     };
     compare(template, defaults, '');
+  });
+});
+
+describe('config reference coverage', () => {
+  test('every table leaf is documented backticked in docs/config-reference.md', () => {
+    const doc = fs.readFileSync(path.join(import.meta.dir, '..', 'docs', 'config-reference.md'), 'utf8');
+    const spans = doc.match(/`[^`\n]+`/g) ?? [];
+    const missing: string[] = [];
+    const walk = (rows: Record<string, Spec>, prefix = ''): void => {
+      for (const [key, spec] of Object.entries(rows)) {
+        if (key === '_hermit_versions') continue;
+        const dotted = prefix ? `${prefix}.${key}` : key;
+        const leaf = new RegExp(`(^|[^A-Za-z0-9_])${key}($|[^A-Za-z0-9_])`);
+        if (!spans.some(span => leaf.test(span))) missing.push(dotted);
+        if (spec.kind === 'shape') walk(spec.sub, dotted);
+      }
+    };
+    walk(TABLE);
+    expect(missing).toEqual([]);
   });
 });
 

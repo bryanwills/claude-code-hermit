@@ -61,6 +61,7 @@ import { channelStateDirKey } from './lib/channel-config';
 import { VOICE_FILE_REL, outputStyleFor } from './lib/voice';
 import { writeFileAtomic } from './lib/md-write';
 import { SEALED_SETTINGS_OPS, TERMINAL_ONLY_SETTINGS_OPS } from './lib/settings/automode-entries';
+import { readSeedPatterns } from './lib/settings/seed-patterns';
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(import.meta.dir, '..');
 
@@ -482,10 +483,7 @@ switch (op) {
       console.error(`deny requires 'standard', 'hardened', or 'ask-only', got: ${profile ?? '(none)'}`);
       process.exit(1);
     }
-    const patternsFile = path.join(PLUGIN_ROOT, 'state-templates', 'deny-patterns.json');
-    const patterns = readJson(patternsFile);
-    const denyEntries: string[] = Array.isArray(patterns.deny) ? patterns.deny : [];
-    const askEntries: string[] = Array.isArray(patterns.ask) ? patterns.ask : [];
+    const { deny: denyEntries, ask: askEntries } = readSeedPatterns(PLUGIN_ROOT);
 
     if (profile === 'ask-only') {
       const existingDeny = new Set<string>(
