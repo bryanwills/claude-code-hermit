@@ -21,7 +21,7 @@ import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { operatorLanguage as resolveOperatorLanguage } from './lib/operator-language';
 import { readSettledConfig } from './lib/config-read';
 import { readMicroProposals } from './lib/micro-proposals-io';
-import { tmuxSessionAlive } from './lib/tmux';
+import { residentLiveness, REAL_LIVENESS_DEPS } from './lib/resident-liveness';
 import { readRuntimeJson, writeRuntimeJson } from './lib/runtime';
 import { findResident, ownsResidentIdentity } from './lib/session-registry';
 import { defaultConfigDir, envAuthPresent } from './lib/setup-token';
@@ -177,7 +177,7 @@ function residentSessionActive(agentDir: string): boolean {
   const tmuxSession = runtime && typeof runtime.tmux_session === 'string' ? runtime.tmux_session : '';
   // Unreadable state or no recorded session → no resident claim, full framing (fail-open).
   if (!tmuxSession) return false;
-  return tmuxSessionAlive(tmuxSession);
+  return residentLiveness(runtime, tmuxSession, REAL_LIVENESS_DEPS(agentDir)).state === 'alive';
 }
 
 // The name a peer must address to reach the resident. `peer_name` is only the

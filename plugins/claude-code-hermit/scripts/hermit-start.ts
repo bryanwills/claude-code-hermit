@@ -22,7 +22,7 @@ import { writeRuntimeJson, readRuntimeJson, readRuntimeState, STATE_DIR, RUNTIME
 import { localISOStamp } from './lib/time';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
 import { AuthMode, claudeStateFile, defaultConfigDir, readTokenValue, resolveAuthMode, TOKEN_ENV_VAR } from './lib/setup-token';
-import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { residentLiveness, otherRuntimeLive, REAL_LIVENESS_DEPS } from './lib/resident-liveness';
 import { isContainer } from './lib/container';
 import { pyTruthy, isDict, iterChannelConfigs, getEnabledChannels, channelStateDirKey } from './lib/channel-config';
 import { cmpSemver } from './lib/semver';
@@ -468,7 +468,8 @@ function checkStaleRuntime(config: Json, sessionName: string): void {
     if (mode === 'tmux' || mode === 'docker') {
       // Check if the tmux session from the previous run still exists
       const prevTmux = 'tmux_session' in runtime ? runtime.tmux_session : '';
-      if (!tmuxSessionAlive(prevTmux)) {
+      const verdict = residentLiveness(runtime, prevTmux, REAL_LIVENESS_DEPS());
+      if (verdict.state === 'dead' || verdict.state === 'orphan') {
         console.log(
           `[hermit] Warning: Previous session crashed (tmux session "${prevTmux}" is gone).`,
         );
@@ -1307,17 +1308,13 @@ export function shouldRefuseBoot(bootMode: BootMode): string[] | null {
     ];
   }
   const rt = readRuntimeJson();
-  if (rt && rt.runtime_mode && rt.runtime_mode !== bootMode) {
-    // A cleanly-stopped instance is definitively dead; its frozen runtime_mode
-    // and not-yet-aged liveness file do not prove it is still running.
-    const cleanlyStopped = Boolean(rt.shutdown_completed_at);
-    const age = sharedLivenessAgeSecs();
-    if (!cleanlyStopped && age !== null && age < LIVENESS_FRESH_SECS) {
-      return [
-        `A ${rt.runtime_mode} instance appears to be alive for this project (state activity ${Math.round(age)}s ago).`,
-        'Stop it first (bin/hermit-stop or hermit-docker down), or override with HERMIT_FORCE_BOOT=1.',
-      ];
-    }
+  const verdict = residentLiveness(rt, rt?.tmux_session ?? '', REAL_LIVENESS_DEPS());
+  const age = otherRuntimeLive(verdict, bootMode);
+  if (age !== null) {
+    return [
+      `A ${rt!.runtime_mode} instance appears to be alive for this project (state activity ${Math.round(age)}s ago).`,
+      'Stop it first (bin/hermit-stop or hermit-docker down), or override with HERMIT_FORCE_BOOT=1.',
+    ];
   }
   return null;
 }

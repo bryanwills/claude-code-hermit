@@ -21,6 +21,11 @@ function fixture() {
   fs.mkdirSync(path.dirname(log), { recursive: true });
   fs.writeFileSync(log, JSON.stringify({ cc_session_id: 'resident', max_prompt_tokens: 100000 }) + '\n');
   const world: World = {
+    liveness: { ageSecs: () => null },
+    registry: { resident: () => null },
+    notify: { operator: () => {}, maintainer: () => {} },
+    actions: { restart: async () => {}, nudge: async () => {}, reauth: () => 'idle' },
+    proc: { heartbeatMonitorDead: () => true },
     clock: { nowMs: () => now },
     tmux: { alive: () => true, capture: () => pane, send: (_, text) => { sent.push(text); } },
     files: {

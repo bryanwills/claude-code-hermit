@@ -19,8 +19,8 @@ import { auditConfigChange } from './lib/config-audit';
 import { localISOStamp } from './lib/time';
 import { readRuntimeJson, updateRuntimeField, STATE_DIR, LIFECYCLE_LOCK } from './lib/runtime';
 import { tmuxSessionAlive, getSessionName } from './lib/tmux';
-import { paneRootPids, collectTree, terminateSurvivors } from './lib/proc';
-import { sharedLivenessAgeSecs, LIVENESS_FRESH_SECS } from './lib/liveness';
+import { paneRootPids, collectTree, verifyTreeExited } from './lib/proc';
+import { residentLiveness, REAL_LIVENESS_DEPS } from './lib/resident-liveness';
 
 type Json = any;
 
@@ -94,13 +94,6 @@ function warnSurvivors(pids: number[]): void {
   console.log(`[hermit] A claude process may still be running. Verify and finish manually: kill -9 ${pids.join(' ')}`);
 }
 
-/** Verify a captured pane tree died; a capped snapshot reads as unverified == orphaned. */
-async function verifyTreeExited(tree: { pids: number[]; capped: boolean }): Promise<{ orphaned: boolean; reportedPids: number[] }> {
-  const survivors = await terminateSurvivors(tree.pids);
-  const orphaned = survivors.length > 0 || tree.capped;
-  return { orphaned, reportedPids: survivors.length ? survivors : tree.pids };
-}
-
 async function main(): Promise<void> {
   const force = process.argv.includes('--force');
 
@@ -108,9 +101,9 @@ async function main(): Promise<void> {
   acquireLifecycleLock();
   const sessionName = getSessionName(config);
 
-  if (!tmuxSessionAlive(sessionName)) {
-    const runtime = readRuntimeJson();
-    if (runtime && runtime.runtime_mode === 'interactive') {
+  const liveness = residentLiveness(readRuntimeJson(), sessionName, REAL_LIVENESS_DEPS());
+  if (liveness.state !== 'alive') {
+    if (liveness.state === 'interactive') {
       // Claude is still running in the operator's terminal — don't corrupt
       // lifecycle truth. The Stop hook (triggered when Claude exits) owns
       // the transition to idle.
@@ -125,9 +118,9 @@ async function main(): Promise<void> {
     // still be alive (the orphan case: tmux gone, process survived). Marking it
     // "stopped" here would make runtime.json lie. Report the likely orphan and
     // exit non-zero without touching lifecycle truth.
-    const age = sharedLivenessAgeSecs();
-    if (age !== null && age < LIVENESS_FRESH_SECS) {
-      console.log(`[hermit] No tmux session "${sessionName}", but state activity ${Math.round(age)}s ago — a detached claude may still be running.`);
+    const age = liveness.evidence.livenessAgeSecs;
+    if (liveness.state === 'orphan') {
+      console.log(`[hermit] No tmux session "${sessionName}", but state activity ${Math.round(age!)}s ago — a detached claude may still be running.`);
       console.log('[hermit] Find it:  pgrep -af "claude --channels"');
       console.log('[hermit] Not marking stopped. Kill that process, or ignore if this is another runtime (then re-run).');
       releaseLifecycleLock();

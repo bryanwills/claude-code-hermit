@@ -85,3 +85,10 @@ export async function terminateSurvivors(pids: number[]): Promise<number[]> {
   await sleep(termWaitMs());
   return alive.filter((p) => pidAlive(p));
 }
+
+/** Verify a captured pane tree died; a capped snapshot reads as unverified == orphaned. */
+export async function verifyTreeExited(tree: { pids: number[]; capped: boolean }): Promise<{ orphaned: boolean; reportedPids: number[] }> {
+  const survivors = await terminateSurvivors(tree.pids);
+  const orphaned = survivors.length > 0 || tree.capped;
+  return { orphaned, reportedPids: survivors.length ? survivors : tree.pids };
+}

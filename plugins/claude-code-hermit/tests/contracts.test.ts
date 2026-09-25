@@ -4024,3 +4024,13 @@ test('responder invocation evidence has one resident Skill hook writer', () => {
   expect(architecture).toContain('state/channel-responder-invoked.json');
   expect(architecture).toContain('channel-responder-invoked.ts only');
 });
+
+describe('shared resident liveness (anti-drift)', () => {
+  test('lifecycle deciders use the shared verdict', () => {
+    for (const file of ['hermit-stop.ts', 'hermit-start.ts', 'docker-preflight.ts', 'startup-context.ts', 'hermit-watchdog.ts']) {
+      const source = fs.readFileSync(path.join(SCRIPTS, file), 'utf-8');
+      expect(source).not.toContain('sharedLivenessAgeSecs(');
+      expect(source).toContain('./lib/resident-liveness');
+    }
+  });
+});
