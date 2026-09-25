@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.6] - 2026-09-25
 
 ### Changed
 - The watchdog runs its checks as one ordered list over a per-tick snapshot, and ends the tick after any restart. `install`/`uninstall` live in `scripts/hermit-watchdog-install.ts`
@@ -26,7 +26,6 @@
 - `heartbeat.every`, `heartbeat.stale_threshold`, `heartbeat.waiting_timeout`, `heartbeat.clean_recheck_cooldown`, `routine_wake_lint.max_windows` and `storage_drift.ignore` are validated instead of accepted silently
 - The auto-mode soft-deny sentence names every setting the settings gate protects, including `auth_mode`, `remote`, `chrome`, `operator_profile`, `telemetry_export`, `artifacts`, `docker` and the channel access fields
 - A `heartbeat` block without `enabled` no longer triggers a `heartbeat.enabled` warning
-- `docs/config-reference.md` documents `chrome`, `stale_threshold`, `waiting_timeout`, `usage_stale_days`, `usage_auto_archive`, `archive_retention_days` and `storage_drift`
 - Claude Opus 5.5 turns are costed at its own rates ($4/$20, cache reads 0.05x, fast $8/$40) instead of Opus 5 rates, and the `opus` alias prices as Opus 5.5; Opus 4.5 has its own row. Rows logged before the upgrade keep their overstated figures
 - Doctor's unpriced-model warning names the actual fallback: the matching tier's current model, or sonnet-5 when no tier matches
 

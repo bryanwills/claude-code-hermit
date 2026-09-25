@@ -11,7 +11,7 @@
       "name": "claude-code-hermit",
       "source": "./plugins/claude-code-hermit",
       "description": "Your own local Claude Tag, in the Claude app, Discord, Telegram, or a custom Claude Code channel.",
-      "version": "1.4.5",
+      "version": "1.4.6",
       "category": "productivity",
       "author": {
         "name": "gtapps",
