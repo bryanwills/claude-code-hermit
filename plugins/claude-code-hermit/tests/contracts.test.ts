@@ -2960,21 +2960,21 @@ describe('doctor model-pricing-known check', () => {
     writeConfig(dir, { ...BASE_CONFIG, model: 'claude-opus-4-8' });
     const report = await runDoctorCheck(dir);
     expect(priceCheck(report).status).toBe('ok');
-    expect(priceCheck(report).detail).toContain('pricing verified 2026-09-05');
+    expect(priceCheck(report).detail).toContain('pricing verified 2026-09-25');
   }), 20000);
 
   test('dated haiku snapshot is priced; unknown id is named', withTmpdir(async (dir) => {
     writeConfig(dir, { ...BASE_CONFIG, model: 'claude-haiku-4-5-20251001' });
     const okReport = await runDoctorCheck(dir);
     expect(priceCheck(okReport).status).toBe('ok');
-    expect(priceCheck(okReport).detail).toContain('pricing verified 2026-09-05');
+    expect(priceCheck(okReport).detail).toContain('pricing verified 2026-09-25');
 
     writeConfig(dir, { ...BASE_CONFIG, model: 'claude-nova-9' });
     const warnReport = await runDoctorCheck(dir);
     const c = priceCheck(warnReport);
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('claude-nova-9');
-    expect(c.detail).toContain('pricing verified 2026-09-05');
+    expect(c.detail).toContain('pricing verified 2026-09-25');
   }), 20000);
 
   test('unknown routine model → warn naming the routine', withTmpdir(async (dir) => {

@@ -1,11 +1,11 @@
 // Per-1M-token pricing (USD). Source of truth for all cost calculations.
-// Verified 2026-09-05 against:
+// Verified 2026-09-25 against:
 //   https://platform.claude.com/docs/en/about-claude/models/overview.md
 //   https://platform.claude.com/docs/en/about-claude/pricing.md
 //   https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md
 // Change ONLY this file when Anthropic updates prices; bump the verified date to today.
 
-export const PRICING_VERIFIED = '2026-09-05';
+export const PRICING_VERIFIED = '2026-09-25';
 
 export const CACHE_WRITE_5M = 1.25;
 export const CACHE_WRITE_1H = 2;
@@ -14,7 +14,7 @@ export const CACHE_READ = 0.1;
 export type ModelPricing = {
   input: number;
   output: number;
-  cacheRead?: number;
+  cacheReadMult?: number;
   fast?: { input: number; output: number };
 };
 
@@ -27,18 +27,20 @@ export type CostByType = {
 
 const CURRENT_TIER: Record<string, string> = {
   fable: 'claude-fable-5-1',
-  opus: 'claude-opus-5',
+  opus: 'claude-opus-5-5',
   sonnet: 'claude-sonnet-5',
   haiku: 'claude-haiku-4-5',
 };
 
 const PRICING: Record<string, ModelPricing> = {
-  'claude-fable-5-1': { input: 10, output: 50, cacheRead: 0.25 },
+  'claude-fable-5-1': { input: 10, output: 50, cacheReadMult: 0.025 },
   'claude-fable-5':   { input: 10, output: 50 },
+  'claude-opus-5-5':  { input: 4, output: 20, cacheReadMult: 0.05, fast: { input: 8, output: 40 } },
   'claude-opus-5':    { input: 5, output: 25, fast: { input: 10, output: 50 } },
   'claude-opus-4-8':  { input: 5, output: 25, fast: { input: 10, output: 50 } },
   'claude-opus-4-7':  { input: 5, output: 25 },
   'claude-opus-4-6':  { input: 5, output: 25 },
+  'claude-opus-4-5':  { input: 5, output: 25 },
   'claude-sonnet-5':  { input: 2, output: 10 },
   'claude-sonnet-4-6': { input: 3, output: 15 },
   'claude-haiku-4-5': { input: 1, output: 5 },
@@ -66,7 +68,7 @@ function calculateCost(
   const { rates } = resolvePricing(model);
   const inputRate = t.fast && rates.fast ? rates.fast.input : rates.input;
   const outputRate = t.fast && rates.fast ? rates.fast.output : rates.output;
-  const cacheReadRate = rates.cacheRead ?? inputRate * CACHE_READ;
+  const cacheReadRate = inputRate * (rates.cacheReadMult ?? CACHE_READ);
   const byType: CostByType = {
     input: (t.input / 1_000_000) * inputRate,
     cacheWrite:

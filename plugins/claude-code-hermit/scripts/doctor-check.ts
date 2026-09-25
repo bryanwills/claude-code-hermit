@@ -1651,7 +1651,7 @@ function checkModelPricingKnown(p: DoctorPaths = PATHS) {
     if (unknown.length > 0) {
       return {
         id: 'model-pricing-known', status: 'warn',
-        detail: `unpriced model(s): ${unknown.join(', ')} — cost tracking silently falls back to sonnet-5 pricing; ${unpricedBit}; ${verified}`,
+        detail: `unpriced model(s): ${unknown.join(', ')} ; cost tracking silently falls back to the matching tier's current model (sonnet-5 if no tier matches); ${unpricedBit}; ${verified}`,
       };
     }
     return { id: 'model-pricing-known', status: 'ok', detail: `all configured models known to the pricing table; ${unpricedBit}; ${verified}` };

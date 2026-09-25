@@ -12,7 +12,7 @@ on a schedule. Do not write anything under an operator's `.claude-code-hermit/`.
 ## Step 1 — Read the table
 
 Read `plugins/claude-code-hermit/scripts/lib/pricing.ts`. Record every `PRICING`
-key, its `{ input, output, cacheRead?, fast? }` rates, the `CACHE_WRITE_5M` /
+key, its `{ input, output, cacheReadMult?, fast? }` rates, the `CACHE_WRITE_5M` /
 `CACHE_WRITE_1H` / `CACHE_READ` multipliers, and `PRICING_VERIFIED`.
 
 ## Step 2 — Fetch live sources
@@ -25,7 +25,9 @@ these three URLs:
 - Prompt Caching
 
 Extract current model ids, per-MTok input/output, cache write (5m and 1h) and
-read multipliers, any per-model `cacheRead` absolute rate, and fast-mode rates.
+read multipliers, any per-model cache-read rate, and fast-mode rates. Store a
+per-model cache-read rate as `cacheReadMult` (that rate divided by the model's
+standard input rate), never as an absolute $/MTok figure.
 
 ## Step 3 — Unknown ids in the log
 
