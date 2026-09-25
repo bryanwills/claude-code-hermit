@@ -9,7 +9,6 @@ import path from 'node:path';
 import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 
-import { parseDuration } from './lib/time';
 import { globDir, readFrontmatter } from './lib/frontmatter';
 import { validate } from './validate-config';
 import { kStr } from './lib/format';
@@ -36,12 +35,17 @@ import { readJson } from './lib/cli';
 import { compileCron } from './lib/cron-match';
 import { secondMostRecentMatch } from './lib/backup';
 import { findResident } from './lib/session-registry';
-import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness, STARTUP_GRACE_SECS } from './lib/monitor-health';
+import { bootMismatch } from './lib/monitor-health';
+import { routineHealth } from './lib/routines/arm';
+import { heartbeatHealth } from './lib/heartbeat/monitor-cmd';
+import { effectiveHeartbeatMode } from './lib/heartbeat/control';
 import { readBootId } from './lib/routines/registry';
 import { probeDeclaredCredentials, shadowingCredentialNote } from './lib/credential-probe';
 
 type Json = any;
 
+// Each check consumes the `lib/` verdict where one exists and adds phrasing only,
+// as checkHeartbeat and checkRoutineMonitor do with heartbeatHealth and routineHealth.
 // Every check takes its paths as an argument defaulting to PATHS (the argv-derived
 // set the CLI runs on), so a test can drive one check against its own scratch dir
 // without reloading this module — the seam escalate()/markNotified() already had.
@@ -1290,38 +1294,17 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     if (!hbCfg.enabled) {
       return { id: 'heartbeat', status: 'ok', detail: 'heartbeat: disabled' };
     }
+    // `stop` clears the registration on purpose; that is not a missing one.
+    if (effectiveHeartbeatMode(hermitDir) === 'stopped') {
+      return { id: 'heartbeat', status: 'ok', detail: 'heartbeat: stopped' };
+    }
 
     const runtimePath = path.join(stateDir, 'runtime.json');
     if (!fs.existsSync(runtimePath)) {
       return { id: 'heartbeat', status: 'ok', detail: 'heartbeat: enabled, no runtime state' };
     }
-    const threshold = 3 * parseDuration(hbCfg.every, 30 * 60000);
-    // A healthy monitor writes liveness on its first loop iteration (before any
-    // sleep), so a real tick lands within seconds of spawn. The absent-liveness
-    // grace only needs to cover spawn + first precheck — not a full poll interval
-    // — otherwise a spawn-blocked monitor reads "warming up" for hours.
     const now = Date.now();
-
-    // When `start-commit` recorded the registration. Used both to reject a liveness
-    // tick left by a prior session's monitor (a tick older than started_at is stale,
-    // not proof the current monitor is alive) and to bound the graces below.
-    let startedAt: number | null = null;
-    let monRt: Json = null;
-    try {
-      monRt = JSON.parse(fs.readFileSync(path.join(stateDir, 'heartbeat-monitor.runtime.json'), 'utf-8'));
-      if (typeof monRt.started_at === 'string') {
-        const t = Date.parse(monRt.started_at);
-        if (Number.isFinite(t)) startedAt = t;
-      }
-    } catch { /* missing or unparseable */ }
-
-    if (bootMismatch(monRt?.boot_id, readBootId(hermitDir))) {
-      return {
-        id: 'heartbeat',
-        status: 'fail',
-        detail: 'heartbeat monitor registered by a previous boot — re-arm with /claude-code-hermit:heartbeat start',
-      };
-    }
+    const health = heartbeatHealth(hermitDir, config, now);
 
     const livenessPath = path.join(stateDir, 'heartbeat-liveness.json');
     let lastPeekAt: number | null = null;
@@ -1332,30 +1315,18 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
         if (Number.isFinite(t)) lastPeekAt = t;
       }
     } catch { /* missing or unparseable */ }
+    // Read after the verdict, so the file may have changed in between.
+    const tickStr = lastPeekAt === null ? 'unknown' : `${Math.round((now - lastPeekAt) / 60000)}m ago`;
 
-    // A tick that merely predates started_at is a different case from no tick at all:
-    // the monitor did spawn, and nothing supersedes that tick until its next poll. Ride
-    // that out off the registered cadence, not config's — `every` can be edited without
-    // re-running `start`, leaving the live loop on the interval it was started with.
-    const predatesGraceSecs = heartbeatPredatesGraceSecs(
-      typeof monRt?.interval === 'number' && monRt.interval > 0
-        ? monRt.interval
-        : parseDuration(hbCfg.every, 30 * 60000) / 1000,
-    );
+    if (health.reason === 'boot-mismatch') {
+      return { id: 'heartbeat', status: 'fail', detail: 'heartbeat monitor registered by a previous boot — re-arm with /claude-code-hermit:heartbeat start' };
+    }
+    if (['runtime-missing', 'interval-drift', 'command-drift'].includes(health.reason)) {
+      return { id: 'heartbeat', status: 'fail', detail: `heartbeat monitor ${health.reason} — re-arm with /claude-code-hermit:heartbeat start` };
+    }
 
-    const health = monitorFreshness(
-      startedAt === null ? null : new Date(startedAt).toISOString(),
-      lastPeekAt === null ? null : new Date(lastPeekAt).toISOString(),
-      threshold / 1000,
-      STARTUP_GRACE_SECS,
-      now,
-      predatesGraceSecs,
-    );
-
-    if (health.reason === 'fresh' || health.reason === 'stale') {
-      const ageMs = now - lastPeekAt!;
-      const tickStr = `${Math.round(ageMs / 60000)}m ago`;
-      if (!health.fresh) {
+    if (health.reason === 'fresh' || health.reason === 'liveness-stale') {
+      if (!health.healthy) {
         return {
           id: 'heartbeat',
           status: 'fail',
@@ -1367,17 +1338,17 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
 
     // No trustworthy tick. Flag once the monitor has had longer than the startup
     // grace to write its first one; otherwise it is still warming up.
-    if (!health.fresh) {
+    if (!health.healthy) {
       if (health.reason === 'liveness-predates-start') {
-        const tickStr = `${Math.round((now - lastPeekAt!) / 60000)}m ago`;
         return {
           id: 'heartbeat',
           status: 'fail',
           detail: `heartbeat liveness belongs to another registration (last tick ${tickStr}) — re-arm with /claude-code-hermit:heartbeat start`,
         };
       }
-      // Only `liveness-absent` is left, and it means no parseable tick has ever
-      // landed — `liveness-predates-start` returned above.
+      if (health.reason !== 'liveness-absent') {
+        return { id: 'heartbeat', status: 'fail', detail: `heartbeat monitor ${health.reason}` };
+      }
       return {
         id: 'heartbeat',
         status: 'fail',
@@ -1391,14 +1362,7 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
   }
 }
 
-// Modeled directly on checkHeartbeat above — same active-session-only gate, same
-// startup-grace and trust-liveness-against-started_at logic. Two differences:
-// (1) enabled/scope is derived from config.routines (any non-anchor enabled entry),
-// not a single heartbeat.enabled flag; (2) a croncreate-fallback mode (Monitor tool
-// unavailable) is reported ok rather than evaluated for liveness at all — it writes no
-// liveness file. The boot gate still applies to it, and is the only thing that can
-// catch it: its CronCreates are durable:false, so a fallback registration stamped by a
-// previous boot describes crons that died with that process.
+// Routine fallback owns its boot gate; monitor mode consumes the arming verdict.
 function checkRoutineMonitor(p: DoctorPaths = PATHS) {
   const { stateDir, hermitDir } = p;
   try {
@@ -1437,16 +1401,8 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
     if (!runtimeExists) {
       return { id: 'routine-monitor', status: 'ok', detail: 'routine-monitor: enabled, no runtime state' };
     }
-    const interval = typeof monRt.interval === 'number' && monRt.interval > 0 ? monRt.interval : 60;
-    const threshold = Math.max(10 * interval * 1000, 10 * 60 * 1000);
-    const STARTUP_GRACE_MS = 2 * 60 * 1000;
     const now = Date.now();
-
-    let startedAt: number | null = null;
-    if (typeof monRt.started_at === 'string') {
-      const t = Date.parse(monRt.started_at);
-      if (Number.isFinite(t)) startedAt = t;
-    }
+    const health = routineHealth(hermitDir, now);
 
     const livenessPath = path.join(stateDir, 'routine-monitor-liveness.json');
     let lastPeekAt: number | null = null;
@@ -1458,34 +1414,19 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
       }
     } catch { /* missing or unparseable */ }
 
-    const health = monitorFreshness(
-      startedAt === null ? null : new Date(startedAt).toISOString(),
-      lastPeekAt === null ? null : new Date(lastPeekAt).toISOString(),
-      threshold / 1000,
-      STARTUP_GRACE_MS / 1000,
-      now,
-    );
-
-    if (health.reason === 'fresh' || health.reason === 'stale') {
-      const ageMs = now - lastPeekAt!;
-      const tickStr = `${Math.round(ageMs / 60000)}m ago`;
-      if (!health.fresh) {
-        return {
-          id: 'routine-monitor',
-          status: 'fail',
-          detail: `routine-monitor not ticking — Monitor subprocess spawn likely blocked (seccomp / nested-userns in container). Last tick: ${tickStr}.`,
-        };
-      }
+    // A tick older than started_at belongs to the previous registration: warming up, not ticking.
+    if (health.healthy && lastPeekAt !== null && !(Date.parse(monRt.started_at) > lastPeekAt)) {
+      const tickStr = `${Math.round((now - lastPeekAt) / 60000)}m ago`;
       return { id: 'routine-monitor', status: 'ok', detail: `routine-monitor: ticking (last tick ${tickStr})` };
     }
-
-    if (!health.fresh) {
-      const tickStr = lastPeekAt !== null ? `${Math.round((now - lastPeekAt) / 60000)}m ago (predates current monitor — stale)` : 'never';
-      return {
-        id: 'routine-monitor',
-        status: 'fail',
-        detail: `routine-monitor not ticking — Monitor subprocess spawn likely blocked (seccomp / nested-userns in container). Last tick: ${tickStr}.`,
-      };
+    if (!health.healthy) {
+      if (['liveness-stale', 'liveness-absent', 'liveness-predates-start'].includes(health.reason)) {
+        const tickStr = lastPeekAt === null ? 'never' : `${Math.round((now - lastPeekAt) / 60000)}m ago${health.reason === 'liveness-predates-start' ? ' (predates current monitor — stale)' : ''}`;
+        return { id: 'routine-monitor', status: 'fail', detail: `routine-monitor not ticking — Monitor subprocess spawn likely blocked (seccomp / nested-userns in container). Last tick: ${tickStr}.` };
+      }
+      const rearm = ['runtime-missing', 'command-drift', 'launch-drift', 'anchor-drift', 'anchor-old'].includes(health.reason)
+        ? ' — re-arm with /claude-code-hermit:hermit-routines load' : '';
+      return { id: 'routine-monitor', status: 'fail', detail: `routine-monitor ${health.reason}${rearm}` };
     }
 
     return { id: 'routine-monitor', status: 'ok', detail: 'routine-monitor: warming up — monitor registered, first tick pending' };

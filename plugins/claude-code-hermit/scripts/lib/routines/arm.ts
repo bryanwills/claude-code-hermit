@@ -8,7 +8,7 @@ import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { isGuest } from '../guest-marker';
 import { pidAlive } from '../lockfile';
-import { heartbeatHealth, livenessReason, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
+import { heartbeatHealth, PLUGIN_ROOT, livenessReason, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
 import { commitHeartbeatArm, prepareHeartbeatArm } from '../heartbeat/start';
 import { bootMismatch, monitorFreshness, waitForFirstTick } from '../monitor-health';
 import { isPaused } from '../pause';
@@ -72,8 +72,8 @@ function context(hermitDirArg: string, pluginRootArg: string): Context {
   };
 }
 
-function routineCommand(ctx: Context): string {
-  return `bash "${ctx.pluginRoot}"/scripts/monitor-supervisor.sh routines "${ctx.hermitDir}"`;
+export function routineCommand(hermitDir: string): string {
+  return `bash "${PLUGIN_ROOT}"/scripts/monitor-supervisor.sh routines "${hermitDir}"`;
 }
 
 function plan(ctx: Context, fallback: boolean, reset: boolean): { plan: PlanResult; routines: Json[] } {
@@ -99,6 +99,10 @@ function planEmpty(result: PlanResult): boolean {
   return result.deletes.length === 0 && result.creates.length === 0;
 }
 
+export function routineHealth(hermitDir: string, nowMs: number): LegHealth {
+  return monitorHealth({ ...context(hermitDir, PLUGIN_ROOT), nowMs });
+}
+
 function monitorHealth(ctx: Context): LegHealth {
   const runtime = readJson(path.join(ctx.hermitDir, 'state', 'routine-monitor.runtime.json'));
   if (runtime?.mode === 'croncreate-fallback') {
@@ -114,7 +118,7 @@ function monitorHealth(ctx: Context): LegHealth {
   if (bootMismatch(runtime.boot_id, ctx.bootId)) {
     return { healthy: false, reason: 'boot-mismatch' };
   }
-  if (runtime.command !== routineCommand(ctx) && ctx.scheduled.length > 0) {
+  if (runtime.command !== routineCommand(ctx.hermitDir) && ctx.scheduled.length > 0) {
     return { healthy: false, reason: 'command-drift' };
   }
   if (ctx.scheduled.length > 0 && runtime.launch !== 'native') {
@@ -349,7 +353,7 @@ async function cmdCommit(ctx: Context, taskId: string, flags: string[]): Promise
     || await waitForFirstTick(path.join(ctx.hermitDir, 'state', 'routine-monitor-liveness.json'));
   const runtime: Json = {
     description: 'routine-monitor',
-    command: routineCommand(ctx),
+    command: routineCommand(ctx.hermitDir),
     interval: MONITOR_INTERVAL_SECS,
     started_at: new Date(ctx.nowMs).toISOString(),
     mode: live ? 'monitor' : 'croncreate-fallback',
