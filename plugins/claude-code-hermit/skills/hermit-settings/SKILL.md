@@ -218,7 +218,6 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
     wedge_floor            4h
     escalate_after         3
     operator_grace         15m
-    context_clear_tokens   700000
 
   Context hygiene compact (config.json context_hygiene.compact)
 
@@ -236,12 +235,11 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
                              (e.g. 4h; lower it for faster detection, 0s = no floor)      [current]
     escalate_after         — consecutive stale cycles before escalation (e.g. 3)          [current]
     operator_grace         — silence window before alert fires (e.g. 15m, 1h)             [current]
-    context_clear_tokens   — emergency /clear when prompt tokens exceed this (e.g. 700000, 0=off) [current]
   ```
   Then ask each field in sequence.
-- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.scheduler_enabled`, `watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`, `watchdog.context_clear_tokens`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
+- Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.scheduler_enabled`, `watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
   - Note: "Changes take effect on the next watchdog run. `scheduler_enabled` (default true) is the OS-timer policy a tmux always-on boot reads: every `hermit-start` registers the timer unless it is false. Setting it false by hand only stops future boots from re-registering — to remove a timer that is already installed run `bin/hermit-watchdog uninstall`, which deletes the unit and sets both `scheduler_enabled` and `enabled` false. `bin/hermit-watchdog install` re-registers it, and a first registration also sets `enabled: true`; a later re-install leaves `enabled` as you set it. Docker hermits run the watchdog from the entrypoint loop — no install step needed, and `scheduler_enabled` does not apply there."
-- **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above, same as `context_clear_tokens`): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
+- **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
   ```
   Context hygiene compact sub-fields (press Enter to keep current value):
     min_context_tokens     — routine-hygiene /compact when estimated compactible conversation exceeds this (e.g. 100000) [current]

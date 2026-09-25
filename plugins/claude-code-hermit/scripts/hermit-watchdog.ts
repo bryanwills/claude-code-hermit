@@ -50,7 +50,7 @@ import { WATCHDOG, resolveLocale, type Locale } from './lib/messages';
 import { claudeStateFile, credentialsFilePath, defaultConfigDir, envAuthPresent, inspectStoredLogin, msUntilExpiry, msUntilLoginExpiry, resolveAuthMode, storedLoginUsable } from './lib/setup-token';
 import { isContainer } from './lib/container';
 import { writeFileAtomic } from './lib/md-write';
-import { promptTokensOf as promptTokens, isEstimateOnly, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS, isOwnTurn } from './lib/context-signal';
+import { promptTokensOf as promptTokens, compactibleTokens, MAX_PLAUSIBLE_PROMPT_TOKENS, isOwnTurn } from './lib/context-signal';
 import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset } from './lib/context-reset';
@@ -108,10 +108,10 @@ export type World = {
   tmux: { alive(s: string): boolean; capture(s: string): string | null; send(s: string, text: string): void };
   files: { readJson(p: string): Json | null; readText(p: string): string | null; writeJson(p: string, v: Json): void; rm(p: string): void };
   paths: { stateDir: string; hermitRoot: string; costLog: string };
-  /** Per-tick memo for the cost-log read, shared by both hygiene tiers (one
-   *  process per scheduler tick, so its lifetime is the tick). Lives on the world
-   *  rather than in module scope so each fake world in a test starts cold. */
-  memo: { costLogEntry?: { sessionId: string; entry: Json }; hygieneSessionId?: string };
+  /** Per-tick memo for the resolved hygiene session id (one process per scheduler
+   *  tick, so its lifetime is the tick). Lives on the world rather than in module
+   *  scope so each fake world in a test starts cold. */
+  memo: { hygieneSessionId?: string };
 };
 
 const REAL_WORLD: World = {
@@ -225,13 +225,14 @@ function nowHHMM(timezone: string, ref?: Date): string {
   return currentHHMMOrUTC(timezone, ref);
 }
 
-/** Operator-language message for a watchdog restart. */
-export function composeRestartMessage(reason: string, timezone: string, locale: Locale = OPERATOR_LOCALE): string {
+/** Operator-language message for a watchdog restart. `resumed` says whether hermit-start was
+ *  asked to restore the conversation, so a fresh start never promises one. */
+export function composeRestartMessage(reason: string, resumed: boolean, timezone: string, locale: Locale = OPERATOR_LOCALE): string {
   const hhmm = nowHHMM(timezone);
   const cause = reason === 'dead-process'
     ? WATCHDOG[locale].restartCauseNotRunning()
     : WATCHDOG[locale].restartCauseFrozen();
-  return WATCHDOG[locale].restart(hhmm, cause);
+  return WATCHDOG[locale].restart(hhmm, cause, resumed);
 }
 
 /** Operator-language message for a wedge episode after a failed wake. */
@@ -803,8 +804,10 @@ function copyOauthAccount(stagedDir: string): void {
   } catch {}
 }
 
-/** Try-acquire lock, mark runtime, kill session, verify the old tree died, spawn hermit-start. */
-async function doRestart(sessionName: string, reason: string, runtime: Json, timezone: string, config: Json): Promise<void> {
+/** Try-acquire lock, mark runtime, kill session, verify the old tree died, spawn hermit-start.
+ *  `resumable` is false for restarts someone asked for (cmdRestart: manual, login renewal),
+ *  which start fresh as before; only restarts the watchdog detects resume. */
+async function doRestart(sessionName: string, reason: string, runtime: Json, timezone: string, resumable = true): Promise<void> {
   if (runtime.last_start_error === 'resident-missing'
     && !fs.existsSync(path.join(HERMIT_ROOT, 'RESIDENT.md'))) {
     if (runtime.last_start_error_notified !== 'resident-missing') {
@@ -853,20 +856,18 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
     // Release before spawning hermit-start (it re-acquires)
     releaseLock(LIFECYCLE_LOCK);
 
+    // Resume the conversation unless the restart was requested, there is none to
+    // resume, or a restart already happened inside the loop guard. hermit-start still
+    // starts fresh when the transcript has no user turn (resolveResumeTarget).
     const id = runtime.cc_session_id;
-    // Same enable test maybeContextCompact applies (`enabled === true`): resume
-    // only where the compact tier actually bounds the context it would restore.
-    const compactCfg = config.context_hygiene?.compact;
-    const threshold = compactCfg?.min_context_tokens;
-    let skip: string | null = null;
-    if (typeof id !== 'string' || !id.trim()) skip = 'no-session-id';
-    else if (compactCfg?.enabled !== true) skip = 'compact-disabled';
-    else {
-      const entry = getLastCostLogEntry(id);
-      if (!entry) skip = 'no-cost-entry';
-      else skip = poisonedEntrySkip(entry, runtime)
-        ?? (promptTokens(entry) < threshold ? null : 'over-threshold');
-    }
+    const ws = readWatchdogState();
+    const sinceLast = typeof ws.last_restart_at === 'string' ? ageSecs(ws.last_restart_at) : null;
+    const skip = !resumable ? 'requested'
+      : typeof id !== 'string' || !id.trim() ? 'no-session-id'
+      : sinceLast !== null && sinceLast < RESUME_LOOP_GUARD_SECS ? 'recent-restart'
+      : null;
+    ws.last_restart_at = worldStamp(REAL_WORLD);
+    writeWatchdogState(ws);
     const resumeArgs = skip ? [] : ['--resume', id];
     const resumeDetail = skip ? `fresh: ${skip}` : `resume ${id}`;
     const startBin = '.claude-code-hermit/bin/hermit-start';
@@ -887,7 +888,7 @@ async function doRestart(sessionName: string, reason: string, runtime: Json, tim
     // 'error' handler above, after this synchronous path already returned, so
     // guard the push on the binary existing rather than on spawn's async result.
     // The lock is already released above, so a slow send never holds it.
-    if (fs.existsSync(startBin)) pushOperatorMessage(composeRestartMessage(reason, timezone));
+    if (fs.existsSync(startBin)) pushOperatorMessage(composeRestartMessage(reason, skip === null, timezone));
   } catch (e) {
     process.stderr.write(`[watchdog] restart failed: ${e}\n`);
   } finally {
@@ -1236,6 +1237,10 @@ export const MONITOR_REARM_DAMPER_SECS = 6 * 3600;
 // `watchdog.wedge_floor`: an install that deliberately tightened heartbeat.every keeps its
 // own recovery SLA, and "0s" restores the plain stale_factor × every product.
 export const WEDGE_FLOOR_DEFAULT = '4h';
+// A restart this soon after the previous one starts fresh instead of resuming: in a
+// crash loop every resume re-pays the whole conversation's cache write. One hour
+// covers the loop cadences seen on the fleet (every 5 and every 30 minutes).
+const RESUME_LOOP_GUARD_SECS = 3600;
 
 /**
  * True when a monitor that should be ticking has a liveness timestamp stale past
@@ -1344,7 +1349,7 @@ async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive
     const guard = passesLifecycleGuards(runtime ?? {});
     const boundary = passesExecutionBoundary(HERMIT_ROOT);
     if (guard.ok && boundary.ok) {
-      await doRestart(sessionName, 'monitor-dead', runtime, config.timezone ?? 'UTC', config);
+      await doRestart(sessionName, 'monitor-dead', runtime, config.timezone ?? 'UTC');
       appendEvent('monitor-restart', `${record} supervisor dead`);
     } else {
       appendEvent('monitor-dead-deferred', guard.ok ? (boundary.ok ? 'idle' : boundary.reason) : guard.reason);
@@ -1431,7 +1436,7 @@ export function maybeStandaloneClear(config: Json, world: World = REAL_WORLD): s
   return `clear:${reason}`;
 }
 
-// --- Shared lifecycle/token guards (maybeContextClear + maybeContextCompact) ---
+// --- Shared lifecycle/token guards (maybeStandaloneClear + maybeContextCompact) ---
 
 /** Discriminated result for passesLifecycleGuards — the reason string feeds
  *  last_hygiene_eval so a starved hygiene tier is diagnosable from state alone. */
@@ -1461,14 +1466,8 @@ export function passesLifecycleGuards(runtime: Json, world: World = REAL_WORLD):
   return { ok: true, sessionName };
 }
 
-// Shared between maybeContextClear and maybeContextCompact — both need "the last
-// cost-log entry for this session" on every tick. Memoized per invocation (this
-// script is single-shot, one process per scheduler tick) so the two mechanisms
-// don't each re-read and re-parse the full (append-only, unbounded-growth) cost
-// log JSONL in the same tick.
+// maybeContextCompact needs "the last cost-log entry for this session" on every tick.
 function getLastCostLogEntry(sessionId: string, world: World = REAL_WORLD): Json {
-  const cached = world.memo.costLogEntry;
-  if (cached && cached.sessionId === sessionId) return cached.entry;
   let lastEntry: Json = null; // stays null when the cost-log is absent — fail safe
   const raw = world.files.readText(world.paths.costLog);
   for (const rawLine of raw?.split('\n') ?? []) {
@@ -1482,18 +1481,17 @@ function getLastCostLogEntry(sessionId: string, world: World = REAL_WORLD): Json
       if (isOwnTurn(e, sessionId)) lastEntry = e;
     } catch {}
   }
-  world.memo.costLogEntry = { sessionId, entry: lastEntry };
   return lastEntry;
 }
 
-// promptTokens (context size from a cost-log entry), isEstimateOnly and
+// promptTokens (context size from a cost-log entry) and
 // MAX_PLAUSIBLE_PROMPT_TOKENS now live in lib/context-signal.ts, shared with
 // doctor-check.ts and cost-tracker.ts so they can't drift again.
 
 /**
  * Why this cost-log entry must not drive a hygiene decision, or null when it may.
  *
- * Both tiers act on "the last cost entry for this session", which is only a proxy for
+ * The compact tier acts on "the last cost entry for this session", which is only a proxy for
  * current context size. Two ways that proxy lies: the entry was observed before the
  * context was reset (it describes a context that no longer exists — measured live, where
  * a re-billed pre-compaction turn drove a compaction of a context 47k UNDER the
@@ -1517,13 +1515,13 @@ function poisonedEntrySkip(entry: Json, runtime: Json): PoisonReason | null {
  *  Cost rows from other sessions in the folder must never drive a reset of the
  *  resident's context. Harness identity and guest provenance keep those separate.
  *
- *  Absent resolves to '' and both tiers skip. Skipping is the safe failure — acting on a
+ *  Absent resolves to '' and the compact tier skips. Skipping is the safe failure — acting on a
  *  frozen row from a session that is not this one is what #916 was. Two writers keep it
  *  present: the SessionStart hook stamps it at start/resume/compact/clear, and the Stop
  *  hook re-asserts it on each of the resident's own turns, so a resident already running
  *  when this version lands is unstamped for one turn rather than until its next restart.
  *  Both writers refuse when a live registry entry at another pid holds the stamp, which is
- *  what keeps a claude the resident launched itself from claiming the tiers. */
+ *  what keeps a claude the resident launched itself from claiming the tier. */
 function resolveHygieneSessionId(runtime: Json, world: World = REAL_WORLD): string {
   const sid: unknown = runtime.cc_session_id;
   const resolved = typeof sid === 'string' ? sid : '';
@@ -1539,7 +1537,7 @@ type PoisonReason = 'stale-entry' | 'aberrant-reading';
 
 /** Closed registry of hygiene evaluation outcomes — every setHygieneEval call site
  *  resolves into this union, so hygiene_eval_counts has a fixed key set by
- *  construction (≤20 distinct strings across both mechanisms) and a typo'd or
+ *  construction (≤20 distinct strings) and a typo'd or
  *  novel outcome is a compile error, not a silent new counter key. */
 export type HygieneOutcome =
   | 'fired'
@@ -1547,7 +1545,6 @@ export type HygieneOutcome =
   | `skip:${PoisonReason}`
   | 'skip:no-session-id'
   | 'skip:no-cost-entry'
-  | 'skip:estimate-only'
   | 'skip:under-threshold'
   | 'skip:below-floor'
   | 'skip:interval-cooldown'
@@ -1555,54 +1552,48 @@ export type HygieneOutcome =
   | 'skip:quiescence-pending'
   | 'skip:lock-held';
 
-/** Records this tick's hygiene outcome on a held watchdog-state object, keyed by
- *  mechanism, so the clear and compact tiers each keep their own most-recent eval.
- *  A single tick runs clear then compact; a shared slot would let compact's outcome
- *  clobber clear's every time compact is enabled, hiding the clear tier's skip/fire
- *  reason — the exact diagnosability this record exists to provide. The caller owns
- *  the subsequent writeWatchdogState (folds into a write it was already making).
+/** Records this tick's compact-tier outcome on a held watchdog-state object, under
+ *  the `compact` key. The caller owns the subsequent
+ *  writeWatchdogState (folds into a write it was already making).
  *
- *  Also increments hygiene_eval_counts[mechanism][outcome] — durable, monotonic
+ *  Also increments hygiene_eval_counts.compact[outcome]: durable, monotonic
  *  FIRST-BLOCKER counters (each evaluation stamps exactly one outcome, the first
  *  guard that returned, not every simultaneously-binding constraint). Counts ≠
- *  scheduler ticks: disabled/invalid config, a missing runtime.json, post-close-clear
- *  ticks, and the process.exit(0) after a clear-tier fire all leave one or both
- *  mechanisms unstamped. Readers diff snapshots against `since` for rates. */
-export function setHygieneEval(world: World, ws: Json, mechanism: 'clear' | 'compact', outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): void {
+ *  scheduler ticks: disabled/invalid config, a missing runtime.json and post-close-clear
+ *  ticks leave the tier unstamped. Readers diff snapshots against `since` for rates. */
+export function setHygieneEval(world: World, ws: Json, outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): void {
   if (!ws.last_hygiene_eval || typeof ws.last_hygiene_eval !== 'object') ws.last_hygiene_eval = {};
-  ws.last_hygiene_eval[mechanism] = {
+  ws.last_hygiene_eval.compact = {
     ts: worldStamp(world),
     outcome,
     // Which session's context this verdict describes. Absent until the tick's first
-    // resolution; the clear tier runs before the compact tier, so a later compact skip
-    // can carry an id its own gate never reached. Harmless — the resident's id does not
-    // change mid-tick — and nothing branches on the field, it is forensics only.
+    // resolution. Nothing branches on the field, it is forensics only.
     ...(world.memo.hygieneSessionId ? { cc_session_id: world.memo.hygieneSessionId } : {}),
     ...(promptTokensVal != null ? { prompt_tokens: promptTokensVal } : {}),
     ...(compactibleVal != null ? { compactible_tokens: compactibleVal } : {}),
   };
   if (!ws.hygiene_eval_counts || typeof ws.hygiene_eval_counts !== 'object') {
-    ws.hygiene_eval_counts = { since: worldStamp(world), clear: {}, compact: {} };
+    ws.hygiene_eval_counts = { since: worldStamp(world), compact: {} };
   }
-  if (!ws.hygiene_eval_counts[mechanism] || typeof ws.hygiene_eval_counts[mechanism] !== 'object') {
-    ws.hygiene_eval_counts[mechanism] = {};
+  if (!ws.hygiene_eval_counts.compact || typeof ws.hygiene_eval_counts.compact !== 'object') {
+    ws.hygiene_eval_counts.compact = {};
   }
-  ws.hygiene_eval_counts[mechanism][outcome] = (ws.hygiene_eval_counts[mechanism][outcome] ?? 0) + 1;
+  ws.hygiene_eval_counts.compact[outcome] = (ws.hygiene_eval_counts.compact[outcome] ?? 0) + 1;
 }
 
 /** stampHygieneEval that also returns the outcome, so an early-exit branch reads as
  *  `return stamped(...)` — one line per gate, and the outcome the gate decided on is
  *  the function's return value rather than something a test has to read back off disk. */
-function stamped(world: World, mechanism: 'clear' | 'compact', outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): HygieneOutcome {
-  stampHygieneEval(world, mechanism, outcome, promptTokensVal, compactibleVal);
+function stamped(world: World, outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): HygieneOutcome {
+  stampHygieneEval(world, outcome, promptTokensVal, compactibleVal);
   return outcome;
 }
 
 /** Read-modify-write variant of setHygieneEval for early-exit branches that don't
  *  already hold a loaded watchdogState in hand. */
-export function stampHygieneEval(world: World, mechanism: 'clear' | 'compact', outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): void {
+export function stampHygieneEval(world: World, outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): void {
   const ws = readWatchdogState(world);
-  setHygieneEval(world, ws, mechanism, outcome, promptTokensVal, compactibleVal);
+  setHygieneEval(world, ws, outcome, promptTokensVal, compactibleVal);
   writeWatchdogState(ws, world);
 }
 
@@ -1610,98 +1601,10 @@ export function stampHygieneEval(world: World, mechanism: 'clear' | 'compact', o
  *  itself: that re-reads state from disk, which would drop whatever the caller has
  *  already mutated in memory but not yet written — a freshly recorded pane hash,
  *  say — and silently cost a quiescence tick. */
-function stampedState(world: World, ws: Json, mechanism: 'clear' | 'compact', outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): HygieneOutcome {
-  setHygieneEval(world, ws, mechanism, outcome, promptTokensVal, compactibleVal);
+function stampedState(world: World, ws: Json, outcome: HygieneOutcome, promptTokensVal?: number, compactibleVal?: number): HygieneOutcome {
+  setHygieneEval(world, ws, outcome, promptTokensVal, compactibleVal);
   writeWatchdogState(ws, world);
   return outcome;
-}
-
-// --- Context-size clear ---
-
-/**
- * Runs before the watchdog.enabled gate — independent of watchdog restart behavior.
- * Sends /clear when the last hermit-owned turn exceeded a prompt-side token threshold
- * and the session is quiescent (pane unchanged across two consecutive ticks).
- * Guards: always-on only, no in-flight transition, operator silent ≥10 min, no shutdown.
- */
-export function maybeContextClear(config: Json, world: World = REAL_WORLD): HygieneOutcome | null {
-  const threshold = config.watchdog?.context_clear_tokens;
-  if (typeof threshold !== 'number' || threshold <= 0) return null;
-
-  const runtime = readRuntimeJson(world.paths.stateDir);
-  if (!runtime) return null;
-
-  const guard = passesLifecycleGuards(runtime, world);
-  if (!guard.ok) return stamped(world, 'clear', `skip:lifecycle:${guard.reason}`);
-  const sessionName = guard.sessionName;
-
-  // Token check: find the last cost-log entry for this hermit session
-  const sessionId = resolveHygieneSessionId(runtime, world);
-  if (!sessionId) return stamped(world, 'clear', 'skip:no-session-id');
-
-  const lastEntry = getLastCostLogEntry(sessionId, world);
-  if (!lastEntry) return stamped(world, 'clear', 'skip:no-cost-entry');
-
-  const poisoned = poisonedEntrySkip(lastEntry, runtime);
-  if (poisoned) return stamped(world, 'clear', `skip:${poisoned}`, promptTokens(lastEntry));
-
-  // Never fire the DESTRUCTIVE /clear on an estimated context size — the per-call mean
-  // could sit either side of the 700k threshold. The non-destructive compact tier keeps
-  // using the estimate (it self-corrects, and would compact the same context anyway one
-  // turn later when a real entry lands).
-  if (isEstimateOnly(lastEntry)) return stamped(world, 'clear', 'skip:estimate-only');
-
-  const prompt = promptTokens(lastEntry);
-  if (prompt <= threshold) return stamped(world, 'clear', 'skip:under-threshold', prompt);
-
-  // Idempotence: bail if this entry was already cleared
-  const watchdogState = readWatchdogState(world);
-  if (watchdogState.last_cleared_cost_ts && watchdogState.last_cleared_cost_ts === lastEntry.timestamp) {
-    return stampedState(world, watchdogState, 'clear', 'skip:already-processed', prompt);
-  }
-
-  // Quiescence guard: require pane unchanged across two consecutive ticks
-  const currentHash = getPaneHash(sessionName, world);
-  const prevHash = watchdogState.last_pane_hash_ctx ?? null;
-  if (currentHash === null || currentHash !== prevHash) {
-    // First qualifying tick — record hash and wait for next tick
-    watchdogState.last_pane_hash_ctx = currentHash;
-    return stampedState(world, watchdogState, 'clear', 'skip:quiescence-pending', prompt);
-  }
-
-  // Pane stable across two ticks — safe to clear
-  if (!tryAcquireLifecycleLock(world)) {
-    return stampedState(world, watchdogState, 'clear', 'skip:lock-held', prompt);
-  }
-  try {
-    // Runtime stamp + breadcrumb + status-cache clear, shared with every other reset
-    // path (lib/context-reset.ts). Runs BEFORE the destructive keystroke: PreCompact
-    // never fires on /clear (see precompact-stamp.ts), so the breadcrumb is the only
-    // trace, and an interrupted reset must still leave it. Fail-open internally — it
-    // can never delay or suppress the safety clear below.
-    applyContextReset(world.paths.hermitRoot, runtime, {
-      kind: 'cleared',
-      trigger: `watchdog-${Math.round(threshold / 1000)}k`,
-      hhmm: nowHHMM(config.timezone ?? 'UTC', new Date(world.clock.nowMs())),
-      tokens: prompt,
-    });
-    world.tmux.send(sessionName, '/clear');
-    watchdogState.last_cleared_cost_ts = lastEntry.timestamp;
-    // Cross-stamp: runtime.cc_session_id survives the reset (only the next
-    // SessionStart restamps it), so the compact tier can still resolve this same
-    // (now-destroyed) entry on the next tick — mark it consumed for compact too.
-    // The stale-entry guard covers it as well; this is belt-and-braces redundancy.
-    watchdogState.last_compacted_cost_ts = lastEntry.timestamp;
-    watchdogState.last_pane_hash_ctx = null; // reset so next bloat cycle re-arms
-    setHygieneEval(world, watchdogState, 'clear', 'fired', prompt);
-    writeWatchdogState(watchdogState, world);
-    appendEvent('context-clear', `prompt tokens ${prompt} over threshold ${threshold}, cc_session_id ${sessionId}`, world);
-  } finally {
-    releaseLock(lifecycleLockPath(world));
-  }
-  // The caller exits the tick on 'fired' (main step 0b) — returning it rather than
-  // calling process.exit here keeps the fired path reachable from an in-process test.
-  return 'fired';
 }
 
 // --- Routine-hygiene compaction ---
@@ -1714,8 +1617,7 @@ const MIN_COMPACT_FLOOR_TOKENS = 60_000;
 const COMPACT_MARKER_TTL_SECS = 3600;
 
 /**
- * Routine-hygiene compaction — separate mechanism from maybeContextClear (destructive
- * /clear, 700k emergency backstop) and the standalone clear rule.
+ * Routine-hygiene compaction — separate mechanism from the standalone clear rule.
  * Fires arc-preserving /compact at a low threshold (default 100k of estimated
  * compactible conversation — total prompt minus the recorded fixed-surface upper
  * bound, or minus the 50k cold-start assumption) so cold-cache wakes
@@ -1724,12 +1626,12 @@ const COMPACT_MARKER_TTL_SECS = 3600;
  * itself — pointers survive via startup-context.ts's SessionStart source==="compact"
  * section (PROP-011 commit 2), which fires on every compaction including this one.
  *
- * Guards mirror maybeContextClear (always-on/transition/shutdown/operator-recency/
- * cost-log token read/two-tick pane quiescence) plus three compact-specific additions:
- * its own min_interval cooldown (waivable by a fresh boundary marker, never by an
- * absolute floor), a midnight-adjacency suppression (skip right before the post-close
- * /clear would wipe the context anyway), and its own quiescence/idempotence state keys
- * so the two mechanisms' trackers don't interfere with each other.
+ * Guards: always-on/transition/shutdown/operator-recency, cost-log token read,
+ * two-tick pane quiescence, its own min_interval cooldown (waivable by a fresh
+ * boundary marker, never by an absolute floor), a midnight-adjacency suppression
+ * (skip right before the post-close /clear would wipe the context anyway), and its
+ * own quiescence/idempotence state keys so its tracker never collides with the
+ * standalone clear's.
  */
 export function maybeContextCompact(config: Json, world: World = REAL_WORLD): HygieneOutcome | null {
   const compactCfg = config.context_hygiene?.compact;
@@ -1744,7 +1646,7 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
   if (!runtime) return null;
 
   const guard = passesLifecycleGuards(runtime, world);
-  if (!guard.ok) return stamped(world, 'compact', `skip:lifecycle:${guard.reason}`);
+  if (!guard.ok) return stamped(world, `skip:lifecycle:${guard.reason}`);
   const sessionName = guard.sessionName;
 
   // Boundary marker: a fresh marker keeps its interval-cooldown waiver until the
@@ -1767,13 +1669,13 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
 
   // Token check: find the last cost-log entry for this hermit session
   const sessionId = resolveHygieneSessionId(runtime, world);
-  if (!sessionId) return stamped(world, 'compact', 'skip:no-session-id');
+  if (!sessionId) return stamped(world, 'skip:no-session-id');
 
   const lastEntry = getLastCostLogEntry(sessionId, world);
-  if (!lastEntry) return stamped(world, 'compact', 'skip:no-cost-entry');
+  if (!lastEntry) return stamped(world, 'skip:no-cost-entry');
 
   const poisoned = poisonedEntrySkip(lastEntry, runtime);
-  if (poisoned) return stamped(world, 'compact', `skip:${poisoned}`, promptTokens(lastEntry));
+  if (poisoned) return stamped(world, `skip:${poisoned}`, promptTokens(lastEntry));
 
   const prompt = promptTokens(lastEntry);
 
@@ -1792,8 +1694,8 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
 
   // Token floor: never compact away a small compactible conversation, even with a
   // boundary marker in play — same units as the threshold above.
-  if (compactible < MIN_COMPACT_FLOOR_TOKENS) return stamped(world, 'compact', 'skip:below-floor', prompt, compactible);
-  if (compactible <= threshold) return stamped(world, 'compact', 'skip:under-threshold', prompt, compactible);
+  if (compactible < MIN_COMPACT_FLOOR_TOKENS) return stamped(world, 'skip:below-floor', prompt, compactible);
+  if (compactible <= threshold) return stamped(world, 'skip:under-threshold', prompt, compactible);
 
   const watchdogState = readWatchdogState(world);
 
@@ -1803,7 +1705,7 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
   // observed stable" progress and cost an extra tick once the interval reopened
   // (e.g. via a boundary marker) — even though the pane never actually moved.
   // Own hash key (last_pane_hash_compact) so this tracker never collides with
-  // maybeContextClear's (last_pane_hash_ctx) — both can be mid-cycle at once.
+  // maybeStandaloneClear's (last_pane_hash_standalone); both can be mid-cycle at once.
   const currentHash = getPaneHash(sessionName, world);
   const prevHash = watchdogState.last_pane_hash_compact ?? null;
   const paneStable = currentHash !== null && currentHash === prevHash;
@@ -1816,29 +1718,29 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
   if (!boundaryWaive && watchdogState.last_compacted_at) {
     const sinceLast = ageSecs(watchdogState.last_compacted_at, world);
     if (sinceLast !== null && sinceLast < minIntervalSecs) {
-      return stampedState(world, watchdogState, 'compact', 'skip:interval-cooldown', prompt, compactible);
+      return stampedState(world, watchdogState, 'skip:interval-cooldown', prompt, compactible);
     }
   }
 
   // Idempotence: bail if this cost-log entry was already compacted
   if (watchdogState.last_compacted_cost_ts && watchdogState.last_compacted_cost_ts === lastEntry.timestamp) {
-    return stampedState(world, watchdogState, 'compact', 'skip:already-processed', prompt, compactible);
+    return stampedState(world, watchdogState, 'skip:already-processed', prompt, compactible);
   }
 
   if (!paneStable) {
-    return stampedState(world, watchdogState, 'compact', 'skip:quiescence-pending', prompt, compactible);
+    return stampedState(world, watchdogState, 'skip:quiescence-pending', prompt, compactible);
   }
 
   // Pane stable across two ticks — safe to compact
   if (!tryAcquireLifecycleLock(world)) {
-    return stampedState(world, watchdogState, 'compact', 'skip:lock-held', prompt, compactible);
+    return stampedState(world, watchdogState, 'skip:lock-held', prompt, compactible);
   }
   try {
     world.tmux.send(sessionName, composeCompactSteeringMessage());
     watchdogState.last_compacted_cost_ts = lastEntry.timestamp;
     watchdogState.last_compacted_at = worldStamp(world);
     watchdogState.last_pane_hash_compact = null; // reset so next bloat cycle re-arms
-    setHygieneEval(world, watchdogState, 'compact', 'fired', prompt, compactible);
+    setHygieneEval(world, watchdogState, 'fired', prompt, compactible);
     writeWatchdogState(watchdogState, world);
     world.files.rm(markerPath); // consume the boundary waiver now that it fired
     // Both token counts travel in the event so the next cost-log entry gives a
@@ -1847,7 +1749,8 @@ export function maybeContextCompact(config: Json, world: World = REAL_WORLD): Hy
   } finally {
     releaseLock(lifecycleLockPath(world));
   }
-  // The caller exits the tick on 'fired' (main step 0c) — see maybeContextClear.
+  // The caller exits the tick on 'fired' (main step 0c). Returning it rather than
+  // calling process.exit here keeps the fired path reachable from an in-process test.
   return 'fired';
 }
 
@@ -1926,14 +1829,8 @@ async function main(): Promise<void> {
   // 0a. Standalone clear, independent of watchdog.enabled.
   maybeStandaloneClear(config);
 
-  // 0b. Context-size clear — independent of watchdog.enabled; runs on any always-on hermit.
-  // A fired clear ends the tick: the context it was measuring no longer exists, so every
-  // gate below would be deciding on a stale reading.
-  if (maybeContextClear(config) === 'fired') process.exit(0);
-
   // 0c. Routine-hygiene compact — independent of watchdog.enabled; runs on any always-on
-  // hermit. Evaluated after the emergency clear so a 700k context takes the /clear path,
-  // not compact, on the same tick.
+  // hermit.
   if (maybeContextCompact(config) === 'fired') process.exit(0);
 
   // 0d. Telemetry export — independent of watchdog.enabled, like 0a-0c; opt-in via
@@ -2023,7 +1920,7 @@ async function main(): Promise<void> {
       ws.orphan_notified = false;
       writeWatchdogState(ws);
     }
-    await doRestart(sessionName, 'dead-process', runtime, timezone, config);
+    await doRestart(sessionName, 'dead-process', runtime, timezone);
     process.exit(0);
   }
 
@@ -2151,7 +2048,7 @@ async function main(): Promise<void> {
   //
   // Bounded, unlike the pane leg. Both suppress the restart tiers below, but the
   // pane leg fires on modals the operator is watching, while this one fires on the
-  // ones nothing else recognises — where step 11's pane-frozen restart used to be
+  // ones nothing else recognises — where step 10's pane-frozen restart used to be
   // the only thing that ever cleared them on an unattended hermit. `statusUpdatedAt`
   // dates the current state, so it is the dialog's own age: honour it for a day,
   // then let that tier reclaim the session.
@@ -2297,11 +2194,11 @@ async function main(): Promise<void> {
 
           if (consecutive >= escalateAfter && paneFrozen && monitorDead) {
             // Persist the bumped count so doctor's checkWatchdog reports it
-            // accurately even though doRestart doesn't touch watchdog-state.
+            // accurately; doRestart re-reads state and only adds last_restart_at.
             watchdogState.consecutive_stale = consecutive;
             watchdogState.last_pane_hash = currentPaneHash;
             writeWatchdogState(watchdogState);
-            await doRestart(sessionName, 'pane-frozen', runtime, timezone, config);
+            await doRestart(sessionName, 'pane-frozen', runtime, timezone);
             // doRestart kills the tmux session and spawns a detached replacement, so the
             // verdict cached at step 3c is stale from here on. Step 5 below sends
             // keys into this pane and guards on it: reusing the pre-restart `true` would
@@ -2661,7 +2558,7 @@ async function cmdRestart(reason: string): Promise<void> {
   adoptSessionConfigDir(runtime);
   const sessionName = runtime.tmux_session || deriveSessionName(config);
   if (!sessionName) process.exit(0);
-  await doRestart(sessionName, reason, runtime, config.timezone ?? 'UTC', config);
+  await doRestart(sessionName, reason, runtime, config.timezone ?? 'UTC', false);
 }
 
 if (import.meta.main) {

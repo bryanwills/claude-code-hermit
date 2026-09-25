@@ -205,9 +205,9 @@ Not suitable for routines whose value is chat or transcript output (subagent out
 
 ## 5. Reconnecting After Disconnects
 
-Watchdog restarts resume the resident conversation when the compact tier is enabled, the last own cost entry is valid and below its context threshold, and the transcript contains a user turn; otherwise they start fresh and record the gate result in `state/watchdog-events.jsonl`.
+Restarts the watchdog detects (a dead session, a frozen pane, a dead monitor) resume the resident conversation when the session id is known and no other restart happened in the previous hour (`last_restart_at` in `state/watchdog-state.json`); a missing id starts fresh as `fresh: no-session-id` and a crash loop starts fresh as `fresh: recent-restart`, both recorded in `state/watchdog-events.jsonl`. A restart requested through `hermit-watchdog restart`, such as a login renewal, always starts fresh (`fresh: requested`). `hermit-start` still starts fresh when the transcript has no user turn. The restart notice says whether the conversation was restored or started fresh.
 
-For a manual start that keeps the conversation, use `hermit-start --resume` or `hermit-docker restart --resume` (`hermit-docker up --resume` also accepts the opt-in). Manual resume skips the size gate but still requires a transcript with a user turn. Starts without `--resume` create a fresh conversation. Resume applies only to always-on boots with a bootstrap prompt; the existing archive-or-resume recovery question still controls whether work continues.
+For a manual start that keeps the conversation, use `hermit-start --resume` or `hermit-docker restart --resume` (`hermit-docker up --resume` also accepts the opt-in). Manual resume skips the loop guard but still requires a transcript with a user turn. Starts without `--resume` create a fresh conversation. Resume applies only to always-on boots with a bootstrap prompt; the existing archive-or-resume recovery question still controls whether work continues.
 
 Progress and waiting reasons remain in task records even when a restart starts a fresh conversation.
 

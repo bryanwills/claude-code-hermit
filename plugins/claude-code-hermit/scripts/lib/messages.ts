@@ -251,7 +251,7 @@ export const MINT: Localized<MintMessages> = {
 // ---------- watchdog lifecycle pushes (hermit-watchdog.ts) ----------
 
 export interface WatchdogMessages {
-  restart(hhmm: string, cause: string): string;
+  restart(hhmm: string, cause: string, resumed: boolean): string;
   restartCauseNotRunning(): string;
   restartCauseFrozen(): string;
   wedge(hhmm: string): string;
@@ -272,10 +272,12 @@ export interface WatchdogMessages {
 
 export const WATCHDOG: Localized<WatchdogMessages> = {
   en: {
-    restart: (hhmm, cause) => `Attempting to restart your agent at ${hhmm}: ${cause}.`,
+    restart: (hhmm, cause, resumed) => resumed
+      ? `Attempting to restart your agent at ${hhmm}: ${cause}. Its conversation is restored where possible, but work in flight since the last save may not have carried over, so it will re-check its work before continuing.`
+      : `Attempting to restart your agent at ${hhmm}: ${cause}. It starts a fresh conversation, so work in flight since the last save is lost and it picks up from its saved work.`,
     restartCauseNotRunning: () => "it wasn't running",
     restartCauseFrozen: () => 'it had frozen',
-    wedge: (hhmm) => `Your agent hasn't responded in a while — checking on it now (${hhmm}).`,
+    wedge: (hhmm) => `Your agent hasn't responded in a while — checking on it now (${hhmm}). If it has to be restarted, work in flight may be lost.`,
     wedgeRecovered: (hhmm) => `Your agent is responding again, nothing to do (${hhmm}).`,
     pauseUntilResume: (label) => `Your agent is paused (${label}) until you resume it.`,
     pauseUntilDate: (label, boundary) => `Your agent is paused (${label}) until ${boundary}.`,
@@ -301,10 +303,12 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
       `Your agent is affected by a temporary Claude service outage (${hhmm}). It will resume on its own. https://status.claude.com`,
   },
   'pt-PT': {
-    restart: (hhmm, cause) => `A tentar reiniciar o seu agente às ${hhmm}: ${cause}.`,
+    restart: (hhmm, cause, resumed) => resumed
+      ? `A tentar reiniciar o seu agente às ${hhmm}: ${cause}. A conversa é retomada sempre que possível, mas o trabalho em curso desde o último registo pode não ter sido mantido, por isso o agente volta a verificar o seu trabalho antes de continuar.`
+      : `A tentar reiniciar o seu agente às ${hhmm}: ${cause}. Começa uma conversa nova, por isso o trabalho em curso desde o último registo perde-se e o agente retoma a partir do trabalho guardado.`,
     restartCauseNotRunning: () => 'não estava a correr',
     restartCauseFrozen: () => 'tinha bloqueado',
-    wedge: (hhmm) => `O seu agente não responde há algum tempo — estou a verificá-lo agora (${hhmm}).`,
+    wedge: (hhmm) => `O seu agente não responde há algum tempo — estou a verificá-lo agora (${hhmm}). Se tiver de ser reiniciado, o trabalho em curso pode perder-se.`,
     wedgeRecovered: (hhmm) => `O seu agente já está a responder, não precisa de fazer nada (${hhmm}).`,
     pauseUntilResume: (label) => `O seu agente está em pausa (${label}) até que a retome.`,
     pauseUntilDate: (label, boundary) => `O seu agente está em pausa (${label}) até ${boundary}.`,

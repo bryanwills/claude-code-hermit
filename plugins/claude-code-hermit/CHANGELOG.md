@@ -7,9 +7,17 @@
 - `spawn-session` launches helpers in the project folder by default, or in another folder with `--cwd <abs-dir>`, and leaves edit isolation to Claude Code's `worktree.bgIsolation`; `--worktree` gives a helper its own worktree from the start
 - `spawn-session` triggers on "spawn a new session" phrasing, with or without `--model` and `--effort`, and its description names it as the launch path a hand-built `claude --bg` bypasses
 - Accepting a proposal a spawned helper investigated sends the implementation to that helper, resuming it by name when it is no longer running, instead of briefing a fresh agent; the helper lands it as a pull request from its worktree, and the watch relay records its report as implementation rather than triage
+- Watchdog restarts resume the resident conversation whenever the session id is known, instead of only when the compact tier was on and the last context was under its threshold; a restart within an hour of the previous one starts fresh so a crash loop does not re-pay the whole context each time (`fresh: recent-restart` in `state/watchdog-events.jsonl`), and restarts requested through `hermit-watchdog restart`, such as a login renewal, still start fresh
+- Restart notices say whether the conversation was restored or started fresh and what work in flight that may have cost; after a restore the agent re-checks its work before continuing. Wedge notices say a restart may lose work in flight
 
 ### Fixed
 - Weekly review `total_cost_usd` is the week's spend from the cost log instead of the cost attributed to tasks closed that week, so it no longer reads $0 when no task closed; the attributed figure stays as `avg_task_cost_usd`. The first review after this upgrade compares against a prior week measured on the old basis
+
+### Removed
+- The watchdog's emergency `/clear` tier and its `watchdog.context_clear_tokens` key; routine compaction and the standalone clear are unchanged
+
+### Upgrade Instructions
+1. Remove the retired key: `.claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json unset watchdog.context_clear_tokens`. A missing key is fine; nothing reads it any more.
 
 ## [1.4.5] - 2026-09-23
 

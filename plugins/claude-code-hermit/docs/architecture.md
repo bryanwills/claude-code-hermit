@@ -340,7 +340,7 @@ Four mechanisms handle background work — each owns a distinct axis:
 - **hermit-routines**: the only place for time-based semantic work (reflect, plugin-check routines, weekly-review). One native plugin monitor started by the activation skill owns eligibility, gating in-script before any wake; a CronCreate anchor and, on platforms without Monitor, per-routine CronCreates cover re-arm and fallback.
 - **heartbeat**; health/checklist/idle-wake gate only, on its own fixed cadence (default 30m), separate semantics from routine scheduling. Polls via `--peek` in a bash subprocess (zero model cost when quiet); wakes the model only on `EVALUATE` verdicts. Must not be merged into routines; routines and heartbeat now both reach a zero-token quiet path independently, but they gate on different questions (a routine's own cron vs. the checklist's staleness) and merging would conflate the two.
 - **watch** — session-scoped external event streams via the `Monitor` tool. Dies with the session; not a scheduler.
-- **watchdog** — out-of-session process recovery (restart, wedge-nudge, re-arm). `context_hygiene.clear`, `context_clear_tokens`, and `context_hygiene.compact` run on every scheduler tick **independent of `watchdog.enabled`**; they are scheduler-owned context-hygiene co-located in the watchdog script, not watchdog features. Setting `enabled: false` disables restart/nudge only.
+- **watchdog** — out-of-session process recovery (restart, wedge-nudge, re-arm). `context_hygiene.clear` and `context_hygiene.compact` run on every scheduler tick **independent of `watchdog.enabled`**; they are scheduler-owned context-hygiene co-located in the watchdog script, not watchdog features. Setting `enabled: false` disables restart/nudge only.
 
 New periodic semantic work belongs in hermit-routines. A plugin check uses `reflect --check-id <id> --check <namespaced skill>` as its routine skill; `scheduled_checks` is reserved for session-triggered work at task completion. Heartbeat, watchdog, and watch must not become general schedulers.
 
@@ -350,7 +350,7 @@ New periodic semantic work belongs in hermit-routines. A plugin check uses `refl
 
 Every trigger waits for the safe execution boundary: matching runtime identity, idle observed for at least 60 seconds, no running task worker, an idle or shell registry entry when present, enough compactible tokens, and an unchanged pane across two ticks. Lifecycle guards and the lifecycle lock also apply. `state/context-clear.json` records the policy hash and trigger so the same reason does not fire twice for the current reset. Machine-learned chat destinations and version stamps do not count as policy edits. Native monitors survive a clear and are not re-armed for it.
 
-The existing emergency `watchdog.context_clear_tokens` tier and routine `context_hygiene.compact` tier remain separate. Compaction summarizes the conversation; a clear discards it. Task records survive either action. See [configuration](config-reference.md#context_hygiene).
+The standalone clear and the routine `context_hygiene.compact` tier are separate. Compaction summarizes the conversation; a clear discards it. Task records survive either action. See [configuration](config-reference.md#context_hygiene).
 
 ---
 
@@ -392,7 +392,7 @@ Truthy ambient values win over configured environment values in every carrier.
 | `DISCORD_STATE_DIR`               | (derived)  | Explicit channel path or bare-host project default |
 | `TELEGRAM_STATE_DIR`              | (derived)  | Explicit channel path or bare-host project default |
 
-**Compaction ownership.** Context compaction has exactly three tiers: native autocompact (primary, tuned via `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`), the watchdog's `maybeContextCompact` backstop (fires with an explicit reason code when native compaction hasn't kept up), and the emergency clear tier. No hook injects model-visible compaction suggestions.
+**Compaction ownership.** Context compaction has exactly two tiers: native autocompact (primary, tuned via `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`) and the watchdog's `maybeContextCompact` backstop (fires with an explicit reason code when native compaction hasn't kept up). The standalone clear (`context_hygiene.clear`) discards the context on quiet, age or policy triggers rather than on size. No hook injects model-visible compaction suggestions.
 
 ### Denied operations
 

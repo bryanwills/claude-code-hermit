@@ -15,7 +15,7 @@ process.stdout.on('error', () => {});
 //
 // TRANSCRIPT ROTATION MODEL (live-probed CC 2.1.214): CC writes one
 // <sessionUuid>.jsonl per session id. A new file appears on session boot,
-// restart, plugin update, and /clear (incl. the watchdog's emergency clear) —
+// restart, plugin update, and /clear (incl. the watchdog's standalone clear) —
 // the old file simply stops with no terminal marker. Compaction does NOT rotate
 // (compact_boundary is an inline entry). An always-on hermit is therefore ONE
 // long-lived session that rotates irregularly, so the window is TIME-based
