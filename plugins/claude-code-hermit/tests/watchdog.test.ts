@@ -14,6 +14,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { runScript, SCRIPTS_DIR } from './helpers/run';
+import { heartbeatCommand, heartbeatInterval } from '../scripts/lib/heartbeat/monitor-cmd';
+import { routineCommand } from '../scripts/lib/routines/arm';
 import { freshDirFactory } from './helpers/workdir';
 import { transcriptDirFor } from '../scripts/lib/cc-compat';
 import {
@@ -2614,8 +2616,16 @@ const tmuxCalls = (h: Hermit) => {
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '';
 };
 const events = (h: Hermit) => (fs.existsSync(eventsFile(h)) ? fs.readFileSync(eventsFile(h), 'utf-8') : '');
-const writeState = (h: Hermit, name: string, obj: unknown) =>
+const writeState = (h: Hermit, name: string, obj: unknown) => {
+  const hermitDir = path.join(h.dir, '.claude-code-hermit');
+  if (name === 'heartbeat-monitor.runtime.json') {
+    const config = readJson(path.join(hermitDir, 'config.json'));
+    obj = { interval: heartbeatInterval(config), command: heartbeatCommand(hermitDir, config), launch: 'native', ...obj as object };
+  } else if (name === 'routine-monitor.runtime.json') {
+    obj = { command: routineCommand(hermitDir), launch: 'native', ...obj as object };
+  }
   fs.writeFileSync(state(h, name), JSON.stringify(obj) + '\n');
+};
 const writeRoutineMonitorConfig = (h: Hermit) =>
   fs.writeFileSync(path.join(h.dir, '.claude-code-hermit', 'config.json'), JSON.stringify({
     watchdog: { enabled: true, stale_factor: 2, escalate_after: 3, operator_grace: '15m' },
@@ -2751,11 +2761,10 @@ test('no tick at all → re-arm on the 2m spawn grace', withHermit(async (h) => 
   expect(events(h)).toContain('monitor-rearm');
 }));
 
-// `every` can be edited without re-running `start`, leaving the live loop on the cadence
-// it was registered with. The grace follows the registration, so a 30m monitor faults at
-// 31 min even while config says 2h — which would otherwise hold it fresh for 121 min.
-test('predates-grace follows runtime.interval, not config.every', withHermit(async (h) => {
-  writeConfig(h); // every: 2h
+// Keep config and registration aligned so drift does not pre-empt freshness.
+// A 30m registration's predates grace expires at 31 minutes.
+test('predates-grace expires after the registered 30m interval', withHermit(async (h) => {
+  writeConfig(h, '30m');
   writeState(h, 'heartbeat-monitor.runtime.json', { started_at: isoAgo(45 / 60), interval: 1800 });
   writeState(h, 'heartbeat-liveness.json', { last_peek_at: isoAgo(55 / 60) });
   writeFakeTmux(h, 0);

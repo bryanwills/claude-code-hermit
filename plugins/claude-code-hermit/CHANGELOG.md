@@ -4,6 +4,7 @@
 
 ### Changed
 - The watchdog runs its checks as one ordered list over a per-tick snapshot, and re-observes the session after a restart. `install`/`uninstall` live in `scripts/hermit-watchdog-install.ts`
+- Doctor's heartbeat and routine-monitor rows and the watchdog's monitor re-arm share the arming verdict. Doctor fails on registration, launch and anchor drift and an anchor that has not fired in over a day; the watchdog re-arms on registration drift as well as stale liveness
 - `proposal-act` keeps its guards, accept steps, defer, dismiss and resolve in `SKILL.md` and reads the accept options and channel re-entry from `branches.md`
 - `spawn-session` launches helpers in the project folder by default, or in another folder with `--cwd <abs-dir>`, and leaves edit isolation to Claude Code's `worktree.bgIsolation`; `--worktree` gives a helper its own worktree from the start
 - `spawn-session` triggers on "spawn a new session" phrasing, with or without `--model` and `--effort`, and its description names it as the launch path a hand-built `claude --bg` bypasses

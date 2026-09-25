@@ -51,7 +51,9 @@ import { readContextSurface } from './lib/context-surface';
 import { runTelemetryExportIfDue } from './report-export';
 import { applyContextReset } from './lib/context-reset';
 import { ensureLedgerFile } from './lib/append-jsonl';
-import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness } from './lib/monitor-health';
+import { heartbeatHealth } from './lib/heartbeat/monitor-cmd';
+import { routineHealth } from './lib/routines/arm';
+import { bootMismatch } from './lib/monitor-health';
 import { readBootId } from './lib/routines/registry';
 import { resolveMaintainerTarget } from './resolve-outbound-channel';
 
@@ -61,7 +63,7 @@ const CONFIG_PATH = '.claude-code-hermit/config.json';
 // Paths the decision cascade reaches through World.paths (watchdog-state.json,
 // watchdog-events.jsonl, last-operator-action.json, compact-requested.json) are
 // joined at their use sites off world.paths.stateDir, not pinned here.
-const HERMIT_ROOT = path.dirname(STATE_DIR); // '.claude-code-hermit' — isPaused() joins its own 'state/pause.json'
+const HERMIT_ROOT = path.resolve(STATE_DIR, '..'); // Registration commands carry the absolute state root.
 const REAUTH_MARKER_JSON = path.join(STATE_DIR, 'reauth-relay.json');
 /** A signed-in credential staged by the mint, waiting for this watchdog to commit it. */
 const PENDING_CREDENTIAL_JSON = path.join(STATE_DIR, 'pending-credential.json');
@@ -1214,23 +1216,16 @@ async function doNudge(sessionName: string, watchdogState: Json, consecutive: nu
 
 // --- Monitor-liveness re-arm (step 5) ---
 //
-// Keys off ground truth: the per-poll liveness files the monitors themselves stamp.
-// Its staleness logic mirrors doctor's checkHeartbeat/checkRoutineMonitor (trusted-tick
-// vs started_at, startup grace, boot gate) so a doctor 'fail' and a watchdog re-arm
-// trip on the same signal.
+// heartbeatHealth and routineHealth define monitor health; the watchdog selects
+// recoverable reasons and adds boot-marker grace and re-arm policy.
 
-// A monitor writes liveness on its first loop iteration, so a real tick lands within
-// seconds of spawn; the grace only needs to cover spawn + first precheck. This is the
-// absent-liveness grace only — a tick that merely predates started_at gets the wider
-// heartbeatPredatesGraceSecs, which has to outlast one poll interval.
-const MONITOR_STARTUP_GRACE_SECS = 120;
 // Grace before a boot mismatch is trusted, measured from the `.boot-id` marker's mtime.
 // hermit-start stamps that marker itself, but the monitors are re-registered by the
 // bootstrap turn that follows it (`/heartbeat start`, `/hermit-routines load`), so in
 // between the runtime files legitimately still carry the previous boot's id — re-arming
 // there would duplicate an injection already in flight. A boot that still has not
 // re-registered after this window is genuinely stuck, and the re-arm is then correct.
-// Wider than MONITOR_STARTUP_GRACE_SECS because it must cover a whole model turn.
+// Covers a whole model turn, beyond the monitor spawn grace.
 const BOOT_GATE_GRACE_SECS = 600;
 // One re-arm attempt per monitor per this window. Essential: where Monitor spawn is
 // blocked outright (seccomp / nested-userns), an undamped liveness-keyed re-arm would
@@ -1248,36 +1243,6 @@ export const WEDGE_FLOOR_DEFAULT = '4h';
 const RESUME_LOOP_GUARD_SECS = 3600;
 
 /**
- * True when a monitor that should be ticking has a liveness timestamp stale past
- * thresholdSecs — or, lacking any trusted tick, a registration older than the startup
- * grace. Trust mirrors doctor: a tick predating started_at belongs to a prior session's
- * monitor and is not proof the current one is alive. A monitor never registered
- * (runtimeData null, so started_at unknown) returns false — re-registering that is
- * resident-start's job, not the watchdog's.
- */
-function monitorLivenessStale(
-  livenessFile: string,
-  runtimeData: Json,
-  thresholdSecs: number,
-  predatesGraceSecs: number = MONITOR_STARTUP_GRACE_SECS,
-  world: World = REAL_WORLD,
-): boolean {
-  const startedAt: string | null =
-    runtimeData && typeof runtimeData.started_at === 'string' ? runtimeData.started_at : null;
-  const liveness = world.files.readJson(path.join(world.paths.stateDir, livenessFile));
-  const lastPeekAt: string | null =
-    liveness && typeof liveness.last_peek_at === 'string' ? liveness.last_peek_at : null;
-  return !monitorFreshness(
-    startedAt,
-    lastPeekAt,
-    thresholdSecs,
-    MONITOR_STARTUP_GRACE_SECS,
-    world.clock.nowMs(),
-    predatesGraceSecs,
-  ).fresh;
-}
-
-/**
  * Does this registration belong to a dead previous boot? Liveness alone cannot see
  * that: a monitor dies with its session, so its last tick is at most one interval old
  * and still reads "fresh" for the rest of the window (90 min at the default heartbeat
@@ -1286,46 +1251,43 @@ function monitorLivenessStale(
  * false, falling through to the plain freshness check (see `bootMismatch`).
  */
 function monitorBootStale(runtimeData: Json, world: World = REAL_WORLD): boolean {
-  if (!bootMismatch(runtimeData?.boot_id, readBootId(world.paths.hermitRoot))) return false;
+  return bootMismatch(runtimeData?.boot_id, readBootId(world.paths.hermitRoot)) && bootGraceElapsed(world);
+}
+
+function bootGraceElapsed(world: World = REAL_WORLD): boolean {
   const markerAgeSecs = getFileAgeSecs(path.join(world.paths.stateDir, '.boot-id'), world);
   return markerAgeSecs !== null && markerAgeSecs >= BOOT_GATE_GRACE_SECS;
 }
 
-/** Heartbeat monitor stale? Gated + thresholded exactly as doctor's checkHeartbeat. */
-function heartbeatMonitorStale(config: Json, world: World = REAL_WORLD): boolean {
-  const hbCfg = config?.heartbeat;
-  if (!hbCfg || typeof hbCfg !== 'object' || Array.isArray(hbCfg) || !hbCfg.enabled) return false;
-  const thresholdSecs = 3 * parseDuration(hbCfg.every ?? '30m');
-  const monRt = world.files.readJson(path.join(world.paths.stateDir, 'heartbeat-monitor.runtime.json'));
-  if (monitorBootStale(monRt, world)) return true;
-  // Grace off the registered cadence, not config's: `every` can be edited without a
-  // re-arm, and the running loop still polls at the interval it was started with.
-  const interval = typeof monRt?.interval === 'number' && monRt.interval > 0
-    ? monRt.interval
-    : parseDuration(hbCfg.every ?? '30m');
-  return monitorLivenessStale(
-    'heartbeat-liveness.json',
-    monRt,
-    thresholdSecs,
-    heartbeatPredatesGraceSecs(interval),
-    world,
-  );
+/** A live supervisor on a drifted command makes the arming verbs answer RESTART_REQUIRED, so a re-arm is futile. */
+function supervisorAlive(livenessFile: string, world: World = REAL_WORLD): boolean {
+  const live = world.files.readJson(path.join(world.paths.stateDir, livenessFile));
+  return typeof live?.pid === 'number' && pidAlive(live.pid);
 }
 
-/** Routine monitor stale? Gated + thresholded exactly as doctor's checkRoutineMonitor. */
-function routineMonitorStale(config: Json, world: World = REAL_WORLD): boolean {
+/** Recoverable heartbeatHealth reason, or null; boot drift waits out the bootstrap grace. */
+function heartbeatMonitorStale(config: Json, world: World = REAL_WORLD): string | null {
+  const health = heartbeatHealth(world.paths.hermitRoot, config, world.clock.nowMs());
+  if (health.healthy) return null;
+  if (health.reason === 'boot-mismatch') return bootGraceElapsed(world) ? health.reason : null;
+  if (health.reason === 'command-drift') return supervisorAlive('heartbeat-liveness.json', world) ? null : health.reason;
+  return ['liveness-stale', 'liveness-absent', 'liveness-predates-start', 'interval-drift'].includes(health.reason) ? health.reason : null;
+}
+
+/** Recoverable routineHealth reason, or null; fallback retains its own boot gate. */
+function routineMonitorStale(config: Json, world: World = REAL_WORLD): string | null {
   const routines = Array.isArray(config?.routines) ? config.routines : [];
   const anyEnabled = routines.some((r: Json) => r && r.enabled === true && r.id !== 'heartbeat-restart');
-  if (!anyEnabled) return false;
+  if (!anyEnabled) return null;
   const monRt = world.files.readJson(path.join(world.paths.stateDir, 'routine-monitor.runtime.json'));
-  if (!monRt) return false; // not loaded — resident-start's job, not the watchdog's
+  if (!monRt) return null; // not loaded — resident-start's job, not the watchdog's
   // Boot gate ahead of the fallback bail: croncreate-fallback writes no liveness file,
   // so the boot id is the only evidence its durable:false crons died with that process.
-  if (monitorBootStale(monRt, world)) return true;
-  if (monRt.mode === 'croncreate-fallback') return false; // CronCreate fallback (no Monitor)
-  const interval = typeof monRt.interval === 'number' && monRt.interval > 0 ? monRt.interval : 60;
-  const thresholdSecs = Math.max(10 * interval, 10 * 60);
-  return monitorLivenessStale('routine-monitor-liveness.json', monRt, thresholdSecs, MONITOR_STARTUP_GRACE_SECS, world);
+  if (monitorBootStale(monRt, world)) return 'boot-mismatch';
+  if (monRt.mode === 'croncreate-fallback') return null; // CronCreate fallback (no Monitor)
+  const health = routineHealth(world.paths.hermitRoot, world.clock.nowMs());
+  if (health.reason === 'command-drift') return supervisorAlive('routine-monitor-liveness.json', world) ? null : health.reason;
+  return !health.healthy && ['liveness-stale', 'liveness-absent', 'liveness-predates-start', 'launch-drift'].includes(health.reason) ? health.reason : null;
 }
 
 /** Damper open when the given re-arm timestamp is older than MONITOR_REARM_DAMPER_SECS
@@ -1398,7 +1360,8 @@ async function maybeMonitorRearm(config: Json, sessionName: string, sessionAlive
   writeWatchdogState(state, world);
 
   const targets = [doHeartbeat ? 'heartbeat' : null, doRoutines ? 'routine-monitor' : null].filter(Boolean).join('+');
-  appendEvent('monitor-rearm', `${targets} liveness stale`, world);
+  const reasons = [doHeartbeat ? `heartbeat:${heartbeatStale}` : null, doRoutines ? `routine-monitor:${routineStale}` : null].filter(Boolean).join(' ');
+  appendEvent('monitor-rearm', reasons, world);
   process.stderr.write(`[watchdog] monitor re-arm "${sessionName}" (${targets})\n`);
 }
 
