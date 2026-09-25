@@ -33,7 +33,7 @@ case "$RUNTIME_MODE" in
       echo "[hermit] No tmux session recorded — run bin/hermit-start to launch." >&2
       exit 1
     fi
-    if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    if ! tmux has-session -t "=$TMUX_SESSION" 2>/dev/null; then
       echo "[hermit] Session \"$TMUX_SESSION\" is not alive — run bin/hermit-start to relaunch." >&2
       exit 1
     fi

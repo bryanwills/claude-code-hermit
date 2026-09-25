@@ -545,6 +545,62 @@ describe('hermit-update host path', () => {
 });
 
 // -------------------------------------------------------
+// hermit-docker up: host tmux resident guard (stubbed docker/tmux)
+// -------------------------------------------------------
+
+describe('hermit-docker up host tmux guard', () => {
+  // The fake tmux reports only the exact-match `=hermit-demo` target alive; the
+  // fake docker records its argv so a refused boot shows no `up -d`, and reports
+  // the service running so restart gets past its running check.
+  async function up(runtime: object, env: Record<string, string> = {}, cmd = 'up') {
+    const wd = setupWorkdir();
+    const proj = wd.dir;
+    fs.mkdirSync(hermit(proj, 'bin'), { recursive: true });
+    fs.mkdirSync(hermit(proj, 'state'), { recursive: true });
+    fs.copyFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-docker'), hermit(proj, 'bin', 'hermit-docker'));
+    write(hermit(proj, 'config.json'), JSON.stringify({ tmux_session_name: 'hermit-demo' }));
+    write(path.join(proj, 'docker-compose.hermit.yml'), 'services: {}\n');
+    write(hermit(proj, 'state', 'runtime.json'), JSON.stringify(runtime));
+    const stub = path.join(proj, '.stub');
+    const dockerLog = path.join(stub, 'docker.log');
+    fs.mkdirSync(stub);
+    write(path.join(stub, 'docker'), `#!/usr/bin/env bash\necho "$*" >> "${dockerLog}"\ncase "$*" in *" ps "*) echo hermit ;; esac\nexit 0\n`);
+    write(path.join(stub, 'tmux'), '#!/usr/bin/env bash\n[ "$1 $2 $3" = "has-session -t =hermit-demo" ] && exit 0\nexit 1\n');
+    write(path.join(stub, 'sleep'), '#!/usr/bin/env bash\nexit 0\n');
+    for (const f of ['docker', 'tmux', 'sleep']) fs.chmodSync(path.join(stub, f), 0o755);
+    try {
+      const r = await runBash(hermit(proj, 'bin', 'hermit-docker'), {
+        args: [cmd], cwd: proj, env: { PATH: `${stub}:${process.env.PATH}`, ...env },
+      });
+      const calls = fs.existsSync(dockerLog) ? fs.readFileSync(dockerLog, 'utf8') : '';
+      return { ...r, booted: calls.includes('up -d') };
+    } finally { wd.cleanup(); }
+  }
+
+  test('refuses while the recorded host tmux session is alive', async () => {
+    const r = await up({ runtime_mode: 'tmux', tmux_session: 'hermit-demo' });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("host tmux session 'hermit-demo'");
+    expect(r.booted).toBe(false);
+  });
+
+  // An inert container left by a boot conflict still counts as running, so
+  // restart reaches the entrypoint just like up does.
+  test('restart refuses too while the host tmux session is alive', async () => {
+    const r = await up({ runtime_mode: 'tmux', tmux_session: 'hermit-demo' }, {}, 'restart');
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("host tmux session 'hermit-demo'");
+    expect(r.booted).toBe(false);
+  });
+
+  test('boots when the session is gone, the record is docker, or HERMIT_FORCE_BOOT=1', async () => {
+    expect((await up({ runtime_mode: 'tmux', tmux_session: 'hermit-dem' })).booted).toBe(true);
+    expect((await up({ runtime_mode: 'docker', tmux_session: 'hermit-demo' })).booted).toBe(true);
+    expect((await up({ runtime_mode: 'tmux', tmux_session: 'hermit-demo' }, { HERMIT_FORCE_BOOT: '1' })).booted).toBe(true);
+  });
+});
+
+// -------------------------------------------------------
 // sanitize.js — safeForLLM (in-process)
 // -------------------------------------------------------
 

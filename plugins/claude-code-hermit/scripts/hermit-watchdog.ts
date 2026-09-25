@@ -1775,7 +1775,7 @@ function maybeEscapePausedSession(timezone: string): void {
 
 // --- Main decision loop ---
 
-type DecisionResult = 'continue' | 'stop' | 'restarted';
+type DecisionResult = 'continue' | 'stop';
 type Decision<C> = { id: string; run(ctx: C): DecisionResult | Promise<DecisionResult> };
 type TickContext = { world: World; config: Json; timezone: string };
 type Snapshot = {
@@ -2197,7 +2197,7 @@ async function heartbeatWedge({ world, config, timezone, snap }: RecoveryContext
             watchdogState.last_pane_hash = currentPaneHash;
             writeWatchdogState(watchdogState, world);
             await world.actions.restart(sessionName, 'pane-frozen', runtime, timezone);
-            return 'restarted';
+            return 'stop';
           } else {
             await world.actions.nudge(sessionName, watchdogState, consecutive, currentPaneHash, timezone, staleThresholdSecs, { inboxSocket: resolveInboxSocket(runtime), resident });
           }
@@ -2264,9 +2264,7 @@ export async function tick(world: World): Promise<void> {
   const snap = buildSnapshot(ctx);
   if (!snap) return;
   for (const decision of RECOVERY) {
-    const result = await decision.run({ ...ctx, snap });
-    if (result === 'stop') return;
-    if (result === 'restarted') snap.liveness = observeLiveness(world, snap.runtime, snap.sessionName);
+    if (await decision.run({ ...ctx, snap }) === 'stop') return;
   }
 }
 

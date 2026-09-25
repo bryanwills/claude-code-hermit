@@ -208,7 +208,7 @@ _wait_for_claude_prompt_host() {
   return 1
 }
 
-if [ ${#PLUGINS_OK_IDS[@]} -gt 0 ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+if [ ${#PLUGINS_OK_IDS[@]} -gt 0 ] && tmux has-session -t "=$TMUX_SESSION" 2>/dev/null; then
   echo "[hermit] Waiting for Claude Code prompt in tmux session '$TMUX_SESSION' (up to 60s)..."
   if _wait_for_claude_prompt_host; then
     echo "[hermit] Sending /reload-plugins..."

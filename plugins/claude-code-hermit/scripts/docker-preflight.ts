@@ -22,7 +22,7 @@
  *     "existing": { "dockerfile": false, "entrypoint": false, "compose": false },
  *     "gitconfigExists": true,
  *     "memory": { "pathKey": "-home-user-project", "seedExists": false },
- *     "liveOwner": { "mode": "tmux", "ageSecs": 42 } | null
+ *     "liveOwner": { "mode": "tmux", "ageSecs": 42 | null } | null
  *   }
  */
 
@@ -47,13 +47,15 @@ function dockerVersion(): string | null {
  *
  * Mirrors the entrypoint's split-brain guard (docker-entrypoint template) and
  * hermit-start's shouldRefuseBoot: same runtime_mode / cleanly-stopped test,
- * same liveness files, same 600s window: all three agree on what "another
- * instance is alive" means. Deliberately NOT a call into shouldRefuseBoot: its
+ * same liveness files, same 600s window, plus the host tmux check below that the
+ * entrypoint cannot make. Deliberately NOT a call into shouldRefuseBoot: its
  * first branch also refuses when a Docker hermit is running, which is the
  * supported case for re-running /docker-setup over an existing container.
  *
- * Fresh proves alive; stale proves nothing (see lib/liveness), so a stale or
- * absent signal reads as null, and the wizard proceeds as it does today.
+ * Fresh proves alive; stale proves nothing (see lib/liveness). A live host tmux
+ * session is the one extra proof: it owns the state even when its liveness files
+ * went stale (routines off, long heartbeat), which the container's entrypoint
+ * cannot see. `ageSecs` is null when that session has written no liveness file.
  */
 function liveOwner(projectRoot: string, hermitDir: string) {
   try {
@@ -62,9 +64,10 @@ function liveOwner(projectRoot: string, hermitDir: string) {
     const mode = rt && typeof rt.runtime_mode === 'string' ? rt.runtime_mode : '';
     if (!mode || mode === 'docker') return null;
     const sessionName = typeof rt?.tmux_session === 'string' ? rt.tmux_session : '';
-    const ageSecs = otherRuntimeLive(residentLiveness(rt, sessionName, REAL_LIVENESS_DEPS(hermitRoot)), 'docker');
-    if (ageSecs === null) return null;
-    return { mode, ageSecs: Math.round(ageSecs) };
+    const verdict = residentLiveness(rt, sessionName, REAL_LIVENESS_DEPS(hermitRoot));
+    if (otherRuntimeLive(verdict, 'docker') === null && verdict.state !== 'alive') return null;
+    const age = verdict.evidence.livenessAgeSecs;
+    return { mode, ageSecs: age === null ? null : Math.round(age) };
   } catch {
     return null;
   }

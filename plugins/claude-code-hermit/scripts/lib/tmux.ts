@@ -37,9 +37,10 @@ function runTmux(transport: Transport, args: string[]): { status: number | null;
   return { status: r.status, error: r.error };
 }
 
-/** Return true when the named tmux session exists. */
+/** Return true when the named tmux session exists. `=` forces an exact match: a bare
+ *  target also matches a session whose name merely starts with `name`. */
 export function tmuxSessionAlive(name: string, transport: Transport = HOST): boolean {
-  return runTmux(transport, ['has-session', '-t', name]).status === 0;
+  return runTmux(transport, ['has-session', '-t', `=${name}`]).status === 0;
 }
 
 /** Capture the visible pane as text, or null when tmux cannot read it. */
