@@ -17,8 +17,8 @@ function main(payload: any): void {
     refuse('helper report was not substituted; delivery failed');
   }
   if (payload.hook_event_name !== 'PreToolUse') return;
-  const match = /^\[\[helper-report ([a-z0-9]{6,64})\]\]$/.exec(input.text);
-  if (!match) refuse('malformed helper-report placeholder: send exactly [[helper-report <id>]]');
+  const match = /^\[\[helper-report ([a-z0-9]{6,64})\]\]$/.exec(input.text.trim());
+  if (!match) refuse('malformed helper-report placeholder: send exactly [[helper-report <id>]], <id> 6 to 64 characters of [a-z0-9]');
   try {
     if (typeof input.chat_id !== 'string' || !input.chat_id) throw new Error('missing chat_id');
     const dir = hermitDir();

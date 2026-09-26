@@ -35,10 +35,17 @@ test('ordinary replies and mid-message mentions remain untouched', withDir(async
 
 test('refuses a malformed placeholder instead of sending it', withDir(async dir => {
   await seed(dir);
-  for (const text of ['[[helper-report ABC123]]', '[[helper-report abc123]] extra', '[[helper-report abc123]', ' [[helper-report abc123]]']) {
+  for (const text of ['[[helper-report ABC123]]', '[[helper-report abc123]] extra', '[[helper-report abc123]', '[[helper-report abc12]]', `[[helper-report ${'a'.repeat(65)}]]`]) {
     expect(await run(dir, payload(text))).toEqual({
-      exitCode: 2, stdout: '', stderr: 'malformed helper-report placeholder: send exactly [[helper-report <id>]]\n',
+      exitCode: 2, stdout: '', stderr: 'malformed helper-report placeholder: send exactly [[helper-report <id>]], <id> 6 to 64 characters of [a-z0-9]\n',
     });
+  }
+}));
+
+test('substitutes a whitespace-padded placeholder', withDir(async dir => {
+  await seed(dir);
+  for (const text of [' [[helper-report abc123]]', '[[helper-report abc123]]\n']) {
+    expect(JSON.parse((await run(dir, payload(text))).stdout).hookSpecificOutput.updatedInput.text).toBe('first report');
   }
 }));
 
