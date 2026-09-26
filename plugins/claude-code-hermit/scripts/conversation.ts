@@ -52,7 +52,7 @@ async function main(): Promise<void> {
       return;
     }
     case 'thread-create': {
-      require(['chat_id', 'name'], ['message_id']);
+      require(['chat_id', 'message_id', 'name']);
       const id = await createThread(dir, config, opts.chat_id, opts.message_id, opts.name);
       if (!id) throw new Error('thread-failed');
       console.log(`OK|${id}`);

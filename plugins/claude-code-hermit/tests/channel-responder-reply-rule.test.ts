@@ -173,7 +173,7 @@ test('procedure owners retain mandatory rules and command interfaces', () => {
       'one open record owns a chat', 'steering, never a second record',
       "chat-lookup --chat-id '<chat_id>'", "thread-create --chat-id '<chat_id>' --message-id '<message_id>' --name '<title>'",
       'title of 1 to 100 characters', 'on `ERROR|`, report it and create no record',
-      'Each gets its own record, thread, card and worker', 'only the first `thread-create` passes `--message-id`',
+      'Each gets its own record, thread, card and worker', 'end the turn only after the last dispatch',
       'Every other chat is its own thread',
       'That reply is the progress card', '--owner resident --conversation <key>',
       'Omit `--card` when the channel returned no message id; do not invent one',
