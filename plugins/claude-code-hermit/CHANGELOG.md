@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- `[[helper-report <id>]]` ids up to 64 characters now substitute, and a malformed placeholder is refused instead of posted to chat as raw text
+
 ## [1.4.6] - 2026-09-25
 
 ### Changed
