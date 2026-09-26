@@ -8,6 +8,9 @@
 - Task thread names lead with what distinguishes the task, so sibling threads and their handles stay tellable apart
 - The Stop intake checkpoint matches every "On it" in a turn to a task record for that chat, so a second acknowledged assignment without a record is caught, and no longer blocks when the acknowledgement resumes an earlier record that has no conversation
 
+### Upgrade Instructions
+1. Delete `.claude-code-hermit/state/intake-ack.json` if it exists. Acknowledgements now live in `state/intake-acks.jsonl` and nothing reads the old file.
+
 ## [1.4.6] - 2026-09-25
 
 ### Changed
