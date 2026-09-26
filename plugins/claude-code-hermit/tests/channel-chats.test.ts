@@ -78,12 +78,14 @@ test.serial('thread creation posts the name and returns null on HTTP or network 
   const previousApi = process.env.HERMIT_DISCORD_API_URL;
   process.env.DISCORD_STATE_DIR = tokenDir;
   const requests: string[] = [];
+  const bodies: unknown[] = [];
   const server = Bun.serve({ port: 0, async fetch(req) {
     expect(req.method).toBe('POST');
     expect(req.headers.get('Authorization')).toBe('Bot test-token');
-    expect(await req.json()).toEqual({ name: 'Task thread' });
+    bodies.push(await req.json());
     const route = new URL(req.url).pathname;
     requests.push(route);
+    if (route.includes('/taken/')) return Response.json({ code: 160004, message: 'A thread has already been created for this message' }, { status: 400 });
     return route.includes('/403/') ? new Response('', { status: 403 }) : Response.json({ id: 'new-thread' });
   } });
   process.env.HERMIT_DISCORD_API_URL = server.url.toString().replace(/\/$/, '');
@@ -92,6 +94,17 @@ test.serial('thread creation posts the name and returns null on HTTP or network 
     expect(await createThread(dir, config, '123', '456', 'Task thread')).toBe('new-thread');
     expect(await createThread(dir, config, '403', '456', 'Task thread')).toBeNull();
     expect(requests).toEqual(['/channels/123/messages/456/threads', '/channels/403/messages/456/threads']);
+    // A message that already holds a thread falls back to a standalone public one,
+    // an announcement thread under an announcement parent.
+    fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: {
+      '123': { parent_id: null, guild_id: '2', type: 0, fetched_at: new Date().toISOString() },
+      '555': { parent_id: null, guild_id: '2', type: 5, fetched_at: new Date().toISOString() },
+    } } }));
+    expect(await createThread(dir, config, '123', 'taken', 'Task thread')).toBe('new-thread');
+    expect(await createThread(dir, config, '555', 'taken', 'Task thread')).toBe('new-thread');
+    expect(requests.slice(2)).toEqual(['/channels/123/messages/taken/threads', '/channels/123/threads', '/channels/555/messages/taken/threads', '/channels/555/threads']);
+    expect(bodies.slice(2)).toEqual([{ name: 'Task thread' }, { name: 'Task thread', type: 11 }, { name: 'Task thread' }, { name: 'Task thread', type: 10 }]);
     server.stop(true);
     expect(await createThread(dir, config, '123', '456', 'Task thread')).toBeNull();
   } finally {
