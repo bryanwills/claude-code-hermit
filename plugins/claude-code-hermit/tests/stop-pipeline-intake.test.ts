@@ -24,7 +24,7 @@ function writeTurn(dir: string, at = '2020-01-01T00:00:00.000Z'): void {
 }
 
 function writeAck(dir: string, patch: Record<string, unknown> = {}): void {
-  fs.writeFileSync(hermit(dir, 'state', 'intake-ack.json'), JSON.stringify({
+  fs.appendFileSync(hermit(dir, 'state', 'intake-acks.jsonl'), JSON.stringify({
     at: '2020-01-01T00:00:01.000Z',
     channel: 'discord',
     chat_id: 'home',
@@ -39,11 +39,11 @@ function writeChats(dir: string, chatId: string, type: number): void {
   }) + '\n');
 }
 
-async function openResident(dir: string, conversation: string): Promise<void> {
+async function openResident(dir: string, conversation: string | null): Promise<void> {
   const r = await runScript('task.ts', {
     cwd: dir,
     env: { AGENT_DIR: hermit(dir) },
-    args: ['open', hermit(dir), '--owner', 'resident', '--requester', 'discord:u1', '--conversation', conversation, '--title', 'Work', '--done', 'Verified'],
+    args: ['open', hermit(dir), '--owner', 'resident', '--requester', 'discord:u1', ...(conversation ? ['--conversation', conversation] : []), '--title', 'Work', '--done', 'Verified'],
   });
   expect(r.exitCode).toBe(0);
 }
@@ -142,6 +142,54 @@ describe('stop-pipeline — channel intake checkpoint', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe('');
     expect(turnExists(dir)).toBe(false);
-    expect(fs.existsSync(hermit(dir, 'state', 'intake-ack.json'))).toBe(false);
+    expect(fs.existsSync(hermit(dir, 'state', 'intake-acks.jsonl'))).toBe(false);
+  }));
+
+  test('two acks with a record for only one: block JSON naming the unrecorded chat', withDir(async (dir) => {
+    writeTurn(dir);
+    writeChats(dir, 't1', 11);
+    writeAck(dir, { chat_id: 't2' });
+    writeAck(dir, { chat_id: 't1' });
+    await openResident(dir, 'discord:t1');
+    const r = await runStop(dir);
+    const body = JSON.parse(r.stdout);
+    expect(body.decision).toBe('block');
+    expect(body.reason).toContain('discord:t2');
+    expect(body.reason).not.toContain('discord:t1');
+    expect(turnExists(dir)).toBe(true);
+  }));
+
+  test('two acks each with its own record: stdout empty, turn marker removed', withDir(async (dir) => {
+    writeTurn(dir);
+    writeChats(dir, 't1', 11);
+    writeAck(dir, { chat_id: 't1' });
+    writeAck(dir, { chat_id: 't2' });
+    await openResident(dir, 'discord:t1');
+    await openResident(dir, 'discord:t2');
+    const r = await runStop(dir);
+    expect(r.stdout.trim()).toBe('');
+    expect(turnExists(dir)).toBe(false);
+  }));
+
+  test('ack for an earlier conversation-less record updated this turn: stdout empty', withDir(async (dir) => {
+    await openResident(dir, null);
+    const [file] = fs.readdirSync(hermit(dir, 'tasks'));
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(hermit(dir, 'tasks', file), past, past);
+    writeTurn(dir, new Date(Date.now() - 1000).toISOString());
+    writeAck(dir, { at: new Date().toISOString() });
+    const blocked = await runStop(dir);
+    expect(JSON.parse(blocked.stdout).decision).toBe('block');
+
+    writeAck(dir, { at: new Date().toISOString() });
+    const r = await runScript('task.ts', {
+      cwd: dir,
+      env: { AGENT_DIR: hermit(dir) },
+      args: ['note', hermit(dir), file.replace(/\.md$/, '')],
+      stdin: 'Resumed\n',
+    });
+    expect(r.exitCode).toBe(0);
+    const passed = await runStop(dir);
+    expect(passed.stdout.trim()).toBe('');
   }));
 });
