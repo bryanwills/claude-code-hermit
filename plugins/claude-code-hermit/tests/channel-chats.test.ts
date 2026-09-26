@@ -78,10 +78,11 @@ test.serial('thread creation posts the name and returns null on HTTP or network 
   const previousApi = process.env.HERMIT_DISCORD_API_URL;
   process.env.DISCORD_STATE_DIR = tokenDir;
   const requests: string[] = [];
+  const bodies: unknown[] = [];
   const server = Bun.serve({ port: 0, async fetch(req) {
     expect(req.method).toBe('POST');
     expect(req.headers.get('Authorization')).toBe('Bot test-token');
-    expect(await req.json()).toEqual({ name: 'Task thread' });
+    bodies.push(await req.json());
     const route = new URL(req.url).pathname;
     requests.push(route);
     return route.includes('/403/') ? new Response('', { status: 403 }) : Response.json({ id: 'new-thread' });
@@ -92,6 +93,15 @@ test.serial('thread creation posts the name and returns null on HTTP or network 
     expect(await createThread(dir, config, '123', '456', 'Task thread')).toBe('new-thread');
     expect(await createThread(dir, config, '403', '456', 'Task thread')).toBeNull();
     expect(requests).toEqual(['/channels/123/messages/456/threads', '/channels/403/messages/456/threads']);
+    // Without a message the thread must be public, and an announcement parent takes an announcement thread.
+    fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'state', 'channel-chats.json'), JSON.stringify({ discord: { chats: {
+      '555': { parent_id: null, guild_id: '2', type: 5, fetched_at: new Date().toISOString() },
+    } } }));
+    expect(await createThread(dir, config, '123', undefined, 'Task thread')).toBe('new-thread');
+    expect(await createThread(dir, config, '555', undefined, 'Task thread')).toBe('new-thread');
+    expect(requests.slice(2)).toEqual(['/channels/123/threads', '/channels/555/threads']);
+    expect(bodies).toEqual([{ name: 'Task thread' }, { name: 'Task thread' }, { name: 'Task thread', type: 11 }, { name: 'Task thread', type: 10 }]);
     server.stop(true);
     expect(await createThread(dir, config, '123', '456', 'Task thread')).toBeNull();
   } finally {

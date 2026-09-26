@@ -104,17 +104,23 @@ export function isThreadType(chat: Pick<Chat, 'type'> | null): boolean {
 // that the caller has been told does not exist. The name is clamped to Discord's
 // 1-100 character limit — an over-long title would otherwise 400 and read as
 // "thread creation unsupported".
-export async function createThread(hermitDir: string, config: Json, chatId: string, messageId: string, name: string): Promise<string | null> {
+// A message holds at most one thread (the thread takes the message's id), so a
+// message carrying several assignments threads the first from the message and the
+// rest without one. Those default to private, hence the explicit public type:
+// an announcement thread (10) in an announcement channel (5), otherwise 11.
+export async function createThread(hermitDir: string, config: Json, chatId: string, messageId: string | undefined, name: string): Promise<string | null> {
   try {
     const token = readChannelToken(hermitDir, 'discord', config?.channels?.discord);
     if (!token) return null;
     const title = name.trim().slice(0, 100);
     if (!title) return null;
     const base = process.env.HERMIT_DISCORD_API_URL || 'https://discord.com/api/v10';
-    const response = await fetch(`${base}/channels/${chatId}/messages/${messageId}/threads`, {
+    const route = messageId ? `/channels/${chatId}/messages/${messageId}/threads` : `/channels/${chatId}/threads`;
+    const payload = messageId ? { name: title } : { name: title, type: cachedChat(hermitDir, chatId)?.type === 5 ? 10 : 11 };
+    const response = await fetch(`${base}${route}`, {
       method: 'POST',
       headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: title }),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) return null;

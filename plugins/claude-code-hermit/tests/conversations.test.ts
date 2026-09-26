@@ -29,6 +29,7 @@ test('the channel library wrappers answer history, chat-lookup, thread-create an
     if (route === '/channels/123') return Response.json({ parent_id: null, guild_id: '2', type: 0 });
     if (route === '/channels/456') return Response.json({ parent_id: '123', guild_id: '2', type: 11 });
     if (route === '/channels/123/messages/9/threads' && req.method === 'POST') return Response.json({ id: '789' });
+    if (route === '/channels/123/threads' && req.method === 'POST') return Response.json({ id: '790' });
     return new Response('', { status: 404 });
   } });
   const env = { HERMIT_DISCORD_API_URL: server.url.toString().replace(/\/$/, ''), DISCORD_STATE_DIR: tokenDir };
@@ -45,6 +46,7 @@ test('the channel library wrappers answer history, chat-lookup, thread-create an
     expect(await run('chat-lookup', '--chat-id', '404')).toEqual({ stdout: 'ERROR|not-found\n', code: 1 });
     expect(await run('thread-create', '--chat-id', '123', '--message-id', '9', '--name', 'Task title')).toEqual({ stdout: 'OK|789\n', code: 0 });
     expect(await run('thread-create', '--chat-id', '123', '--message-id', '8', '--name', 'Task title')).toEqual({ stdout: 'ERROR|thread-failed\n', code: 1 });
+    expect(await run('thread-create', '--chat-id', '123', '--name', 'Second task')).toEqual({ stdout: 'OK|790\n', code: 0 });
     expect(await run('is-trusted', '--source', 'discord', '--user-id', 'u1', '--chat-id', '123')).toEqual({ stdout: 'OK|trusted\n', code: 0 });
     expect(await run('is-trusted', '--source', 'discord', '--user-id', 'u2', '--chat-id', '123')).toEqual({ stdout: 'ERROR|untrusted\n', code: 1 });
     expect(await run('is-trusted', '--source', 'discord', '--user-id', 'u1', '--chat-id', '123', '--name', 'x')).toEqual({ stdout: 'ERROR|invalid-options\n', code: 1 });
