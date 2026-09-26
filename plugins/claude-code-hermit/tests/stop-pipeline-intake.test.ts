@@ -181,6 +181,15 @@ describe('stop-pipeline — channel intake checkpoint', () => {
     expect(r.stdout.trim()).toBe('');
   }));
 
+  test('two unrecorded chats plus a touched conversation-less record: block JSON', withDir(async (dir) => {
+    writeTurn(dir);
+    writeAck(dir, { chat_id: 't1' });
+    writeAck(dir, { chat_id: 't2' });
+    await openResident(dir, null);
+    const r = await runStop(dir);
+    expect(JSON.parse(r.stdout).decision).toBe('block');
+  }));
+
   test('ack for an earlier conversation-less record updated this turn: stdout empty', withDir(async (dir) => {
     await openResident(dir, null);
     const [file] = fs.readdirSync(hermit(dir, 'tasks'));

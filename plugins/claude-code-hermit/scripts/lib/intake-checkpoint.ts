@@ -35,17 +35,17 @@ export function intakeBlockReason(dir: string, sessionId: string | null): string
     const tasks = readTasks(dir);
     const openedThisTurn = (task: { opened_at: string }) => Date.parse(task.opened_at) >= turnAt;
     // A record resumed this turn without a conversation (e.g. opened from a
-    // peer request) backs the acks: its file was rewritten this turn.
+    // peer request) backs one unmatched chat: its file was rewritten this turn.
     const resumedConversationless = tasks.some(task => {
       // Closed records are immutable, so only open ones or ones closed this turn can qualify.
       if (task.conversation !== null || (task.status === 'closed' && !(Date.parse(task.closed_at ?? '') >= turnAt))) return false;
       try { return fs.statSync(path.join(dir, 'tasks', `${task.id}.md`)).mtimeMs >= turnAt; } catch { return false; }
     });
     const chats = new Map(acks.map(ack => [`${ack.channel}:${ack.chat_id}`, String(ack.chat_id)]));
-    const missing = resumedConversationless ? [] : [...chats].filter(([key, chatId]) => !tasks.some(task =>
+    const missing = [...chats].filter(([key, chatId]) => !tasks.some(task =>
       (task.conversation === key || task.card_chat_id === chatId) && (task.status === 'open' || openedThisTurn(task))
     )).map(([key]) => key);
-    if (missing.length > 0) {
+    if (missing.length > (resumedConversationless ? 1 : 0)) {
       return `task skill intake is still open. Run task.ts open now for the work you just acknowledged in ${missing.join(', ')}.`;
     }
 
