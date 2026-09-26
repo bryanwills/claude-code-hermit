@@ -163,7 +163,9 @@ export function persistIntakeAck(
 ): void {
   try {
     if (typeof text !== 'string' || !text.trim().toLowerCase().startsWith('on it')) return;
-    fs.writeFileSync(path.join(hermitDir, 'state', 'intake-ack.json'), JSON.stringify({
+    const ackPath = path.join(hermitDir, 'state', 'intake-acks.jsonl');
+    ensureLedgerFile(ackPath);
+    fs.appendFileSync(ackPath, JSON.stringify({
       at: new Date().toISOString(),
       channel,
       chat_id: chatId != null ? String(chatId) : '',

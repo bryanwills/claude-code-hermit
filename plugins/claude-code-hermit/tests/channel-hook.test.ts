@@ -262,7 +262,7 @@ describe('channel-hook intake ack (PostToolUse)', () => {
       env: envFor(dir),
     });
     expect(r.exitCode).toBe(0);
-    const ack = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'intake-ack.json'), 'utf8'));
+    const ack = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'intake-acks.jsonl'), 'utf8'));
     expect(ack.session_id).toBe('sess-from-payload');
     expect(ack.channel).toBe('discord');
     expect(ack.chat_id).toBe('123');
@@ -278,7 +278,7 @@ describe('channel-hook intake ack (PostToolUse)', () => {
       env: envFor(dir),
     });
     expect(r.exitCode).toBe(0);
-    const ack = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'intake-ack.json'), 'utf8'));
+    const ack = JSON.parse(fs.readFileSync(hermit(dir, 'state', 'intake-acks.jsonl'), 'utf8'));
     expect(ack.session_id).toBeNull();
   }));
 
@@ -293,7 +293,7 @@ describe('channel-hook intake ack (PostToolUse)', () => {
       env: envFor(dir),
     });
     expect(r.exitCode).toBe(0);
-    expect(fs.existsSync(hermit(dir, 'state', 'intake-ack.json'))).toBe(false);
+    expect(fs.existsSync(hermit(dir, 'state', 'intake-acks.jsonl'))).toBe(false);
   }));
 });
 
