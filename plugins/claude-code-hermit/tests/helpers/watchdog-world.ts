@@ -41,7 +41,7 @@ export function watchdogWorld() {
   const put = (file: string, value: unknown) => world.files.writeJson(path.join(root, file), value);
   put('config.json', {
     watchdog: { enabled: true, escalate_after: 1, wedge_floor: '1m' },
-    heartbeat: { enabled: true, every: '1m' },
+    heartbeat: { enabled: true, every: '1m', active_hours: { start: '00:00', end: '23:59' } },
     context_hygiene: { clear: { enabled: false }, compact: { enabled: false } },
     backup: { enabled: false },
   });
