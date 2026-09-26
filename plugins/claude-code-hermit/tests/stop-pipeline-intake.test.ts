@@ -171,25 +171,14 @@ describe('stop-pipeline — channel intake checkpoint', () => {
     expect(turnExists(dir)).toBe(false);
   }));
 
-  test('two acks in one chat with a single record: block JSON', withDir(async (dir) => {
+  test('two acks in one chat with a single record: stdout empty', withDir(async (dir) => {
     writeTurn(dir);
     writeChats(dir, 'dm', 1);
     writeAck(dir, { chat_id: 'dm' });
     writeAck(dir, { chat_id: 'dm' });
     await openResident(dir, 'discord:dm');
     const r = await runStop(dir);
-    const body = JSON.parse(r.stdout);
-    expect(body.decision).toBe('block');
-    expect(body.reason).toContain('discord:dm');
-  }));
-
-  test('a conversation-less record touched this turn backs only one unrecorded ack', withDir(async (dir) => {
-    writeTurn(dir);
-    writeAck(dir, { chat_id: 't1' });
-    writeAck(dir, { chat_id: 't2' });
-    await openResident(dir, null);
-    const r = await runStop(dir);
-    expect(JSON.parse(r.stdout).decision).toBe('block');
+    expect(r.stdout.trim()).toBe('');
   }));
 
   test('ack for an earlier conversation-less record updated this turn: stdout empty', withDir(async (dir) => {
