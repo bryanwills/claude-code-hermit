@@ -12,12 +12,13 @@ function refuse(reason: string): never {
 function main(payload: any): void {
   const input = payload.tool_input;
   if (typeof input?.text !== 'string') return;
-  const match = /^\[\[helper-report ([a-z0-9]{6,16})\]\]$/.exec(input.text);
-  if (!match) return;
+  if (!input.text.trimStart().startsWith('[[helper-report')) return;
   if (payload.hook_event_name === 'PostToolUse') {
     refuse('helper report was not substituted; delivery failed');
   }
   if (payload.hook_event_name !== 'PreToolUse') return;
+  const match = /^\[\[helper-report ([a-z0-9]{6,64})\]\]$/.exec(input.text);
+  if (!match) refuse('malformed helper-report placeholder: send exactly [[helper-report <id>]]');
   try {
     if (typeof input.chat_id !== 'string' || !input.chat_id) throw new Error('missing chat_id');
     const dir = hermitDir();

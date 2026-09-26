@@ -27,10 +27,26 @@ const run = (dir: string, input: object) => runScript('helper-report-relay.ts', 
   cwd: dir, env: { AGENT_DIR: path.join(dir, '.claude-code-hermit') }, stdin: JSON.stringify(input),
 });
 
-test('ordinary replies and non-placeholder shapes remain untouched', withDir(async dir => {
-  for (const text of ['hello', '[[helper-report ABC123]]', '[[helper-report abc123]] extra']) {
+test('ordinary replies and mid-message mentions remain untouched', withDir(async dir => {
+  for (const text of ['hello', 'the tag is [[helper-report abc123]]']) {
     expect(await run(dir, payload(text))).toEqual({ exitCode: 0, stdout: '', stderr: '' });
   }
+}));
+
+test('refuses a malformed placeholder instead of sending it', withDir(async dir => {
+  await seed(dir);
+  for (const text of ['[[helper-report ABC123]]', '[[helper-report abc123]] extra', '[[helper-report abc123]', ' [[helper-report abc123]]']) {
+    expect(await run(dir, payload(text))).toEqual({
+      exitCode: 2, stdout: '', stderr: 'malformed helper-report placeholder: send exactly [[helper-report <id>]]\n',
+    });
+  }
+}));
+
+test('substitutes an id longer than 16 characters', withDir(async dir => {
+  const { reports } = await seed(dir);
+  fs.writeFileSync(path.join(reports, 'capicomposer404v2.md'), 'long id report');
+  const result = await run(dir, payload('[[helper-report capicomposer404v2]]'));
+  expect(JSON.parse(result.stdout).hookSpecificOutput.updatedInput.text).toBe('long id report');
 }));
 
 test('substitutes only the named report byte-exactly and preserves other input', withDir(async dir => {
@@ -102,5 +118,6 @@ test('oversize stdin fails open', withDir(async dir => {
 test('PostToolUse alarms only on an unsubstituted placeholder', withDir(async dir => {
   const result = await run(dir, payload(undefined, undefined, 'PostToolUse'));
   expect(result).toEqual({ exitCode: 2, stdout: '', stderr: 'helper report was not substituted; delivery failed\n' });
+  expect((await run(dir, payload('[[helper-report abc123]', undefined, 'PostToolUse'))).exitCode).toBe(2);
   expect(await run(dir, payload('actual report', undefined, 'PostToolUse'))).toEqual({ exitCode: 0, stdout: '', stderr: '' });
 }));

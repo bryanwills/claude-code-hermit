@@ -103,7 +103,7 @@ The plugin manifest registers 16 shared hooks. The four resident-only hooks (`pa
 
 | Hook | Event and matcher | What it does |
 | ---- | ----------------- | ------------ |
-| Helper report relay | PreToolUse `.*reply$` | Replaces a `[[helper-report <id>]]` reply with that report from `helper-reports/`, refusing the send unless exactly one open record owns the chat |
+| Helper report relay | PreToolUse `.*reply$` | Replaces a `[[helper-report <id>]]` reply with that report from `helper-reports/`, refusing the send when the placeholder is malformed or unless exactly one open record owns the chat |
 | Cache edit guard | PreToolUse `Edit\|Write` | Warns (or blocks) when Edit/Write targets a marketplace cache copy |
 | Settings gate | PreToolUse `Bash\|Edit\|Write` | Raises Claude Code's native permission prompt for execution-adjacent hermit settings, channel enrollment, and direct `config.json` edits |
 | Artifact backend guard | PreToolUse `Artifact` | Denies a native Artifact publish when `artifacts.backend` is not claude, with a reason that names the backend |

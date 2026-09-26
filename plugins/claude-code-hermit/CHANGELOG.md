@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- A `[[helper-report <id>]]` reply with an id over 16 characters, or a malformed placeholder, is refused instead of posted to chat as raw text; ids up to 64 characters substitute
+
 ## [1.4.6] - 2026-09-25
 
 ### Changed
