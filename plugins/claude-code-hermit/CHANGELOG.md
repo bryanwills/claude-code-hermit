@@ -18,7 +18,7 @@
 
 ### Upgrade Instructions
 1. Delete `.claude-code-hermit/state/intake-ack.json` if it exists. Acknowledgements now live in `state/intake-acks.jsonl` and nothing reads the old file.
-2. In `.claude-code-hermit/config.json`, set `artifacts.weekly_review` to `false`. Leave the `weekly_review` entry in `state/artifacts.json` in place so re-enabling republishes to the same URL. Tell the operator: "The standalone weekly-review page is now off by default because the dashboard already shows the full weekly review. To turn it back on, say `/hermit-settings artifact-weekly-review yes`."
+2. Run `.claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json set artifacts.weekly_review false`. Leave the `weekly_review` entry in `state/artifacts.json` in place so re-enabling republishes to the same URL. Tell the operator: "The standalone weekly-review page is now off by default because the dashboard already shows the full weekly review. To turn it back on, say `/hermit-settings artifact-weekly-review yes`."
 
 ## [1.4.6] - 2026-09-25
 

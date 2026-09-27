@@ -514,7 +514,7 @@ if (resolvedWithImpact.length > 0) {
 if (openLoops.length > 0) {
   body += `### Open Loops\n`;
   for (const { p, sessionsSince } of openLoops) {
-    body += `- ${p.fm.id}: ${p.fm.title || 'untitled'} — proposed ${sessionsSince} sessions ago, no action taken.\n`;
+    body += `- ${shortPropId(p.fm.id)}: ${p.fm.title || 'untitled'} — proposed ${sessionsSince} sessions ago, no action taken.\n`;
   }
   body += '\n';
 }
