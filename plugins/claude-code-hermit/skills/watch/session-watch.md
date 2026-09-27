@@ -1,9 +1,8 @@
 # Session watches
 
-Read this procedure for `/watch session`. The shared rules in [SKILL.md](SKILL.md) apply.
-Step 5 uses `SKILL.md` § Starting an ad-hoc watch steps 6–9 for registry writes and task notes.
-When entering from another skill after it has already sent work with `notify_when_idle: true`,
-read those shared rules and registry steps, then follow only steps 3–5 below using that send's result.
+Follow the shared rules in [SKILL.md](SKILL.md). Start a new watch with the first
+section; after a caller has already armed a subscription, use
+[Registering an existing idle subscription](#registering-an-existing-idle-subscription).
 
 ### Starting a session watch (`/watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>] [--implement] [--id <bg-id>]`)
 
@@ -49,8 +48,8 @@ read those shared rules and registry steps, then follow only steps 3–5 below u
    registry. One or more remaining matches: show the operator each matched name
    with the live status its row reports (`idle`, `busy`, `waiting`, `shell`; some
    rows carry none, so show the name alone there) and wait for confirmation
-   before doing anything else. On confirmation, run steps 2–5 below once per
-   matched name, each producing its own registry entry; do step 3's relay check
+   before doing anything else. On confirmation, run step 2 and the registration section below once per
+   matched name, each producing its own registry entry; do the registration relay check
    on the first match before subscribing to the rest, and if it comes back
    operator-only, stop there and decline the whole set rather than subscribing
    the others.
@@ -63,26 +62,37 @@ read those shared rules and registry steps, then follow only steps 3–5 below u
    A target whose turn has already ended fires its notice at once for that same
    turn, so do not send a bodyless subscription to a row showing `idle` or
    `waiting` (except the blocked case below), nor to a target you are sending work to: arm that one by passing
-   `notify_when_idle: true` on the same `SendMessage`, then record the entry with
-   steps 3 to 5. A session just launched or resumed with a prompt can take a
+   `notify_when_idle: true` on the same `SendMessage`, then use the registration section below. A session just launched or resumed with a prompt can take a
    moment to show busy, so without `--id`, re-read its row once before deciding. If it still
    shows `waiting`, read that name's row in `claude agents --json`. When its
    `state` is `blocked`, send the bodyless `notify_when_idle` subscription,
-   record the entry through steps 3 to 5, and tell the caller the session is
+   use the registration section below, and tell the caller the session is
    blocked on its `waitingFor`. A subscription taken while blocked stays
    silent until the prompt is answered, then fires when the turn ends.
    For `idle`, or `waiting` with any other state or no registry row, answer `<name> is not working on anything right
    now, so there is no turn to watch; the next message sent to it arms the
    watch.` and do not write the registry.
-3. Read the tool result: it says whether the notice will be shown to you or only
+   After a successful subscription, follow Registering an existing idle subscription below.
+
+### Registering an existing idle subscription
+
+Inputs: the target name, note, optional record/proposal/purpose metadata, and the
+result of a successful `SendMessage` with `notify_when_idle: true`. This section
+only records that subscription; do not send another message or subscribe again.
+
+1. Read the supplied send result: it says whether the notice will be shown to you or only
    to the operator. When it is operator-only (this session holds peer messages
    for approval, e.g. under `bypassPermissions`), no relay is possible — say so
    plainly instead of claiming the watch is live, and do not write the registry.
-4. Generate id `session-<name>-<epoch>-<4char-random>` — same timestamp + random
+2. Generate id `session-<name>-<epoch>-<4char-random>` — same timestamp + random
    suffix convention as an ad-hoc id, so two watches on one name in the same
    second do not collide.
-5. Use the same registry steps as ad-hoc (steps 6–9), appending:
+3. Read `.claude-code-hermit/state/monitors.runtime.json`; create it if missing
+   with `{"monitors": [], "last_cleared": null}`. Append:
    `{id: "session-<name>-<epoch>-<rand>", description: <note or "session <name>">, target: <name>, started_at, source: "adhoc", class: "peer-idle"}`.
-   When given, store `--record` as `record`, `--proposal` as `proposal` and
-   `--implement` as `purpose: "implement"` on that entry. Do not add `task_id` (`task_id` means a Monitor task and drives
-   `TaskStop`).
+   Store a supplied record as `record`, proposal as `proposal`, and implementation
+   purpose (`--implement`) as `purpose: "implement"`. Do not add `task_id`
+   (`task_id` means a Monitor task and drives `TaskStop`). Write the registry back.
+4. Inside an open task record's turn, note the watch and its id through
+   `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with
+   `- [ACTIVE] <instruction> (started HH:MM)` on stdin. Otherwise skip the note.
