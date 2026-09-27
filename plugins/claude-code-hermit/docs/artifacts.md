@@ -7,7 +7,7 @@ can instead point publishing at a connected MCP artifact server the operator run
 case this file's claude.ai-specific mechanics (tool-call shape, `force`, entitlement,
 TUI-only reachability) are replaced by that server's own protocol — see § Non-claude
 backend deviations. Gated per artifact type under `config.artifacts.*` (default **on** — the
-plugin's research-preview feature-defaults rule; disable a single page via
+plugin's research-preview feature-defaults rule, except the weekly-review page, which is off; toggle a single page via
 `/hermit-settings artifact-dashboard|artifact-proposals|artifact-weekly-review`, or
 disable Artifacts entirely via Claude Code's own `disableArtifact`,
 `CLAUDE_CODE_DISABLE_ARTIFACT`, or `permissions.deny`). Only reachable from the
@@ -273,9 +273,9 @@ message alongside the dashboard's. Same page across the week — each mid-week r
 of the compiled report republishes to the same URL, so the artifact's own version
 history *is* the week's revision history.
 
-Near-duplicate note: the dashboard already embeds the full weekly body in its own
-section. This standalone page's distinct value is a stable per-surface URL and its own
-version history — not new content.
+Off by default: the dashboard already embeds the full weekly body in its own section.
+This standalone page's distinct value is a stable per-surface URL and its own version
+history, not new content. Opt in via `/hermit-settings artifact-weekly-review yes`.
 
 ## On-demand document publish
 

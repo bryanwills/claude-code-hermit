@@ -143,6 +143,20 @@ function writeWeekCostLog(hermitDir: string): void {
   ].join('\n') + '\n');
 }
 
+describe('weekly-review Proposals', () => {
+  test('prints short ids and lists resolved proposals once, under Recently Resolved', withHermitDir(async dir => {
+    const now = new Date().toISOString();
+    fs.writeFileSync(path.join(dir, 'proposals', 'PROP-012-tidy-the-queue-120000.md'),
+      `---\nid: PROP-012-tidy-the-queue-120000\ntitle: Tidy the queue\nstatus: resolved\ncreated: ${now}\nresolved_date: ${now}\n---\nBody.\n`);
+    expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
+    const { body } = readReview(dir);
+    expect(body).toContain('1 created: PROP-012.');
+    expect(body).toContain('1 resolved.');
+    expect(body).toContain('- PROP-012: Tidy the queue');
+    expect(body).not.toContain('tidy-the-queue');
+  }));
+});
+
 // -------------------------------------------------------------------------
 // Usage section — usage-metrics.jsonl → "no tracked use" suggestions.
 // Suggest-only: guarded so a young/missing ledger never reads as "unused".

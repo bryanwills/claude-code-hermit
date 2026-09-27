@@ -134,7 +134,7 @@ export const TABLE: Record<string, Spec> = {
   artifacts: shape({
     dashboard: bool(true),
     proposals: bool(true),
-    weekly_review: bool(true),
+    weekly_review: bool(false),
     publish_authorized: bool(null),
     backend: str('claude'),
   }),

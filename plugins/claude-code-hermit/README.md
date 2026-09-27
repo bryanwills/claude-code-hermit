@@ -124,7 +124,7 @@ Tune from a terminal with `/hermit-settings`, or change permitted settings from 
 | `remote` | remote control; `false` also requires approval for cross-machine peer messages; **`true`** |
 | `ask_gate` | route unattended questions to a paired channel: **`true`** |
 | `budget` | optional daily / weekly / monthly caps; **`alert`** or binding `pause` action |
-| `artifacts` | dashboard / proposals / weekly review: **all enabled** |
+| `artifacts` | dashboard / proposals / weekly review: **dashboard and proposals enabled** |
 | `heartbeat.enabled` | timed idle sweeps: **`true`** |
 | `heartbeat.every` | idle sweep cadence: **`30m`** |
 | `heartbeat.active_hours` | active window: **`08:00`–`23:00`** |
