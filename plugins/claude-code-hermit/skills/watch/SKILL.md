@@ -130,8 +130,7 @@ Start/stop decisions read from the runtime registry.
    `state` is `blocked`, send the bodyless `notify_when_idle` subscription,
    record the entry through steps 3 to 5, and tell the caller the session is
    blocked on its `waitingFor`. A subscription taken while blocked stays
-   silent until the prompt is answered, then fires when the turn ends
-   (probed on Claude Code 2.1.283).
+   silent until the prompt is answered, then fires when the turn ends.
    For `idle`, or `waiting` with any other state or no registry row, answer `<name> is not working on anything right
    now, so there is no turn to watch; the next message sent to it arms the
    watch.` and do not write the registry.

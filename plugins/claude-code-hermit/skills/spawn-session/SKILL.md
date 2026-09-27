@@ -161,10 +161,9 @@ alternate invocation, or weaker permission mode.
    ```
    The output columns are session id, status, state, and waitingFor. Use the
    first column as the full session id `<sid>`: the printed bg id is only its
-   first 8 characters and is not a resume handle. A timeout prints no row;
-   continue to step 4 without `<sid>`.
-   Zero or more than one line means no `<sid>`: say so, and write the lines
-   below without `(<sid>)`. Without `--proposal`, inside an open record's turn,
+   first 8 characters and is not a resume handle. A timeout prints no row,
+   which means no `<sid>`: say so, write the lines below without `(<sid>)`,
+   and continue to step 4. Without `--proposal`, inside an open record's turn,
    append `Handed to helper <n> (<sid>).` as a progress note by piping it into
    `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <T-id>`,
    where `<T-id>` is that open record's id, not the bg id (the note is
@@ -188,10 +187,9 @@ alternate invocation, or weaker permission mode.
    ```
 
 4. Invoke `/claude-code-hermit:watch session <n> "<first 40 chars of the operator prompt>"`.
-   If step 3 returned state `blocked`, tell the operator the helper is waiting
-   on its `waitingFor` and can be answered with `claude attach <id>`, or in
-   Docker `docker exec -it <container> claude attach <id>`. Still invoke the
-   watch; do not cancel the record on account of the block.
+   When the watch reports the helper blocked on its `waitingFor`, give the operator
+   `claude attach <id>` to answer it (in Docker,
+   `docker exec -it <container> claude attach <id>`).
    When `--proposal` was used, also pass `--record <T-id> --proposal <PROP-id>`.
    That skill owns the subscription (`### Starting a session watch`) and the
    idle-notice relay (`### Handling idle notices`); do not re-implement either.
