@@ -25,6 +25,13 @@ nothing across sessions), with two changes:
 
 **Delivery.**
 
+First read `.claude-code-hermit/state/monitors.runtime.json`. A `peer-idle`
+entry whose `target` is `<n>` means the helper's triage report has not arrived.
+Send nothing: no `SendMessage`, no resume, and no Fallback. Keep the record from step (a) open. Tell the operator the helper is still triaging;
+`accept PROP-NNN --answer "implement now"` starts implementation once the report
+lands, and `/claude-code-hermit:watch stop <id>` clears the entry if it is stale.
+With no such entry, continue below.
+
 - `<n>` has a `ListAgents` row: `SendMessage` it the instructions with
   `notify_when_idle: true` on that same send. Then register the watch entry as
   watch § Starting a session watch steps 3 to 5 describe, with `record` set to
@@ -33,8 +40,7 @@ nothing across sessions), with two changes:
   rather than triage.
 - No row (watch § Handling idle notices leaves an idle helper for the
   supervisor to reclaim): a line with no `(<sid>)` has no resume handle, so
-  take the Fallback. `ListAgents` omits a helper stalled at boot or blocked on
-  a prompt, so first run
+  take the Fallback. `ListAgents` omits a helper stalled at boot or still starting, so first run
   `claude agents --json | jq -r --arg sid <sid> '.[] | select(.id==($sid|.[0:8])) | .id'`
   (the bg id is the sid's first 8 characters and survives a `/clear`, which
   changes the listed `sessionId`): any line means it is still running but unreachable, and resuming it would
@@ -47,9 +53,9 @@ nothing across sessions), with two changes:
   starts a copy. The instructions are one single-quoted
   argument, so replace every `'` in them with `'\''` first, as spawn-session's
   limits require. Then invoke
-  `/claude-code-hermit:watch session <n> "Implement PROP-NNN" --record <id> --proposal PROP-NNN --implement`,
+  `/claude-code-hermit:watch session <n> "Implement PROP-NNN" --record <id> --proposal PROP-NNN --implement --id <bg-id>`,
   where `<id>` is the record step (a) opened, not the hand-off line's helper
-  record.
+  record. Use the first 8 characters of `<sid>` as `<bg-id>`.
 
 **Fallback.** A send that errors or a resume that fails to launch never reached
 the helper: run the falsification gate, then Dispatch. Once they have reached

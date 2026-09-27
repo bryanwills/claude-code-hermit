@@ -19,7 +19,7 @@ Two classes:
 ```
 /claude-code-hermit:watch <instruction>              — start ad-hoc (poll, default 5m interval)
 /claude-code-hermit:watch <stream-command>           — start ad-hoc stream
-/claude-code-hermit:watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>] — watch local session(s) until their next idle notice
+/claude-code-hermit:watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>] [--id <bg-id>] — watch local session(s) until their next idle notice
 /claude-code-hermit:watch notice <text>              — [internal] handle a watched-session notice
 /claude-code-hermit:watch start                      — register all enabled config watches
 /claude-code-hermit:watch stop [id]                  — stop by id (or auto if 1 active)
@@ -89,13 +89,31 @@ Start/stop decisions read from the runtime registry.
    HERMIT_LINE
    ```
 
-### Starting a session watch (`/watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>] [--implement]`)
+### Starting a session watch (`/watch session <name|glob> [note] [--record <T-id>] [--proposal <PROP-id>] [--implement] [--id <bg-id>]`)
 
-1. Parse optional `--record <T-id>`, `--proposal <PROP-id>` and `--implement`
+1. Parse optional `--record <T-id>`, `--proposal <PROP-id>`, `--implement` and `--id <bg-id>`
    with the name and note. If `<name>` contains `*` or `?`, take the **glob branch** below instead of
-   resolving an exact name. The glob branch ignores `--record`, `--proposal` and `--implement`.
+   resolving an exact name. The glob branch ignores `--record`, `--proposal`, `--implement` and `--id`.
 
-   Otherwise resolve `<name>` with `ListAgents`. The row must be a Claude Code
+   With `--id`, first poll the bg id in one Bash call every 2s for up to 30s.
+   A busy, blocked or done row is started; null or idle status with working
+   state is not. Output columns are status, state and waitingFor:
+   ```bash
+   deadline=$((SECONDS + 30))
+   while (( SECONDS <= deadline )); do
+     row=$(claude agents --json | jq -r --arg id <bg-id> '.[] | select(.id==$id and (.status=="busy" or .state=="blocked" or .state=="done")) | [.status, .state, .waitingFor] | @tsv')
+     if [[ -n "$row" ]]; then
+       printf '%s\n' "$row"
+       break
+     fi
+     (( SECONDS + 2 <= deadline )) || break
+     sleep 2
+   done
+   ```
+
+   If no row is printed or its state is `done`, give step 2's "not working on
+   anything" decline and stop. Otherwise resolve `<name>` with `ListAgents`.
+   Without `--id`, resolve `<name>` with `ListAgents` as usual. The row must be a Claude Code
    session on this machine — `notify_when_idle` covers nothing else, so a
    cloud/remote agent or an in-process subagent row does not qualify. If no such
    row matches, answer `No session named <name> is reachable from here.` and do
@@ -118,14 +136,18 @@ Start/stop decisions read from the runtime registry.
    on the first match before subscribing to the rest, and if it comes back
    operator-only, stop there and decline the whole set rather than subscribing
    the others.
-2. Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
+2. With `--id`, decide from the polled row, without re-reading or looking it
+   up by name: `busy` subscribes as below; `blocked` subscribes and reports its
+   `waitingFor` as below; `done` or no row gets the decline below.
+   Without `--id`, use the existing row checks below, including the one re-read.
+   Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
    `message`: this is a pure subscription and costs the watched session nothing.
    A target whose turn has already ended fires its notice at once for that same
    turn, so do not send a bodyless subscription to a row showing `idle` or
    `waiting` (except the blocked case below), nor to a target you are sending work to: arm that one by passing
    `notify_when_idle: true` on the same `SendMessage`, then record the entry with
    steps 3 to 5. A session just launched or resumed with a prompt can take a
-   moment to show busy, so re-read its row once before deciding. If it still
+   moment to show busy, so without `--id`, re-read its row once before deciding. If it still
    shows `waiting`, read that name's row in `claude agents --json`. When its
    `state` is `blocked`, send the bodyless `notify_when_idle` subscription,
    record the entry through steps 3 to 5, and tell the caller the session is

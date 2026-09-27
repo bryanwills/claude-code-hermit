@@ -3,9 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- Core requires Claude Code 2.1.283 or newer
 - The Storage Drift warning at session start names `storage_drift.ignore` for intentional top-level folders and says subfolders of `raw/` and `compiled/` are never exempt
 
 ### Fixed
+- A helper resumed to implement a proposal is watched instead of declined while it starts
+- Accepting a proposal for implementation while its helper is still triaging no longer sends the work or files the report on the wrong record
 - A freshly spawned background helper that is still starting or waiting on a permission prompt is no longer reported as unreachable with its task cancelled
 - `[[helper-report <id>]]` ids up to 64 characters now substitute, and a malformed placeholder is refused instead of posted to chat as raw text
 - A channel message carrying several task assignments opens one Discord thread per assignment instead of one shared thread or none; `conversation.ts thread-create` opens a standalone public thread when the message already holds one
