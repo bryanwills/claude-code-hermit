@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- The Storage Drift warning at session start names `storage_drift.ignore` for intentional top-level folders and says subfolders of `raw/` and `compiled/` are never exempt
+
 ### Fixed
 - A freshly spawned background helper that is still starting or waiting on a permission prompt is no longer reported as unreachable with its task cancelled
 - `[[helper-report <id>]]` ids up to 64 characters now substitute, and a malformed placeholder is refused instead of posted to chat as raw text
