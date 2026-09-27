@@ -3,9 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- Requires Claude Code 2.1.283 or newer
 - The Storage Drift warning at session start names `storage_drift.ignore` for intentional top-level folders and says subfolders of `raw/` and `compiled/` are never exempt
 
 ### Fixed
+- A helper resumed to implement a proposal is watched instead of declined while it starts
+- Accepting a proposal for implementation while its helper is still triaging no longer sends the work or files the report on the wrong record
 - Routines handed to background agents record `finish` after the skill's final step completes
 - Weekly reviews label their own in-progress routine in Duties instead of reporting it as `started`
 - A freshly spawned background helper that is still starting or waiting on a permission prompt is no longer reported as unreachable with its task cancelled
