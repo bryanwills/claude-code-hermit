@@ -178,8 +178,8 @@ alternate invocation, or weaker permission mode.
    `claude attach <id>` to answer it (in Docker,
    `docker exec -it <container> claude attach <id>`).
    When `--proposal` was used, also pass `--record <T-id> --proposal <PROP-id>`.
-   That skill owns the subscription (`### Starting a session watch`) and the
-   idle-notice relay (`### Handling idle notices`); do not re-implement either.
+   That skill owns the subscription (`watch/session-watch.md` § Starting a session watch)
+   and the idle-notice relay (`watch/notices.md` § Handling idle notices); do not re-implement either.
    When it declines the subscription, pass on the reason it gives rather than
    asserting one: the helper may still be running, or it may have finished its
    first turn before the subscription landed. Either way, give the

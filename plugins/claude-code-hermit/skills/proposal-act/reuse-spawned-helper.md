@@ -34,12 +34,14 @@ they can ask again to implement once its report lands (that re-entry is
 With no such entry, continue below.
 
 - `<n>` has a `ListAgents` row: `SendMessage` it the instructions with
-  `notify_when_idle: true` on that same send. Then register the watch entry as
-  watch § Starting a session watch steps 3 to 5 describe, with `record` set to
+  `notify_when_idle: true` on that same send. Then read `${CLAUDE_PLUGIN_ROOT}/skills/watch/SKILL.md` for its shared rules
+  and registry steps, and [watch/session-watch.md](../watch/session-watch.md)
+  § Starting a session watch steps 3–5. Follow only those steps with this send's
+  result; do not subscribe again. Register the entry with `record` set to
   the record step (a) opened, `proposal` to PROP-NNN and `purpose` to
   `implement`, so the idle-notice relay records the report as implementation
   rather than triage.
-- No row (watch § Handling idle notices leaves an idle helper for the
+- No row ([watch/notices.md](../watch/notices.md) § Handling idle notices leaves an idle helper for the
   supervisor to reclaim): a line with no `(<sid>)` has no resume handle, so
   take the Fallback. `ListAgents` omits a helper stalled at boot or still starting, so first run
   `claude agents --json | jq -r --arg sid <sid> '.[] | select(.id==($sid|.[0:8])) | .id'`
