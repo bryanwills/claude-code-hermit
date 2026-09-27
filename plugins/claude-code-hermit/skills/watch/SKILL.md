@@ -111,9 +111,11 @@ Start/stop decisions read from the runtime registry.
    done
    ```
 
-   If no row is printed or its state is `done`, give step 2's "not working on
-   anything" decline and stop. Otherwise resolve `<name>` with `ListAgents`.
-   Without `--id`, resolve `<name>` with `ListAgents` as usual. The row must be a Claude Code
+   If no row is printed, answer `No session named <name> is reachable from here.`
+   and stop. If its state is `done`, give step 2's "not working on anything"
+   decline and stop.
+
+   Resolve `<name>` with `ListAgents`. The row must be a Claude Code
    session on this machine — `notify_when_idle` covers nothing else, so a
    cloud/remote agent or an in-process subagent row does not qualify. If no such
    row matches, answer `No session named <name> is reachable from here.` and do
@@ -136,10 +138,10 @@ Start/stop decisions read from the runtime registry.
    on the first match before subscribing to the rest, and if it comes back
    operator-only, stop there and decline the whole set rather than subscribing
    the others.
-2. With `--id`, decide from the polled row, without re-reading or looking it
-   up by name: `busy` subscribes as below; `blocked` subscribes and reports its
-   `waitingFor` as below; `done` or no row gets the decline below.
-   Without `--id`, use the existing row checks below, including the one re-read.
+2. With `--id`, decide from the polled row's status and state rather than the
+   `ListAgents` status or a re-read: `busy` subscribes as below; `blocked`
+   subscribes and reports the polled `waitingFor` as below.
+   Without `--id`, apply the row checks below, including the one re-read.
    Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
    `message`: this is a pure subscription and costs the watched session nothing.
    A target whose turn has already ended fires its notice at once for that same

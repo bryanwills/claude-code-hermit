@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Changed
-- Core requires Claude Code 2.1.283 or newer
+- Requires Claude Code 2.1.283 or newer
 - The Storage Drift warning at session start names `storage_drift.ignore` for intentional top-level folders and says subfolders of `raw/` and `compiled/` are never exempt
 
 ### Fixed

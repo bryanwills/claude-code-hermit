@@ -26,10 +26,11 @@ nothing across sessions), with two changes:
 **Delivery.**
 
 First read `.claude-code-hermit/state/monitors.runtime.json`. A `peer-idle`
-entry whose `target` is `<n>` means the helper's triage report has not arrived.
-Send nothing: no `SendMessage`, no resume, and no Fallback. Keep the record from step (a) open. Tell the operator the helper is still triaging;
-`accept PROP-NNN --answer "implement now"` starts implementation once the report
-lands, and `/claude-code-hermit:watch stop <id>` clears the entry if it is stale.
+entry whose `target` is `<n>` means the helper is still on an earlier turn:
+triage without `purpose`, or implementation with `purpose: "implement"`.
+Send nothing: no `SendMessage`, no resume, and no Fallback. Keep the record from step (a) open. Tell the operator which of the two the helper is still doing and that
+they can ask again to implement once its report lands (that re-entry is
+`accept PROP-NNN --answer "implement now"`); `/claude-code-hermit:watch stop <id>` clears the entry if it is stale.
 With no such entry, continue below.
 
 - `<n>` has a `ListAgents` row: `SendMessage` it the instructions with
