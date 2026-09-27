@@ -98,6 +98,7 @@ After it completes, run:
 bun <pluginRoot>/scripts/routines.ts finish <id> <delivery> --outcome-stdin <<'HERMIT_LINE'
 <one line: the routine id and what the fire actually did or found>
 HERMIT_LINE
+If the invoked skill or model-override dispatch hands work to a background agent and the turn ends before the skill's final step, the routine stays open: run `finish` exactly once per fire in the turn that completes that final step after the agent's hand-back, never at dispatch.
 ```
 The heredoc line describes the routine outcome recorded by `finish`.
 Replace `<pluginRoot>`, `<id>`, and `<skill>` (passed verbatim to the slash invocation; `claude-code-hermit:brief --morning` becomes `/claude-code-hermit:brief --morning`).

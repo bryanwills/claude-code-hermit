@@ -7,6 +7,10 @@ import { PLUGIN_ROOT } from './helpers/run';
 const routines = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills/hermit-routines/SKILL.md'), 'utf8');
 const responder = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills/channel-responder/SKILL.md'), 'utf8');
 
+test('routine finish follows the background agent hand-back and final skill step', () => {
+  expect(routines).toContain("after the agent's hand-back, never at dispatch");
+});
+
 test('routine formatting Read bounds cover exactly the canonical section', () => {
   const section = routines.slice(routines.indexOf('**Formatting-only read.**'), routines.indexOf('**Model-override substitution.**'));
   const json = section.match(/```json\n([^\n]+)\n```/)?.[1];

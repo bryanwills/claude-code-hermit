@@ -458,7 +458,17 @@ body += '### By person\n';
 for (const person of taskStandup(hermitDir).byPerson) {
   body += `- ${person.name ?? person.identity}: ${person.promised.length} open, ${person.late.length} late, ${person.waiting.length} waiting\n`;
 }
-body += '\n### Duties\n' + dutySummary(hermitDir).map(line => '- ' + line).join('\n') + '\n\n';
+const reviewRoutinePrefixes = readSettledConfig(hermitDir).routines
+  .filter((routine: any) => routine.skill === 'claude-code-hermit:weekly-review')
+  .map((routine: any) => `routine:${routine.id}: requested `);
+body += '\n### Duties\n' + dutySummary(hermitDir).map(line => {
+  // Only a start stamped this week is this review; an older dangling `started` is a stuck fire.
+  const started = line.match(/last_event=started@(\S+)$/);
+  if (started && new Date(started[1]) >= weekStart && reviewRoutinePrefixes.some((prefix: string) => line.startsWith(prefix))) {
+    line = line.slice(0, started.index) + 'last_event=in progress (this review)';
+  }
+  return '- ' + line;
+}).join('\n') + '\n\n';
 
 // Delivered (durable compiled/ outputs produced this week, per session ## Artifacts)
 if (delivered.length > 0) {
