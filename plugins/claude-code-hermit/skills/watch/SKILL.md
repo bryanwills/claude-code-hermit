@@ -121,12 +121,18 @@ Start/stop decisions read from the runtime registry.
 2. Call `SendMessage` with `to: <name>` and `notify_when_idle: true`. Omit
    `message`: this is a pure subscription and costs the watched session nothing.
    A target whose turn has already ended fires its notice at once for that same
-   turn, so never send a bodyless subscription to a row showing `idle` or
-   `waiting`, nor to a target you are sending work to: arm that one by passing
+   turn, so do not send a bodyless subscription to a row showing `idle` or
+   `waiting` (except the blocked case below), nor to a target you are sending work to: arm that one by passing
    `notify_when_idle: true` on the same `SendMessage`, then record the entry with
    steps 3 to 5. A session just launched or resumed with a prompt can take a
-   moment to show busy, so re-read its row once before deciding. When it still
-   shows `idle` or `waiting`, answer `<name> is not working on anything right
+   moment to show busy, so re-read its row once before deciding. If it still
+   shows `waiting`, read that name's row in `claude agents --json`. When its
+   `state` is `blocked`, send the bodyless `notify_when_idle` subscription,
+   record the entry through steps 3 to 5, and tell the caller the session is
+   blocked on its `waitingFor`. A subscription taken while blocked stays
+   silent until the prompt is answered, then fires when the turn ends
+   (probed on Claude Code 2.1.283).
+   For `idle`, or `waiting` with any other state or no registry row, answer `<name> is not working on anything right
    now, so there is no turn to watch; the next message sent to it arms the
    watch.` and do not write the registry.
 3. Read the tool result: it says whether the notice will be shown to you or only

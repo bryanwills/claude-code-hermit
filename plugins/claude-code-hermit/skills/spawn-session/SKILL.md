@@ -143,13 +143,26 @@ alternate invocation, or weaker permission mode.
    persisted directory. Print the returned bg id and `claude logs <id>`,
    `claude attach <id>`, `claude stop <id>` hints. If the spawn is declined or
    fails, stop; do not watch, open a record, or patch a Decision.
-   After a successful launch with `--proposal` or inside an open record's
-   turn, read the helper's full session id `<sid>`: the printed bg id is only
-   its first 8 characters and is not a resume handle. Match on the bg id, not
-   the name, since a name can be reused:
+   After every successful launch, wait for the helper to start before step 4.
+   In one Bash call, poll its registry row every 2s for up to 30s. Match on the
+   bg id, not the name, since a name can be reused. A busy, blocked, or done
+   row is started; null or idle status with working state is not:
    ```bash
-   claude agents --json | jq -r --arg id <bg-id> '.[] | select(.id==$id) | .sessionId // empty'
+   deadline=$((SECONDS + 30))
+   while (( SECONDS <= deadline )); do
+     row=$(claude agents --json | jq -r --arg id <bg-id> '.[] | select(.id==$id and (.status=="busy" or .state=="blocked" or .state=="done")) | [.sessionId, .status, .state, .waitingFor] | @tsv')
+     if [[ -n "$row" ]]; then
+       printf '%s\n' "$row"
+       break
+     fi
+     (( SECONDS + 2 <= deadline )) || break
+     sleep 2
+   done
    ```
+   The output columns are session id, status, state, and waitingFor. Use the
+   first column as the full session id `<sid>`: the printed bg id is only its
+   first 8 characters and is not a resume handle. A timeout prints no row;
+   continue to step 4 without `<sid>`.
    Zero or more than one line means no `<sid>`: say so, and write the lines
    below without `(<sid>)`. Without `--proposal`, inside an open record's turn,
    append `Handed to helper <n> (<sid>).` as a progress note by piping it into
@@ -175,6 +188,10 @@ alternate invocation, or weaker permission mode.
    ```
 
 4. Invoke `/claude-code-hermit:watch session <n> "<first 40 chars of the operator prompt>"`.
+   If step 3 returned state `blocked`, tell the operator the helper is waiting
+   on its `waitingFor` and can be answered with `claude attach <id>`, or in
+   Docker `docker exec -it <container> claude attach <id>`. Still invoke the
+   watch; do not cancel the record on account of the block.
    When `--proposal` was used, also pass `--record <T-id> --proposal <PROP-id>`.
    That skill owns the subscription (`### Starting a session watch`) and the
    idle-notice relay (`### Handling idle notices`); do not re-implement either.
