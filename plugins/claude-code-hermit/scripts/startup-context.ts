@@ -44,7 +44,7 @@ const BUDGETS = {
   taskPolicy:    1500,
   knowledge:     2500, // compiled/ artifacts — read from config, 2500 default
   schemaDrift:    400, // only emitted when compiled/ types are undeclared in knowledge-schema.md
-  storageDrift:   500, // only emitted when misplaced files are found
+  storageDrift:   800, // only emitted when misplaced files are found
   report:        1500,
   upgrade:        500,
 };
@@ -491,7 +491,7 @@ function emitFullContext(source: string | null) {
   }
 
   // -------------------------------------------------------
-  // 5. Storage drift (priority 2.8, budget 500 — silent when clean)
+  // 5. Storage drift (priority 2.8, budget 800 — silent when clean)
   // -------------------------------------------------------
   if (totalChars < HARD_CAP) {
     try {
@@ -499,7 +499,7 @@ function emitFullContext(source: string | null) {
       if (hits.length > 0) {
         const lines = hits.slice(0, 5).map(h => `- ${h}`).join('\n');
         const suffix = hits.length > 5 ? `\n(${hits.length - 5} more)` : '';
-        const body = `${hits.length} path${hits.length !== 1 ? 's' : ''} invisible to session injection and archival:\n${lines}${suffix}\nMove files into .claude-code-hermit/raw/ or compiled/ (flat).`;
+        const body = `${hits.length} path${hits.length !== 1 ? 's' : ''} invisible to session injection and archival:\n${lines}${suffix}\nKnowledge files: move into .claude-code-hermit/raw/ or compiled/ (flat; subfolders there are never exempt).\nIntentional top-level folder with no knowledge (runtime install, script override): add its bare name to config storage_drift.ignore.`;
         emit('Storage Drift', body.slice(0, BUDGETS.storageDrift));
       }
     } catch {}
