@@ -499,8 +499,9 @@ function emitFullContext(source: string | null) {
       if (hits.length > 0) {
         const lines = hits.slice(0, 5).map(h => `- ${h}`).join('\n');
         const suffix = hits.length > 5 ? `\n(${hits.length - 5} more)` : '';
-        const body = `${hits.length} path${hits.length !== 1 ? 's' : ''} invisible to session injection and archival:\n${lines}${suffix}\nKnowledge files: move into .claude-code-hermit/raw/ or compiled/ (flat; subfolders there are never exempt).\nIntentional top-level folder with no knowledge (runtime install, script override): add its bare name to config storage_drift.ignore.`;
-        emit('Storage Drift', body.slice(0, BUDGETS.storageDrift));
+        const head = `${hits.length} path${hits.length !== 1 ? 's' : ''} invisible to session injection and archival:\n${lines}${suffix}`;
+        const tail = `\nKnowledge files: move into .claude-code-hermit/raw/ or compiled/ (flat; subfolders there are never exempt).\nIntentional top-level folder with no knowledge (runtime install, script override): add its bare name to storage_drift.ignore via /claude-code-hermit:hermit-settings.`;
+        emit('Storage Drift', head.slice(0, BUDGETS.storageDrift - tail.length) + tail);
       }
     } catch {}
   }

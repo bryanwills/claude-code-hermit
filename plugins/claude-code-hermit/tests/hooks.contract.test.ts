@@ -613,7 +613,7 @@ BODY_MARKER this long body should never be injected when a stub is present.
     expect(r.stdout).toContain('.claude-code-hermit/raw/artifacts/');
     expect(r.stdout).not.toContain('.claude-code-hermit/scripts/');
     expect(r.stdout).toContain('subfolders there are never exempt');
-    expect(r.stdout).toContain('add its bare name to config storage_drift.ignore.');
+    expect(r.stdout).toContain('add its bare name to storage_drift.ignore via /claude-code-hermit:hermit-settings.');
   }));
 
   test('startup-context (storage drift — remediation survives many long hits)', withDir(async (dir) => {
@@ -626,7 +626,21 @@ BODY_MARKER this long body should never be injected when a stub is present.
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('(1 more)');
-    expect(r.stdout).toContain('add its bare name to config storage_drift.ignore.');
+    expect(r.stdout).toContain('add its bare name to storage_drift.ignore via /claude-code-hermit:hermit-settings.');
+  }));
+
+  test('startup-context (storage drift — remediation survives hits past the budget)', withDir(async (dir) => {
+    for (let i = 0; i < 5; i++) {
+      const name = `stray-${i}-${'x'.repeat(150)}`;
+      fs.mkdirSync(hermit(dir, name), { recursive: true });
+      write(hermit(dir, name, 'f.md'), 'x\n');
+    }
+    const r = await runScript('startup-context.ts', {
+      cwd: dir, env: { ...ENV, AGENT_DIR: hermit(dir) },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('subfolders there are never exempt');
+    expect(r.stdout).toContain('add its bare name to storage_drift.ignore via /claude-code-hermit:hermit-settings.');
   }));
 
   test('startup-context (catalog: non-foundational gets line, not body)', withDir(async (dir) => {
