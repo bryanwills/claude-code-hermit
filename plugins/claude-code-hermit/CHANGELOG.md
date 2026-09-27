@@ -4,6 +4,8 @@
 
 ### Changed
 - The Storage Drift warning at session start names `storage_drift.ignore` for intentional top-level folders and says subfolders of `raw/` and `compiled/` are never exempt
+- The weekly-review artifact page is off by default, since the dashboard's weekly card already carries the full review
+- Weekly review lists proposals by short id and the channel summary names at most five delivered items
 
 ### Fixed
 - Routines handed to background agents record `finish` after the skill's final step completes
@@ -16,6 +18,7 @@
 
 ### Upgrade Instructions
 1. Delete `.claude-code-hermit/state/intake-ack.json` if it exists. Acknowledgements now live in `state/intake-acks.jsonl` and nothing reads the old file.
+2. In `.claude-code-hermit/config.json`, set `artifacts.weekly_review` to `false`. Leave the `weekly_review` entry in `state/artifacts.json` in place so re-enabling republishes to the same URL. Tell the operator: "The standalone weekly-review page is now off by default because the dashboard already shows the full weekly review. To turn it back on, say `/hermit-settings artifact-weekly-review yes`."
 
 ## [1.4.6] - 2026-09-25
 

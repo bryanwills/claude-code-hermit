@@ -258,6 +258,9 @@ Deliberately declined:
 
 ## Weekly review
 
+Off by default: the dashboard already embeds the full weekly review, so this page is
+opt-in via `/hermit-settings artifact-weekly-review yes`.
+
 `config.artifacts.weekly_review`, state key `weekly_review`. The latest compiled
 `review-weekly-YYYY-Www.md`, published as markdown directly (the Artifact tool renders
 `.md` natively — confirmed empirically) with its YAML frontmatter stripped (raw

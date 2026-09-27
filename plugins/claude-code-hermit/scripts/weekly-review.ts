@@ -14,6 +14,7 @@ import { costLogPath, hermitDir as resolveHermitRoot } from './lib/cc-compat';
 import { readSettledConfig } from './lib/config-read';
 import { formatTokens } from './lib/format';
 import { writeFileAtomic } from './lib/md-write';
+import { shortPropId } from './lib/dashboard';
 import { lint as knowledgeLint } from './knowledge-lint';
 
 type Json = any;
@@ -483,13 +484,14 @@ if (delivered.length > 0) {
 if (weekCreated.length > 0 || weekAccepted.length > 0 || weekResolved.length > 0) {
   body += `### Proposals\n`;
   if (weekCreated.length > 0) {
-    body += `${weekCreated.length} created: ${weekCreated.map(p => p.fm.id).join(', ')}.\n`;
+    body += `${weekCreated.length} created: ${weekCreated.map(p => shortPropId(p.fm.id)).join(', ')}.\n`;
   }
   if (weekAccepted.length > 0) {
-    body += `${weekAccepted.length} accepted: ${weekAccepted.map(p => p.fm.id).join(', ')}.\n`;
+    body += `${weekAccepted.length} accepted: ${weekAccepted.map(p => shortPropId(p.fm.id)).join(', ')}.\n`;
   }
   if (weekResolved.length > 0) {
-    body += `${weekResolved.length} resolved: ${weekResolved.map(p => p.fm.id).join(', ')}.\n`;
+    // Each one is listed with its title under Recently Resolved.
+    body += `${weekResolved.length} resolved.\n`;
   }
   body += '\n';
 }
@@ -500,9 +502,9 @@ if (resolvedWithImpact.length > 0) {
   for (const { p, preCount, postCount, showImpact } of resolvedWithImpact) {
     const title = p.fm.title || p.fm.id;
     if (showImpact && preCount > 0) {
-      body += `- ${p.fm.id}: ${title} — ${preCount} incomplete session${preCount !== 1 ? 's' : ''} pre-resolution, ${postCount} post.\n`;
+      body += `- ${shortPropId(p.fm.id)}: ${title} — ${preCount} incomplete session${preCount !== 1 ? 's' : ''} pre-resolution, ${postCount} post.\n`;
     } else {
-      body += `- ${p.fm.id}: ${title} — observed trend.\n`;
+      body += `- ${shortPropId(p.fm.id)}: ${title} — observed trend.\n`;
     }
   }
   body += '\n';
