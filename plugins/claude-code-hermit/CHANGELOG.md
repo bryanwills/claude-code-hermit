@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- `watch` loads session-watch and peer/self-exit notice procedures only when needed, with shared guards, Monitor expiry renewal and duty recording kept in the main skill
 - Requires Claude Code 2.1.283 or newer
 - The Storage Drift warning at session start names `storage_drift.ignore` for intentional top-level folders and says subfolders of `raw/` and `compiled/` are never exempt
 - The weekly-review artifact page is off by default, since the dashboard's weekly card already carries the full review
