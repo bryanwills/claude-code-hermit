@@ -2,6 +2,7 @@
 name: channel-responder
 description: Handles inbound messages tagged <channel source=...> from Claude Code Channels, routing replies, task work, approvals, and operator controls with session context.
 ---
+`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
 
 # Channel Responder
 

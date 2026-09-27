@@ -2,6 +2,8 @@
 name: proposal-act
 description: 'Accept, defer, dismiss, or resolve a proposal. For accepted proposals, asks how to proceed: start implementing now, queue a task, or note for manual implementation. Activates on messages like "accept PROP-", "dismiss PROP-", "defer PROP-", "resolve PROP-".'
 ---
+`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
+
 # Proposal Act
 
 Take action on a proposal: accept, defer, dismiss, or resolve.

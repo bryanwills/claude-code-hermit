@@ -3704,7 +3704,7 @@ describe('proactive-notify unification contract', () => {
     expect(responder).toContain('channel-send.ts');
     expect(responder).toContain('--notice');
     // The APPEND names the same script through bin/hermit-run rather than the
-    // `bun ${CLAUDE_PLUGIN_ROOT}/scripts/…` spelling the skill uses: the token
+    // `bun <plugin_root>/scripts/…` spelling the skill uses: the token
     // is substituted at skill load and never in the operator's CLAUDE.md, which
     // this file is copied verbatim into.
     expect(append).toContain('hermit-run channel-send');

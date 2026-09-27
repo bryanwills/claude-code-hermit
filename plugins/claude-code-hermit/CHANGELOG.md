@@ -10,6 +10,7 @@
 - Weekly review lists proposals by short id and the channel summary names at most five delivered items
 
 ### Fixed
+- Script commands in skill supporting files (reflect, proposal-act, channel-responder, channel-setup) resolve the plugin root instead of running as `bun /scripts/…`
 - A helper resumed to implement a proposal is watched instead of declined while it starts
 - Accepting a proposal for implementation while its helper is still triaging no longer sends the work or files the report on the wrong record
 - Routines handed to background agents record `finish` after the skill's final step completes
