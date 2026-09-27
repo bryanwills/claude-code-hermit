@@ -26,6 +26,18 @@ import { parseYaml } from './yaml';
 
 const CONFIG_DOMAINS = new Set(['automation', 'script', 'scene']);
 
+// Script config keys must pass HA's cv.slug (python-slugify: ASCII-folded,
+// lowercase, non-alphanumeric runs collapsed to `_`). Automation and scene ids
+// are free-form, so their derivation stays on the plain slugify.
+function haSlug(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 /** The slice of HomeAssistantClient the apply path needs (tests inject a fake). */
 export interface ApplyClient {
   get(path: string): Promise<any>;
@@ -145,19 +157,25 @@ export async function validateAndApply(
       parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
         ? (parsed as Record<string, any>)
         : {};
+    const deriveSlug = reloadDomain === 'script' ? haSlug : slugify;
     configId =
       pyStrOrEmpty(artifactConfig.id).trim() ||
-      slugify(pyStrOrEmpty(artifactConfig.alias).trim()) ||
-      slugify(stem(artifactPath));
+      deriveSlug(pyStrOrEmpty(artifactConfig.alias).trim()) ||
+      deriveSlug(stem(artifactPath));
     if (!pyStrOrEmpty(artifactConfig.id).trim()) {
       driftWarning =
         `id '${configId}' derived from ${artifactConfig.alias ? 'alias' : 'filename'} — ` +
         `set id: explicitly in the YAML to prevent drift on rename.`;
     }
 
+    // HA keys scripts by the URL alone and its script schema rejects a
+    // top-level `id`; automation and scene bodies accept it.
+    const { id: _id, ...scriptBody } = artifactConfig;
+    const body = reloadDomain === 'script' ? scriptBody : artifactConfig;
+
     creationAttempted = true;
     try {
-      await client.post(`/api/config/${reloadDomain}/config/${configId}`, artifactConfig);
+      await client.post(`/api/config/${reloadDomain}/config/${configId}`, body);
       try {
         const verify = await client.get(`/api/config/${reloadDomain}/config/${configId}`);
         // The GET must return an object; when the artifact carries an alias it

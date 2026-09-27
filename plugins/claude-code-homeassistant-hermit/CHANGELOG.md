@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- `ha validate-apply` updates scripts: the `id` is no longer sent in the script body, and alias- or filename-derived script ids follow Home Assistant's lowercase slug rules.
+
 ## [0.4.17] - 2026-09-25
 
 ### Removed

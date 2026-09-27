@@ -180,7 +180,24 @@ test('pushes script config via rest', async () => {
   expect(result.creationAttempted).toBe(true);
   expect(client.calls.post).toContainEqual([
     '/api/config/script/config/my_script',
-    { id: 'my_script', alias: 'Safe script', sequence: [{ delay: '00:00:01' }] },
+    { alias: 'Safe script', sequence: [{ delay: '00:00:01' }] },
+  ]);
+});
+
+test('script id derived from alias as an HA slug', async () => {
+  const root = safeRoot();
+  const artifact = writeArtifact(root, 'alias: Café Wake-Up  Lights\nsequence:\n  - delay: "00:00:01"');
+  const client = fakeClient({
+    post: () => ({ result: 'valid' }),
+    get: () => ({ alias: 'Café Wake-Up  Lights' }),
+  });
+
+  const result = await validateAndApply(root, client, artifact, 'script');
+
+  expect(result.configId).toBe('cafe_wake_up_lights');
+  expect(client.calls.post).toContainEqual([
+    '/api/config/script/config/cafe_wake_up_lights',
+    { alias: 'Café Wake-Up  Lights', sequence: [{ delay: '00:00:01' }] },
   ]);
 });
 
