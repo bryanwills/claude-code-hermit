@@ -7,7 +7,7 @@
 
 ### Fixed
 - Routines handed to background agents record `finish` after the skill's final step completes
-- Weekly reviews label their own in-progress routine while preserving its previous `last_fired`
+- Weekly reviews label their own in-progress routine in Duties instead of reporting it as `started`
 - A freshly spawned background helper that is still starting or waiting on a permission prompt is no longer reported as unreachable with its task cancelled
 - `[[helper-report <id>]]` ids up to 64 characters now substitute, and a malformed placeholder is refused instead of posted to chat as raw text
 - A channel message carrying several task assignments opens one Discord thread per assignment instead of one shared thread or none; `conversation.ts thread-create` opens a standalone public thread when the message already holds one

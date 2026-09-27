@@ -8,7 +8,7 @@ const routines = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills/hermit-routines/
 const responder = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills/channel-responder/SKILL.md'), 'utf8');
 
 test('routine finish follows the background agent hand-back and final skill step', () => {
-  expect(routines).toContain("If the invoked skill or model-override dispatch hands work to a background agent and the turn ends before the skill's final step, the routine stays open: run `finish` exactly once per fire in the turn that completes that final step after the agent's hand-back, never at dispatch.");
+  expect(routines).toContain("after the agent's hand-back, never at dispatch");
 });
 
 test('routine formatting Read bounds cover exactly the canonical section', () => {

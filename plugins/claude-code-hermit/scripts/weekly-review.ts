@@ -462,8 +462,10 @@ const reviewRoutinePrefixes = readSettledConfig(hermitDir).routines
   .filter((routine: any) => routine.skill === 'claude-code-hermit:weekly-review')
   .map((routine: any) => `routine:${routine.id}: requested `);
 body += '\n### Duties\n' + dutySummary(hermitDir).map(line => {
-  if (reviewRoutinePrefixes.some((prefix: string) => line.startsWith(prefix))) {
-    line = line.replace(/last_event=started@[^\s]+$/, 'last_event=in progress (this review)');
+  // Only a start stamped this week is this review; an older dangling `started` is a stuck fire.
+  const started = line.match(/last_event=started@(\S+)$/);
+  if (started && new Date(started[1]) >= weekStart && reviewRoutinePrefixes.some((prefix: string) => line.startsWith(prefix))) {
+    line = line.slice(0, started.index) + 'last_event=in progress (this review)';
   }
   return '- ' + line;
 }).join('\n') + '\n\n';

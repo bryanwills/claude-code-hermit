@@ -54,7 +54,7 @@ describe('weekly-review Duties', () => {
       writeConfig(dir, { routines: [{ id, skill: 'claude-code-hermit:weekly-review', schedule: '0 23 * * 0', enabled: true }] });
       fs.writeFileSync(path.join(dir, 'state/routine-metrics.jsonl'), [
         { routine_id: id, event: 'fired', ts: '2026-09-20T23:00:00Z' },
-        { routine_id: id, event: 'started', ts: '2026-09-27T23:00:00Z' },
+        { routine_id: id, event: 'started', ts: new Date().toISOString() },
       ].map(row => JSON.stringify(row)).join('\n') + '\n');
       expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
       const { body } = readReview(dir);
@@ -63,14 +63,15 @@ describe('weekly-review Duties', () => {
     }));
   }
 
-  test('preserves completed reviews and other open routines', withHermitDir(async dir => {
+  test('preserves stale review starts and other open routines', withHermitDir(async dir => {
     writeConfig(dir, { routines: [
       { id: 'review', skill: 'claude-code-hermit:weekly-review', schedule: '0 23 * * 0', enabled: true },
       { id: 'weekly-review', skill: 'claude-code-hermit:reflect', schedule: '0 23 * * 0', enabled: true },
     ] });
     fs.writeFileSync(path.join(dir, 'state/routine-metrics.jsonl'), [
-      { routine_id: 'review', event: 'fired', ts: '2026-09-20T23:00:00Z' },
-      { routine_id: 'weekly-review', event: 'started', ts: '2026-09-27T23:00:00Z' },
+      { routine_id: 'review', event: 'fired', ts: '2026-09-13T23:00:00Z' },
+      { routine_id: 'review', event: 'started', ts: '2026-09-20T23:00:00Z' },
+      { routine_id: 'weekly-review', event: 'started', ts: new Date().toISOString() },
     ].map(row => JSON.stringify(row)).join('\n') + '\n');
     const lines = dutySummary(dir);
     expect((await runScript('weekly-review.ts', { args: [dir] })).exitCode).toBe(0);
