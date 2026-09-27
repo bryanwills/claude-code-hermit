@@ -26,8 +26,9 @@ import { parseYaml } from './yaml';
 
 const CONFIG_DOMAINS = new Set(['automation', 'script', 'scene']);
 
-// Script config keys must pass HA's cv.slug (python-slugify: ASCII-folded,
-// lowercase, non-alphanumeric runs collapsed to `_`). Automation and scene ids
+// Script config keys must pass HA's cv.slug: lowercase, non-alphanumeric runs
+// collapsed to `_`. Accents are stripped via NFKD; letters HA transliterates
+// (ß, ø) become `_` here, which HA still accepts. Automation and scene ids
 // are free-form, so their derivation stays on the plain slugify.
 function haSlug(value: string): string {
   return value
@@ -158,13 +159,25 @@ export async function validateAndApply(
         ? (parsed as Record<string, any>)
         : {};
     const deriveSlug = reloadDomain === 'script' ? haSlug : slugify;
-    configId =
-      pyStrOrEmpty(artifactConfig.id).trim() ||
-      deriveSlug(pyStrOrEmpty(artifactConfig.alias).trim()) ||
-      deriveSlug(stem(artifactPath));
-    if (!pyStrOrEmpty(artifactConfig.id).trim()) {
+    const explicitId = pyStrOrEmpty(artifactConfig.id).trim();
+    const aliasId = deriveSlug(pyStrOrEmpty(artifactConfig.alias).trim());
+    configId = explicitId || aliasId || deriveSlug(stem(artifactPath));
+    if (!configId) {
+      const msg = 'No config id could be derived from alias or filename; set id: in the YAML.';
+      const reportPath = writeApplyReport(root, artifactPath, simulation, {
+        configCheckOk: configOk, configId: null, creationAttempted: false,
+        creationOk: false, reloadAttempted: false, reloadDomain,
+        message: msg,
+      });
+      return {
+        ok: false, configCheckOk: configOk, configId: null, domain: reloadDomain,
+        creationAttempted: false, creationOk: false, reloadAttempted: false,
+        reloadDomain, message: msg, reportPath,
+      };
+    }
+    if (!explicitId) {
       driftWarning =
-        `id '${configId}' derived from ${artifactConfig.alias ? 'alias' : 'filename'} — ` +
+        `id '${configId}' derived from ${aliasId ? 'alias' : 'filename'} — ` +
         `set id: explicitly in the YAML to prevent drift on rename.`;
     }
 

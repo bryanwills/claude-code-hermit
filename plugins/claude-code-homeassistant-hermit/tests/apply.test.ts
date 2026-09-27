@@ -201,6 +201,30 @@ test('script id derived from alias as an HA slug', async () => {
   ]);
 });
 
+test('script id falls back to filename when alias has no slug characters', async () => {
+  const root = safeRoot();
+  const artifact = writeArtifact(root, 'alias: 日本\nsequence:\n  - delay: "00:00:01"', 'wake_up.yaml');
+  const client = fakeClient({ post: () => ({ result: 'valid' }), get: () => ({ alias: '日本' }) });
+
+  const result = await validateAndApply(root, client, artifact, 'script');
+
+  expect(result.configId).toBe('wake_up');
+  expect(result.message).toContain('derived from filename');
+});
+
+test('script with no derivable id fails before pushing', async () => {
+  const root = safeRoot();
+  const artifact = writeArtifact(root, 'alias: 日本\nsequence:\n  - delay: "00:00:01"', '日本.yaml');
+  const client = fakeClient({ post: () => ({ result: 'valid' }) });
+
+  const result = await validateAndApply(root, client, artifact, 'script');
+
+  expect(result.ok).toBe(false);
+  expect(result.creationAttempted).toBe(false);
+  expect(result.message).toContain('set id:');
+  expect(client.calls.post).toEqual([['/api/config/core/check_config', {}]]);
+});
+
 test('pushes scene config via rest', async () => {
   const root = safeRoot();
   const artifact = writeArtifact(root, SCENE_YAML);
