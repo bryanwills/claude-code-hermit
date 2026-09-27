@@ -26,6 +26,19 @@ import { parseYaml } from './yaml';
 
 const CONFIG_DOMAINS = new Set(['automation', 'script', 'scene']);
 
+// Script config keys must pass HA's cv.slug: lowercase, non-alphanumeric runs
+// collapsed to `_`. Accents are stripped via NFKD; letters HA transliterates
+// (ß, ø) become `_` here, which HA still accepts. Automation and scene ids
+// are free-form, so their derivation stays on the plain slugify.
+function haSlug(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 /** The slice of HomeAssistantClient the apply path needs (tests inject a fake). */
 export interface ApplyClient {
   get(path: string): Promise<any>;
@@ -145,19 +158,37 @@ export async function validateAndApply(
       parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
         ? (parsed as Record<string, any>)
         : {};
-    configId =
-      pyStrOrEmpty(artifactConfig.id).trim() ||
-      slugify(pyStrOrEmpty(artifactConfig.alias).trim()) ||
-      slugify(stem(artifactPath));
-    if (!pyStrOrEmpty(artifactConfig.id).trim()) {
+    const deriveSlug = reloadDomain === 'script' ? haSlug : slugify;
+    const explicitId = pyStrOrEmpty(artifactConfig.id).trim();
+    const aliasId = deriveSlug(pyStrOrEmpty(artifactConfig.alias).trim());
+    configId = explicitId || aliasId || deriveSlug(stem(artifactPath));
+    if (!configId) {
+      const msg = 'No config id could be derived from alias or filename; set id: in the YAML.';
+      const reportPath = writeApplyReport(root, artifactPath, simulation, {
+        configCheckOk: configOk, configId: null, creationAttempted: false,
+        creationOk: false, reloadAttempted: false, reloadDomain,
+        message: msg,
+      });
+      return {
+        ok: false, configCheckOk: configOk, configId: null, domain: reloadDomain,
+        creationAttempted: false, creationOk: false, reloadAttempted: false,
+        reloadDomain, message: msg, reportPath,
+      };
+    }
+    if (!explicitId) {
       driftWarning =
-        `id '${configId}' derived from ${artifactConfig.alias ? 'alias' : 'filename'} — ` +
+        `id '${configId}' derived from ${aliasId ? 'alias' : 'filename'} — ` +
         `set id: explicitly in the YAML to prevent drift on rename.`;
     }
 
+    // HA keys scripts by the URL alone and its script schema rejects a
+    // top-level `id`; automation and scene bodies accept it.
+    const { id: _id, ...scriptBody } = artifactConfig;
+    const body = reloadDomain === 'script' ? scriptBody : artifactConfig;
+
     creationAttempted = true;
     try {
-      await client.post(`/api/config/${reloadDomain}/config/${configId}`, artifactConfig);
+      await client.post(`/api/config/${reloadDomain}/config/${configId}`, body);
       try {
         const verify = await client.get(`/api/config/${reloadDomain}/config/${configId}`);
         // The GET must return an object; when the artifact carries an alias it
