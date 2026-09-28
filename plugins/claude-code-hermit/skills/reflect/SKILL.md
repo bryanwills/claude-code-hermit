@@ -2,6 +2,7 @@
 name: reflect
 description: Reflect on recent work and propose improvements if patterns are noticed.
 ---
+`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
 
 Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 

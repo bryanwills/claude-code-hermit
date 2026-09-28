@@ -3701,12 +3701,10 @@ describe('proactive-notify unification contract', () => {
   test('channel-responder outbound.md and CLAUDE-APPEND both point to the same --notice mechanism', () => {
     const responder = read(path.join(SKILLS, 'channel-responder', 'outbound.md'));
     const append = read(path.join(TEMPLATES, 'CLAUDE-APPEND.md'));
-    expect(responder).toContain('channel-send.ts');
+    // Both name the script through bin/hermit-run: outbound.md is also read
+    // from the operator's CLAUDE.md, where `<plugin_root>` has no definition.
+    expect(responder).toContain('hermit-run channel-send');
     expect(responder).toContain('--notice');
-    // The APPEND names the same script through bin/hermit-run rather than the
-    // `bun ${CLAUDE_PLUGIN_ROOT}/scripts/…` spelling the skill uses: the token
-    // is substituted at skill load and never in the operator's CLAUDE.md, which
-    // this file is copied verbatim into.
     expect(append).toContain('hermit-run channel-send');
     expect(append).toContain('--notice');
   });

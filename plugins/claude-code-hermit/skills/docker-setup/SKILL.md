@@ -3,6 +3,8 @@ name: docker-setup
 description: Host-only, operator-invoked. Generates Docker scaffolding and walks the operator through token setup, build, start, MCP plugin configuration, workspace trust, and verification. Offers to back up and overwrite existing Docker files. Run after /hatch.
 disable-model-invocation: true
 ---
+`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
+
 # Docker Setup
 
 Generate Docker scaffolding for running hermit as an always-on autonomous agent in a container. Docker provides isolation, crash recovery, and a reproducible environment. The default `auto` mode (classifier-reviewed autonomy) works well for most Docker hermits. Operators who need zero prompts for fully unattended operation can opt into `bypassPermissions` via `/hermit-settings permissions`.

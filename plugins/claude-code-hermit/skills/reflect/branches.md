@@ -1,4 +1,4 @@
-Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+Record notes only inside an open record's turn, using `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 
 # Reflect — Branch Procedures
 
@@ -49,7 +49,7 @@ Invoked from SKILL.md (quick mode and scheduled reflect) whenever ≥1 candidate
 
 **Pin the root.** Once per reflect run, before any judge, triage, or eval-runner dispatch. If this run already has the `Anchor:` line, reuse it. Otherwise:
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit
+bun <plugin_root>/scripts/proposal.ts anchor .claude-code-hermit
 ```
 Its stdout is one whole `Anchor: root=… memory_dir=…` line, already carrying the `Anchor:` prefix — paste it verbatim as the first line of every subsequent judge, triage, scheduled-checks gate, and eval-runner dispatch this run, and do not re-prefix it. On a non-zero exit there is no line to paste: do not dispatch, rerun with the absolute state dir the error names in place of `.claude-code-hermit`.
 
@@ -112,7 +112,7 @@ Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 
 The judge returns one verdict line per candidate, matched by `<title>`. For each candidate, record its line:
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts gate .claude-code-hermit --gate judge --caller reflect <<'HERMIT_GATE'
+bun <plugin_root>/scripts/proposal.ts gate .claude-code-hermit --gate judge --caller reflect <<'HERMIT_GATE'
 Title: <title>
 Verdict: <the judge's line for this candidate, verbatim>
 HERMIT_GATE
@@ -155,7 +155,7 @@ Artifact: <the candidate's Artifact: line, verbatim, when it has one>
 
 The gate returns one verdict block per candidate, matched by `<title>`. Line 1 of each block is that candidate's verdict; lines 2+ are additive metadata (`closest_prop`, `aligned`, `operator_excerpt`, `overlap_compiled`, `prior_discussion`, `failed_condition`) — read for context if useful, but do not treat as part of the verdict for branching. For each candidate, record its verdict line (use `"caller":"reflect"` on a normal reflect run, or `"caller":"scheduled-checks"` when invoked via § Scheduled checks):
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts gate .claude-code-hermit --gate triage --caller reflect <<'HERMIT_GATE'
+bun <plugin_root>/scripts/proposal.ts gate .claude-code-hermit --gate triage --caller reflect <<'HERMIT_GATE'
 Title: <title>
 Verdict: <that candidate's line 1, verbatim>
 HERMIT_GATE
@@ -175,7 +175,7 @@ After validating with `claude-code-hermit:reflection-judge`, choose exactly one 
 
 Sub-threshold observations do not surface to the operator in steady state. Append them to the observations ledger with a short stable pattern label — the label goes on stdin, so apostrophes in it are safe:
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit reflect-noticed --origin=own-work <<'HERMIT_OBSERVATION'
+bun <plugin_root>/scripts/observations.ts observe .claude-code-hermit reflect-noticed --origin=own-work <<'HERMIT_OBSERVATION'
 <short pattern label>
 HERMIT_OBSERVATION
 ```
@@ -193,7 +193,7 @@ Every micro-proposal question must include: **[observed pattern + duration] + [c
 Queuing procedure:
 
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
+bun <plugin_root>/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
 {"tier":<1|2>,"question":"<full question text>","options":["<label>", ...],"on_resolve":"<full skill invocation with an {answer} placeholder>"}
 HERMIT_MP
 ```
@@ -213,7 +213,7 @@ Component Health improves existing components. This subsection is the symmetric 
 After ≥8 procedure-capture candidates surfaced, run:
 
 ```
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts metrics .claude-code-hermit --source=procedure-capture
+bun <plugin_root>/scripts/proposal.ts metrics .claude-code-hermit --source=procedure-capture
 ```
 
 Triage-survival < 25% or acceptance < 30% → disable procedure capture rather than tune it. `INSUFFICIENT` output means the ≥8-verdict sample hasn't been reached yet; do not read thresholds until it does.
@@ -298,7 +298,7 @@ Queue as a Tier-3 candidate by calling `/claude-code-hermit:proposal-create` —
 
 Then exactly one bridged ask via `proposal.ts queue-micro`:
 ```bash
-bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
+bun <plugin_root>/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
 {"tier":2,"question":"<pattern + duration> + <consequence> + save it and run <skill name> on <schedule>?","options":["accept","dismiss"],"on_resolve":"/claude-code-hermit:proposal-act {answer} PROP-NNN","proposal_id":"PROP-NNN"}
 HERMIT_MP
 ```

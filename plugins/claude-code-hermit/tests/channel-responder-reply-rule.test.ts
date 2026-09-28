@@ -255,7 +255,7 @@ test('procedure owners retain mandatory rules and command interfaces', () => {
       'Main owns sends and any `AskUserQuestion`; delegates return composed messages',
       'exclude the `primary` string pointer when iterating', 'Push is best-effort; do not retry on failure',
       'do not log a `channel-send-unavailable` issue for this branch', 'Respond in conversation either way',
-      'do not resolve the channel yourself', 'channel-send.ts .claude-code-hermit --notice',
+      'do not resolve the channel yourself', 'hermit-run channel-send .claude-code-hermit --notice',
       'Any decision, reply or operator action requires a plain client version',
       'complete', 'richer version of the same notice', '"sensitive": true',
       'apply §0 Message formatting', '**Exit 0**', '**Exit 2**', 'Fix and re-run', '**Exit 1**',
