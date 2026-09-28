@@ -12,7 +12,7 @@ A wrong reboot causes an outage. A wrong deploy targets the wrong site.
 
 ### Tools
 
-Skills self-advertise through their own `SKILL.md` descriptions — they are not catalogued here. The curated `php forge.php` commands cover the hot paths; run `forge.php --help` for the full catalog. Any other SDK call goes through generic dispatch: `call <method>` reads; writes need `preview <method>` then `execute <plan-id>`, a single-use hash-checked plan the operator approves. Secrets and DELETE are denied — `forge.php policy` shows the boundary. Args are a JSON array on stdin, with IDs as bare numbers (SDK params are typed ints; `strict_types` rejects `"123"`). Never pass the org slug — it is prepended automatically, except for global methods like `organizations`:
+Skills self-advertise through their own `SKILL.md` descriptions — they are not catalogued here. The curated `forge.php` commands cover the hot paths; run `forge.php --help` for the full catalog. Any other SDK call goes through generic dispatch: `call <method>` reads; writes need `preview <method>` then `execute <plan-id>`, a single-use hash-checked plan the operator approves. Secrets and DELETE are denied — `forge.php policy` shows the boundary. Args are a JSON array on stdin, with IDs as bare numbers (SDK params are typed ints; `strict_types` rejects `"123"`). Never pass the org slug — it is prepended automatically, except for global methods like `organizations`:
 
 ```bash
 echo '[123]' | forge.php call databases
