@@ -8,8 +8,8 @@ Standing work is what the hermit does without being asked in the moment: routine
 
 ### Gather (bounded reads only)
 
-- Routines: `bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json get routines` for id, schedule, skill, enabled, precheck.
-- Routine outcomes: `bun <plugin_root>/scripts/routines.ts health .claude-code-hermit` (JSON; add `--days N` for a longer window). Use `last_fire`, `failure_total`, `last_precheck_error`, `open_attempt`.
+- Routines: `settings-get-routines` (Commands) for id, schedule, skill, enabled, precheck.
+- Routine outcomes: `routines-health` (Commands) (JSON; add `--days N` for a longer window). Use `last_fire`, `failure_total`, `last_precheck_error`, `open_attempt`.
 - Watches: `Read state/monitors.runtime.json` for id, description, source, class, started_at.
 - Roles: the `[role` lines already in this turn's context. Hermit-wide ones always apply; a pinned `[role <key>:<chat_id>]` line applies only to that chat (`SKILL.md` § 1).
 - Current activity: the open-record digest and its execution observation.
@@ -87,10 +87,9 @@ Do not classify tier, tag Evidence Source, or decide memory-vs-proposal. Reflect
 
 **Resolved corrections → observations ledger, not Findings.** For a correction or emergency implying a durable preference that clearly names an installed skill/component (e.g. "the brief is too verbose", not a vague "you"), append a ledger row **instead of** a `## Findings` line:
 
-```
-bun <plugin_root>/scripts/observations.ts observe .claude-code-hermit skill-correction --origin=<own-work|external-content> <<'HERMIT_OBSERVATION'
+Run `observations-observe` (Commands) with arguments `skill-correction --origin=<own-work|external-content>` and the following stdin payload:
+```text
 skill-correction:<canonical-name>
-HERMIT_OBSERVATION
 ```
 
 `<canonical-name>` is the skill's lowercase bare `name:` frontmatter, without `claude-code-hermit:`/`<plugin>:`. Set `origin` to `external-content` for non-primary senders, else `own-work`. Rejected rows return `ERROR|<reason>` at exit 0; no `|| true` is needed. Mis-invocations exit 1: fix the call, never retry blindly or block the reply. At most one row per turn.

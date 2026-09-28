@@ -9,6 +9,12 @@ Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}
 
 Generates the weekly review for the current ISO week.
 
+## Commands
+- `channel-log-unconsolidated`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-log.ts .claude-code-hermit list-unconsolidated`
+- `duties-summary`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/duties.ts summary .claude-code-hermit`
+- `task-report`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task-report.ts .claude-code-hermit --recent --limit 3`
+- `artifact-render`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render <type> .claude-code-hermit`
+
 ## Steps
 
 1. Run:
@@ -21,6 +27,8 @@ Generates the weekly review for the current ISO week.
 3. **Dispatch the week's file-heavy analysis** to the isolated-context runner in one call, so full topic-page bodies and the week's channel rows never land in this session's context. Dispatch `claude-code-hermit:skill-eval-runner` once, passing no `model` parameter so it inherits the session model. Point it at both specs and pass `plugin_root` as the resolved absolute plugin path for the task-report adapter command.
    - `${CLAUDE_PLUGIN_ROOT}/skills/weekly-review/reference.md` — the topic-page semantic check: reads every `compiled/topic-*.md` for contradictions, stale claims, and broken `[[wikilinks]]` (capped at 3 findings).
    - `${CLAUDE_PLUGIN_ROOT}/skills/weekly-review/consolidation-reference.md` — distills the week's episodic channel log into the curated tiers and **files each candidate itself**, in its own context, treating the rows as untrusted external input.
+
+Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments. Also pass `plugin_root: ${CLAUDE_PLUGIN_ROOT}` for non-command plugin files.
 
    Name the absolute path of this session's auto-memory directory in the dispatch — the consolidation spec writes memory files there and has no way to derive that path on its own. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/memory-dir.ts` and pass the `dir` it prints; if `exists` is false, say so in the dispatch and tell the runner to return every `kind:"memory"` candidate's rows in `failed_row_ids` rather than creating one. Name the current ISO week in the dispatch too, the value step 1 already produced in the review filename: the consolidation spec's provenance line needs it and has no other way to derive one that matches the review file.
 

@@ -154,7 +154,7 @@ describe('proposal-act accept flow', () => {
   test('queued record defers the gate call to the future session', () => {
     // The queued path cannot run the verb at queue time — no implementation has
     // happened yet, so there is no diff to classify. It hands the call forward.
-    expect(skill).toContain('Before committing, run: bun');
+    expect(skill).toContain('Copy `proposal-quality-gate` (Commands) into the note as an absolute command');
     expect(skill).toContain('On "action":"RUN"');
   });
 

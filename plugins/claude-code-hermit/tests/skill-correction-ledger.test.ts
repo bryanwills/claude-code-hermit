@@ -175,7 +175,7 @@ describe('channel-responder: resolved correction routes to ledger row', () => {
   });
 
   test('channel-responder: appends through observations.ts with the skill-correction source', () => {
-    expect(channelResponder).toContain('observations.ts observe .claude-code-hermit skill-correction');
+    expect(channelResponder).toContain('`observations-observe` (Commands) with arguments `skill-correction');
   });
 
   test('channel-responder: label is skill-correction:<canonical-name> on its own heredoc line', () => {

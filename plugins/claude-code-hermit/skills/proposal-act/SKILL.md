@@ -2,11 +2,16 @@
 name: proposal-act
 description: 'Accept, defer, dismiss, or resolve a proposal. For accepted proposals, asks how to proceed: start implementing now, queue a task, or note for manual implementation. Activates on messages like "accept PROP-", "dismiss PROP-", "defer PROP-", "resolve PROP-".'
 ---
-`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
 
 # Proposal Act
 
 Take action on a proposal: accept, defer, dismiss, or resolve.
+
+## Commands
+- `artifact-render`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render <type> .claude-code-hermit`
+- `proposal-quality-gate`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts quality-gate .claude-code-hermit`
+- `task-note`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit`
+- `task-open`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts open .claude-code-hermit`
 
 ## Step 0 — Channel reply
 

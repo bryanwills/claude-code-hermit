@@ -33,6 +33,8 @@ Pass the capability signals from Step 1 in the dispatch prompt. Dispatch `claude
 - `mcp_tools`: the `ListMcpResourcesTool` output
 - `channels_keys`: the `channels` key list from config.json
 
+Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments. Also pass `plugin_root: ${CLAUDE_PLUGIN_ROOT}` for non-command plugin files.
+
 The runner reads memory topic files, compiled artifacts, and codebase shape in an isolated context, generates ≤2 ideas (applying the friction + grounding constraints), and returns the structured result.
 
 **Eval runner return schema** — the runner's return value is a JSON object conforming to this block. The schema is byte-identical in `reference.md` (producer) and here (consumer); a contract test asserts this.

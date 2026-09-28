@@ -28,11 +28,12 @@ const reference = fs.readFileSync(path.join(path.dirname(SKILL_PATH), 'reference
 
 // ~/.agents/probe-results/cc-skill-truncation-after-compaction-and-reinvoke.md
 // records a 20,000-character rendered retention limit; leave room for growth.
+// The Commands block costs ~700 rendered chars.
 for (const name of ['channel-responder', 'task', 'proposal-act']) {
   test(`${name} fits the rendered retention budget`, () => {
     const text = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', name, 'SKILL.md'), 'utf-8');
     const rendered = text.replaceAll('${CLAUDE_PLUGIN_ROOT}', '/' + 'p'.repeat(99));
-    expect(rendered.length).toBeLessThanOrEqual(18_000);
+    expect(rendered.length).toBeLessThanOrEqual(18_500);
   });
 }
 
@@ -219,7 +220,7 @@ test('procedure owners retain mandatory rules and command interfaces', () => {
       'resolve <id> --action approved', 'create PROP-NNN via `/claude-code-hermit:proposal-create`',
       'resolve <id> --action rejected', 'If no pending micro-proposals: classify as normal message',
       '`YES` / "go ahead" / "accept" → `accept`', '`LATER` / "hold" / "defer" → `defer`',
-      '`NO` / "drop" / "dismiss" → `dismiss`', 'index .claude-code-hermit',
+      '`NO` / "drop" / "dismiss" → `dismiss`', '`proposal-index` (Commands)',
       'Match an explicit `#N` or `PROP-NNN`', 'apply when exactly one exists',
       'Never surface internal proposal fields back to the channel',
     ]],
@@ -245,7 +246,7 @@ test('procedure owners retain mandatory rules and command interfaces', () => {
       '**Do not write a finding**', 'with no open record, write nothing',
       '[HH:MM] Channel pattern:', '[origin: external]', 'Do not classify tier, tag Evidence Source',
       'instead of** a `## Findings` line',
-      'observations.ts observe .claude-code-hermit skill-correction --origin=<own-work|external-content>',
+      '`observations-observe` (Commands)', 'skill-correction --origin=<own-work|external-content>',
       'skill-correction:<canonical-name>', 'lowercase bare `name:` frontmatter',
       'Rejected rows return `ERROR|<reason>` at exit 0',
       'fix the call, never retry blindly or block the reply', 'At most one row per turn',
@@ -264,5 +265,6 @@ test('procedure owners retain mandatory rules and command interfaces', () => {
       'never advise `/<channel>:access`', 'hermit-settings channels → edit <name> → group',
     ]],
   ];
+  expect(skill).toContain('- `proposal-index`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts index .claude-code-hermit`');
   for (const [text, required] of rules) for (const rule of required) expect(text).toContain(rule);
 });

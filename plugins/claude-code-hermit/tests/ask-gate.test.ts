@@ -56,6 +56,12 @@ describe('ask-gate', () => {
     expect(r.exitCode).toBe(2);
     expect(r.stderr).toContain('channel reply tool');
     expect(r.stderr).toContain('micro-proposals.json');
+    const proposalPath = r.stderr.match(/bun '([^']+)' queue-micro/)?.[1];
+    expect(proposalPath).toBeDefined();
+    expect(path.isAbsolute(proposalPath!)).toBe(true);
+    expect(proposalPath!.endsWith('/scripts/proposal.ts')).toBe(true);
+    expect(fs.existsSync(proposalPath!)).toBe(true);
+    expect(r.stderr).not.toContain('${');
   }));
 
   test('always_on: false — untouched even with channels configured', withDir(async (dir) => {

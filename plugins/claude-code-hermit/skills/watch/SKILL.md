@@ -3,11 +3,7 @@ name: watch
 description: Background watching via the CC Monitor tool. Starts subprocesses that stream events as conversation notifications — zero token cost when quiet. Supports declared config watches (auto-registered on session start) and ad-hoc operator-invoked watches.
 ---
 
-`<plugin_root>` in this skill and its supporting files means `${CLAUDE_PLUGIN_ROOT}`.
-When this file is read as a sibling reference, derive the same root from its absolute
-path (`<plugin_root>/skills/watch/SKILL.md`). Substitute that absolute path before running commands.
-
-Record notes only inside an open record's turn, using `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 
 # Watch
 
@@ -17,6 +13,12 @@ the subprocess becomes a conversation notification. Silence costs zero tokens.
 Two classes:
 - **Stream:** Source pushes events (`tail -f`, WebSocket, fswatch). Truly event-driven.
 - **Poll:** Script checks on interval, emits only on change. Same polling model, less noise.
+
+## Commands
+- `proposal-patch`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts patch .claude-code-hermit`
+- `proposal-resolve-id`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts resolve-id .claude-code-hermit`
+- `task-block`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts block .claude-code-hermit`
+- `task-note`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit`
 
 ## Usage
 
@@ -100,7 +102,7 @@ or record write that already completed.
 8. Write registry back
 9. When running inside an open task record, note the watch with its id:
    ```bash
-   bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
    - [ACTIVE] <instruction> (started HH:MM)
    HERMIT_LINE
    ```
@@ -127,7 +129,7 @@ Called automatically by resident-start on a genuine boot. Can also be called man
 4. Write registry back
 5. If any watches were registered during an open task record turn, note them with its id:
    ```bash
-   bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id> <<'HERMIT_LINE'
    [HH:MM] Watches registered: <id1>, <id2> (<N> total)
    HERMIT_LINE
    ```
@@ -207,6 +209,6 @@ or watch id.
 
 ## Watch duty records
 
-When a watch event is handled, run `bun <plugin_root>/scripts/duties.ts record .claude-code-hermit watch <id> --verdict <verdict>` before removing a consumed entry. This updates only its `last_event_at` and `last_verdict`; listings are labeled since session start.
+When a watch event is handled, run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/duties.ts record .claude-code-hermit watch <id> --verdict <verdict>` before removing a consumed entry. This updates only its `last_event_at` and `last_verdict`; listings are labeled since session start.
 
-Read `TASKS.md`. If a finding requires a human and `config.tasks.duties_open_records` is true, use `bun <plugin_root>/scripts/task.ts open .claude-code-hermit --requester duty:watch --title ... --done ... --due <ISO> --dedupe-key duty:watch:<watch-id>:<event-key>` and `bun <plugin_root>/scripts/task.ts block .claude-code-hermit <id> --waiting-on <human> --status-line ... --next ...`. Post the stall notice only on `created:true`; repeated open digests refer to the same record. Otherwise post plain messages. A verified resolution closes only its matching record with `bun <plugin_root>/scripts/task.ts close .claude-code-hermit <id> --by check --actor duty:watch`; ambiguous reads never close records.
+Read `TASKS.md`. If a finding requires a human and `config.tasks.duties_open_records` is true, use `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts open .claude-code-hermit --requester duty:watch --title ... --done ... --due <ISO> --dedupe-key duty:watch:<watch-id>:<event-key>` and `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts block .claude-code-hermit <id> --waiting-on <human> --status-line ... --next ...`. Post the stall notice only on `created:true`; repeated open digests refer to the same record. Otherwise post plain messages. A verified resolution closes only its matching record with `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts close .claude-code-hermit <id> --by check --actor duty:watch`; ambiguous reads never close records.

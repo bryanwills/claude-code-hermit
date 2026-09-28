@@ -1232,3 +1232,36 @@ test('resident drift remains pending at equal version and with ambiguous shared 
   expect(ambiguous.claude_append_ambiguous).toBe(true);
   expect(ambiguous.resident_changed).toBe(true);
 }));
+
+
+test('changelog root tokens resolve to each owning plugin install', withProj(async (proj) => {
+  const coreRoot = path.join(proj, 'core-install');
+  const siblingRoot = path.join(proj, 'sibling-install');
+  fs.cpSync(PR, coreRoot, { recursive: true });
+  fs.cpSync(SP, siblingRoot, { recursive: true });
+  const instructions = '\n### Upgrade Instructions\nRun ${CLAUDE_PLUGIN_ROOT}/scripts/one.ts and <plugin_root>/scripts/two.ts.\n';
+  fs.writeFileSync(path.join(coreRoot, 'CHANGELOG.md'), '## [1.1.7]\n' + instructions);
+  fs.writeFileSync(path.join(siblingRoot, 'CHANGELOG.md'), '## [0.4.3]\n' + instructions);
+  writeConfig(proj, JSON.stringify({
+    _hermit_versions: { 'claude-code-hermit': '1.1.6', 'claude-code-dev-hermit': '0.4.1' },
+  }));
+  const pluginList = writePluginList([{ ...siblingEntry(proj), installPath: siblingRoot }]);
+  const result = await runScript('evolve-plan.ts', {
+    args: [hermitDir(proj), '--hatch-target=local', `--plugin-list-json=${pluginList}`],
+    env: { CLAUDE_PLUGIN_ROOT: coreRoot },
+  });
+  expect(result.exitCode).toBe(0);
+  const plan = JSON.parse(result.stdout);
+  expect(plan.errors).toEqual([]);
+  expect(plan.siblings).toHaveLength(1);
+  for (const [slice, ownRoot, otherRoot] of [
+    [plan.changelog_slice, coreRoot, siblingRoot],
+    [plan.siblings[0].changelog_slice, siblingRoot, coreRoot],
+  ]) {
+    expect(slice).toContain(`${ownRoot}/scripts/one.ts`);
+    expect(slice).toContain(`${ownRoot}/scripts/two.ts`);
+    expect(slice).not.toContain(otherRoot);
+    expect(slice).not.toContain('${CLAUDE_PLUGIN_ROOT}');
+    expect(slice).not.toContain('<plugin_root>');
+  }
+}));

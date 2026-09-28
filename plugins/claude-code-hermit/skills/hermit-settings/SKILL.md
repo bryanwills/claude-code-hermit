@@ -2,11 +2,14 @@
 name: hermit-settings
 description: View or change hermit configuration for this project. Manages model, channels, morning brief, heartbeat, routines, compaction thresholds, Docker packages, and unattended mode.
 ---
-`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
 
 # Hermit Settings
 
 View or modify the hermit configuration for this project.
+
+## Commands
+- `artifact-render`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render <type> .claude-code-hermit`
+- `channel-group-add`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<hermit_state_dir>" group-add`
 
 ## Step 0 — Channel reply
 

@@ -13,6 +13,9 @@ to run at any time. Produces no side effects beyond writing
 `.claude-code-hermit/state/doctor-report.json` and `.claude-code-hermit/state/doctor-alerts.json`,
 and appending a summary block to the open task record.
 
+## Commands
+- `task-note`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit`
+
 ## Notification route
 
 A finding gets one notification per unresolved episode: the check script records it, you send it

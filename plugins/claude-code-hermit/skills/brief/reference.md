@@ -6,11 +6,11 @@ Return structured JSON for the calling skill to compose and deliver. Read fresh 
 
 The caller supplies `plugin_root` (absolute), `mode` (`morning`, `evening`, `daily`, `default-no-session`), `today` (ISO date), and morning `context_recovery`.
 
-Run `bun <plugin_root>/scripts/task-report.ts .claude-code-hermit --limit 20` for normalized records and `bun <plugin_root>/scripts/task.ts list .claude-code-hermit --open --owner resident --json` for open resident work. Run `bun <plugin_root>/scripts/duties.ts summary .claude-code-hermit` for requested and observed duties, returning any discrepancy in `findings`; a `skipped-precheck` last event is healthy (the routine ran its precheck and had nothing to do), not a discrepancy.
+Run `task-report` (Commands) with arguments `--limit 20` for normalized records and `task-list` (Commands) with arguments `--open --owner resident --json` for open resident work. Run `duties-summary` (Commands) for requested and observed duties, returning any discrepancy in `findings`; a `skipped-precheck` last event is healthy (the routine ran its precheck and had nothing to do), not a discrepancy.
 
 ## Per-mode instructions
 
-For morning, run `bun <plugin_root>/scripts/proposal.ts index .claude-code-hermit`, then read `state/proposals-index.json`; put proposed auto-detected entries in `pending_proposals`. Read `OPERATOR.md` for `operator_priorities` if present. Populate `queued_work` from runnable open resident records. If `context_recovery` is true, summarize the newest normalized record; otherwise `report_summary` is null.
+For morning, run `proposal-index` (Commands), then read `state/proposals-index.json`; put proposed auto-detected entries in `pending_proposals`. Read `OPERATOR.md` for `operator_priorities` if present. Populate `queued_work` from runnable open resident records. If `context_recovery` is true, summarize the newest normalized record; otherwise `report_summary` is null.
 
 For evening and daily, select records whose `closed_at` date matches `today`, and open records whose `opened_at` date matches `today`. Populate `sessions_today` with task source paths as the compatibility `session` identifier and one-line title/outcome summaries. Populate `findings` from lessons and `tomorrow` from open work and waiting reasons. Do not count `cancelled` or `unconfirmed` as done.
 

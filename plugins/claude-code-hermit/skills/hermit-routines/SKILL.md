@@ -26,12 +26,12 @@ Register and manage scheduled routines. Where the Monitor tool is available, all
 
 Called automatically by `hermit-start.ts` on always-on launches. Can also be called manually to apply config changes mid-session.
 
-1. Resolve the plugin root path: derive it from this skill's **Base directory**, which the harness injects into the invocation context as `<plugin_root>/skills/hermit-routines`. Strip the trailing `/skills/hermit-routines` to get `pluginRoot`. This works in both installed and `--plugin-dir` modes. (`$CLAUDE_PLUGIN_ROOT` is NOT a Bash env var at runtime — evaluating it in Bash always returns empty. The braced `${CLAUDE_PLUGIN_ROOT}` form is text-substituted in skill markdown only in installed mode. Neither is reliable here — always use the Base-directory derivation.) The resolved `pluginRoot` must be baked into any CronCreate-delivered prompt at registration — it is not available inside either subprocess or cron-delivered prompts.
+1. Use the harness-substituted `${CLAUDE_PLUGIN_ROOT}` paths below. Copy absolute commands into any CronCreate-delivered prompt at registration; the plugin root is NOT a Bash env var at runtime.
 
-   **Validate `pluginRoot` before proceeding.** If `pluginRoot` is empty, or either of `<pluginRoot>/scripts/routines.ts` (the `log-event`/`precheck`/`cron-registry` verbs all live in it) or `<pluginRoot>/scripts/routine-monitor.sh` does not exist (`test -f` on each path), abort `load` immediately — do not register/delete anything — and log one line: `Routine load aborted: plugin scripts not found at "<pluginRoot>". No routines registered or reset.`
+   **Validate the plugin scripts before proceeding.** Run `test -f "${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts"` (the `log-event`/`precheck`/`cron-registry` verbs all live in it) and `test -f "${CLAUDE_PLUGIN_ROOT}/scripts/routine-monitor.sh"`. If either fails, abort `load` immediately — do not register/delete anything — and log one line: `Routine load aborted: plugin scripts not found at "${CLAUDE_PLUGIN_ROOT}". No routines registered or reset.`
 2. **Ask what needs arming:**
    ```
-   bun <pluginRoot>/scripts/routines.ts arm begin .claude-code-hermit <pluginRoot> --session-id "${CLAUDE_SESSION_ID}"
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts arm begin .claude-code-hermit ${CLAUDE_PLUGIN_ROOT} --session-id "${CLAUDE_SESSION_ID}"
    ```
    It reads config, the runtime mirror and both liveness files, and returns the whole plan. Append ` --reset` for `load --reset` (below). Its first line decides the branch:
 
@@ -49,7 +49,7 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
    - Execute `DELETE:` / `CREATE:` lines through the **CronCreate flow** below. Preserve `ANCHOR_PROMPT_BEGIN` through `ANCHOR_PROMPT_END` as the anchor prompt.
 4. **Commit:**
    ```
-   bun <pluginRoot>/scripts/routines.ts arm commit .claude-code-hermit <pluginRoot> <native|none> --created "<succeeded-csv>" --heartbeat <native|none>
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts arm commit .claude-code-hermit ${CLAUDE_PLUGIN_ROOT} <native|none> --created "<succeeded-csv>" --heartbeat <native|none>
    ```
    Use `native` for the routine leg unless `MONITOR_SKIP` was printed. Append ` --reset` when `begin` got it. The verb accepts a live supervisor PID or waits up to 10 seconds for liveness, then writes runtime and the registry mirror.
    - `OK|monitor|<n> scheduled|anchor <created|kept>`: log it.
@@ -57,9 +57,9 @@ Called automatically by `hermit-start.ts` on always-on launches. Can also be cal
    - `HEARTBEAT:<result>`: independent heartbeat result. Log `OK|registered|interval=<s>`; for `DEAD|liveness-absent`, report that the heartbeat will not run this session.
 5. **Step 3-F, fallback** (only after `FALLBACK|liveness-absent`): run
    ```
-   bun <pluginRoot>/scripts/routines.ts arm begin .claude-code-hermit <pluginRoot> --fallback --session-id "${CLAUDE_SESSION_ID}"
+   bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts arm begin .claude-code-hermit ${CLAUDE_PLUGIN_ROOT} --fallback --session-id "${CLAUDE_SESSION_ID}"
    ```
-   This re-plans over the full enabled set without activation or heartbeat lines. Execute its `DELETE:`/`CREATE:` lines through the **CronCreate flow** below, then commit with `arm commit .claude-code-hermit <pluginRoot> fallback --created "<succeeded-csv>" --heartbeat none`.
+   This re-plans over the full enabled set without activation or heartbeat lines. Execute its `DELETE:`/`CREATE:` lines through the **CronCreate flow** below, then commit with `arm commit .claude-code-hermit ${CLAUDE_PLUGIN_ROOT} fallback --created "<succeeded-csv>" --heartbeat none`.
 
    **CronCreate flow** (executes the `DELETE:`/`CREATE:` lines from any `arm begin` block — monitor-mode anchor, fallback, or `--reset`):
    Report `WARN:routines|...` as a scheduler warning, including when all registrations are kept. CronCreate fallback does not enforce `routine_max_lateness_minutes`.
@@ -81,7 +81,7 @@ The shared precheck consults the binding pause flag.
 **Formatting-only read.** When a routine needs to send a channel message and the formatting rules are not already in its context, use `Read` once with these arguments. Do not search for the heading, read the whole file, or invoke the responder for formatting:
 
 ```json
-{"file_path":"<pluginRoot>/skills/channel-responder/SKILL.md","offset":23,"limit":9}
+{"file_path":"${CLAUDE_PLUGIN_ROOT}/skills/channel-responder/SKILL.md","offset":29,"limit":9}
 ```
 
 In the templates below, replace `<formatting-read>` with this `Read` call and its resolved plugin path. Include the arguments in the dispatched agent's prompt too; the agent must not need to look up the read instructions. Skip it when no channel send is needed or the rules are already in that caller's context.
@@ -90,18 +90,18 @@ In the templates below, replace `<formatting-read>` with this `Read` call and it
 
 Base execution, one routine, `<delivery>` = `cron-create` (fallback prompt) or `monitor` (`run` handler):
 ```
-Run: bun <pluginRoot>/scripts/routines.ts precheck <id> <delivery>
+Run: bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts precheck <id> <delivery>
 If the output is SKIP, stop. If PROCEED:
 - For an inline routine that sends a channel message, use <formatting-read> before invoking the skill, unless the Message formatting rules are already in context. Apply it when preparing the send. Skip this read when no channel send is needed.
 - Invoke /<skill>, or dispatch per the model-override rule above (the worker receives its own formatting reference).
 After it completes, run:
-bun <pluginRoot>/scripts/routines.ts finish <id> <delivery> --outcome-stdin <<'HERMIT_LINE'
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts finish <id> <delivery> --outcome-stdin <<'HERMIT_LINE'
 <one line: the routine id and what the fire actually did or found>
 HERMIT_LINE
 If the invoked skill or model-override dispatch hands work to a background agent and the turn ends before the skill's final step, the routine stays open: run `finish` exactly once per fire in the turn that completes that final step after the agent's hand-back, never at dispatch.
 ```
 The heredoc line describes the routine outcome recorded by `finish`.
-Replace `<pluginRoot>`, `<id>`, and `<skill>` (passed verbatim to the slash invocation; `claude-code-hermit:brief --morning` becomes `/claude-code-hermit:brief --morning`).
+Copy the already absolute commands and replace `<id>` and `<skill>` (passed verbatim to the slash invocation; `claude-code-hermit:brief --morning` becomes `/claude-code-hermit:brief --morning`).
 
 **Optional `precheck`: the wake gate.** A routine may declare `precheck`; one of the builtins `"reflect"`, `"doctor"`, `"later"`, or a project-relative path to an executable the operator owns. The routine monitor runs it at fire time, before waking the session: on `SKIP` the fire is consumed and stamped `skipped-precheck` at **zero token cost**, and nothing is emitted. On `WAKE`, any non-zero exit, a timeout (`precheck_timeout_s`, default 30s, max 300), or unparseable output, the routine fires exactly as it would with no gate, and a failure stamps `precheck-error` with the reason. Contract for an operator script: print `SKIP` or `WAKE` as its **first stdout line and nothing else that matters**; no output reaches the session, so a gate that has found something hands nothing over; the skill re-queries its own source, using the `ROUTINE_LAST_FIRED` env var (ISO timestamp of the last successful fire, empty on the first ever fire; treat empty as "everything is new"). Also in the environment: `HERMIT_DIR`, `ROUTINE_ID`, `PATH`, and, when set, `HOME`, `LANG`, `CLAUDE_CONFIG_DIR`, `HERMIT_PLUGIN_ROOT`. No other monitor variables are forwarded. Gates must be read-only and cheap; anything that mutates state belongs in the skill, which only runs when the gate says so. The hermit may write the script for the operator on request. In CronCreate fallback mode the gate still runs, but after the wake; same behavior, no token saving.
 
@@ -115,13 +115,13 @@ The daily fire re-arms the monitor and, in fallback mode, the routine CronCreate
 
 **`reflect_after: true`:** append after the trailing `finish` call (and after the `heartbeat-restart` append if both apply). Skip when `skill` is `claude-code-hermit:reflect` — chaining reflect after reflect is a config foot-gun.
 ```
-Then, only if `routines.ts precheck` returned PROCEED (not SKIP), run <pluginRoot>/scripts/reflect-precheck.ts .claude-code-hermit <pluginRoot> --quick. If its first output line is exactly `EMPTY`, do not invoke reflect. Otherwise (a `RUN|<hash>` line) invoke /claude-code-hermit:reflect --quick --precheck-verdict '<that full line>'.
+Then, only if `routines.ts precheck` returned PROCEED (not SKIP), run ${CLAUDE_PLUGIN_ROOT}/scripts/reflect-precheck.ts .claude-code-hermit ${CLAUDE_PLUGIN_ROOT} --quick. If its first output line is exactly `EMPTY`, do not invoke reflect. Otherwise (a `RUN|<hash>` line) invoke /claude-code-hermit:reflect --quick --precheck-verdict '<that full line>'.
 ```
 
 **Special case — `skill` is exactly `claude-code-hermit:reflect`:** reflect's body should not load on days with nothing to reflect on. Replace the invoke clause with:
 ```
 If the precheck output carried a second line `REFLECT RUN|<phases-json>`, invoke /claude-code-hermit:reflect --precheck-verdict 'RUN|<phases-json>' — do NOT run reflect-precheck.ts yourself; it already ran, and running it again appends its observation rows a second time.
-Otherwise run <pluginRoot>/scripts/reflect-precheck.ts .claude-code-hermit <pluginRoot>. If its first output line is exactly `EMPTY`, do not invoke reflect; fall through to the `finish` call. Otherwise (a `RUN|<phases-json>` line) invoke /claude-code-hermit:reflect --precheck-verdict '<that full line>'.
+Otherwise run ${CLAUDE_PLUGIN_ROOT}/scripts/reflect-precheck.ts .claude-code-hermit ${CLAUDE_PLUGIN_ROOT}. If its first output line is exactly `EMPTY`, do not invoke reflect; fall through to the `finish` call. Otherwise (a `RUN|<phases-json>` line) invoke /claude-code-hermit:reflect --precheck-verdict '<that full line>'.
 ```
 The `REFLECT` line is present whenever the routine declares `"precheck": "reflect"` (the shipped default): the gate then ran subprocess-side before the wake, and an EMPTY day never woke the session at all. Without it, the fallback clause runs the precheck in-session: an EMPTY day costs one wake but never loads the reflect skill body. Single-check invocations (`--check-id <id> --check <skill>`) have no cadence precheck; `--quick` gets its own via the `reflect_after` append above.
 

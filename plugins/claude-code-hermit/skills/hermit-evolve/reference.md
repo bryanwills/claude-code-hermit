@@ -1,14 +1,14 @@
-Record notes only inside an open record's turn, using `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+Record notes only inside an open record's turn, using `task-note` (Commands) with arguments `<id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 
 # Hermit Evolve — Upgrade Steps Reference
 
 This file is the instruction spec for the isolated-context subagent dispatched by `hermit-evolve/SKILL.md`'s `## Execution routing` section (`evolve-runner`). The subagent reads this file directly — not `SKILL.md`, which stays a thin routing stub — and executes steps 0 through 9 exactly as written below. Step 10 (report handling) lives in `SKILL.md` and runs in the main loop after the subagent returns its report.
 
-The dispatch prompt supplies the resolved absolute plugin root — substitute it for `<plugin_root>` throughout this file. Do not use the `${CLAUDE_PLUGIN_ROOT}` token: it is not substituted in this file's content and is empty as a Bash variable.
+The evolve-runner body supplies the absolute plugin root for non-command files and the Commands entries used below. Run those entries verbatim with the stated arguments.
 
 ### 0. Verify Claude Code CLI version
 
-- Read `<plugin_root>/.claude-plugin/hermit-meta.json`. If the file
+- Read `.claude-plugin/hermit-meta.json` under the plugin root. If the file
   doesn't exist or `min_claude_code_version` is not set, skip this step.
 - Run `claude --version` and parse the leading semver (format:
   `X.Y.Z (Claude Code)`). If the command fails or the version cannot be parsed,
@@ -53,15 +53,13 @@ The dispatch prompt supplies the resolved absolute plugin root — substitute it
 
 First determine `hatch_target` (the pre-pass needs it, and so do Steps 6, 7, 8):
 
-Run `bun <plugin_root>/scripts/domain-hatch.ts preflight claude-code-hermit` and take `target` as `hatch_target`. It owns the whole chain — the stamped file first, then core's own block in `CLAUDE.local.md` or `CLAUDE.md`, then install-scope detection — so hatch, evolve and every domain hatch resolve the target identically.
+Run `domain-hatch-preflight` (Commands) and take `target` as `hatch_target`. It owns the whole chain — the stamped file first, then core's own block in `CLAUDE.local.md` or `CLAUDE.md`, then install-scope detection — so hatch, evolve and every domain hatch resolve the target identically.
 
-If it returns `needs_target_question: true` the project has no stamped target. Use the returned `target_default` and stamp it with `bun <plugin_root>/scripts/domain-hatch.ts ensure-target claude-code-hermit --target <target_default>`, so the next run of anything reads an answered file instead of re-deriving.
+If it returns `needs_target_question: true` the project has no stamped target. Use the returned `target_default` and stamp it with `domain-hatch-ensure-target` (Commands) with arguments `--target <target_default>`, so the next run of anything reads an answered file instead of re-deriving.
 
 Then run the deterministic pre-pass — a single read-only analyzer that computes the version gap, the bounded CHANGELOG slice, new config keys, changed templates/bin, and the CLAUDE-APPEND block diff, so the steps below act on its output instead of reading and diffing whole files:
 
-```
-bun <plugin_root>/scripts/evolve-plan.ts .claude-code-hermit --hatch-target=<hatch_target>
-```
+Run `evolve-plan` (Commands) with arguments `--hatch-target=<hatch_target>`.
 
 Parse stdout as JSON (the "plan"). The plan's `errors` array is the **sole error channel** — objects of `{code, message}`:
 
@@ -76,9 +74,7 @@ Before entering either the full or sibling-only path, initialize `context_reload
 
 **Snapshot the config for the audit ledger.** Once the version check above has decided the run proceeds (so a stop-here run writes nothing), record what `config.json` looked like before any migration touches it:
 
-```
-bun <plugin_root>/scripts/evolve-finalize.ts .claude-code-hermit snapshot --core=<to>
-```
+Run `evolve-snapshot` (Commands) with arguments `--core=<to>`.
 
 Step 2b migrations write `config.json` (through settings-edit) before the finalizer runs; without this snapshot, the finalizer's audit `before` is taken after those writes and the ledger could only ever show the version stamp and its own defaults merge. It always exits 0 — if it prints `SKIP|…`, continue the upgrade anyway. The finalizer reports which happened as `audit_scope` in Step 9.
 
@@ -97,17 +93,14 @@ Within `changelog_slice` (already ordered oldest-first), each version entry may 
 
 The CHANGELOG.md `### Upgrade Instructions` sections are the single source of truth for migrations — do not skip or merely display them. The same pattern applies to sibling-hermit upgrades in Step 7.
 
-Treat `${CLAUDE_PLUGIN_ROOT}` in a CHANGELOG step as `<plugin_root>`.
 
 **Any instruction that changes `.claude-code-hermit/config.json` is applied with settings-edit verbs — never the Edit or Write tool**, whatever wording the instruction uses ("read config.json and set…", "edit config.json", "add the key"). Read with `get`, then write one key per call:
 
-```
-bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json get <dotted.path>
-bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json set <dotted.path> <json-value>
-bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json unset <dotted.path>
-```
+Run `settings-get` (Commands) with arguments `<dotted.path>`.
+Run `settings-set` (Commands) with arguments `<dotted.path> <json-value>`.
+Run `settings-unset` (Commands) with arguments `<dotted.path>`.
 
-Use the absolute `<plugin_root>` path, not an env var. This keeps every migration validated and recorded in the settings ledger, and it is what the strict profile requires — there, a tool write to `config.json` is hook-blocked. A conditional instruction ("if it is exactly X, change it to Y") is evaluated from the `get` output first; if the condition does not hold, make no call. If a verb refuses a write, treat that step as a deferred migration (record it verbatim per the Delegated mode rules) rather than falling back to a direct edit.
+Use the absolute Commands entries. This keeps every migration validated and recorded in the settings ledger, and it is what the strict profile requires — there, a tool write to `config.json` is hook-blocked. A conditional instruction ("if it is exactly X, change it to Y") is evaluated from the `get` output first; if the condition does not hold, make no call. If a verb refuses a write, treat that step as a deferred migration (record it verbatim per the Delegated mode rules) rather than falling back to a direct edit.
 
 **Surgical docker-template migrations.** An Upgrade Instruction may surgically patch a wizard-rendered docker template (`Dockerfile.hermit`) and re-record its `template-manifest.json` baseline. When it does, it sets the report's `Docker rebuild` field to `base-patched`. Treat the corresponding `docker_templates` drift entry as resolved — do **not** surface it as unresolved upstream drift in Step 10.
 
@@ -122,9 +115,7 @@ The plan's `new_config_keys` array lists every key in the current `config.json.t
 Special-default keys — the **only** keys this step writes, because their value is detected, not templated:
 - `language` (0.0.1) / `timezone` (0.0.1): when one appears in `new_config_keys`, **auto-detect** the value (`$LANG` / system timezone via `date +%Z`/`timedatectl`) and write it now via a settings-edit verb, so the finalizer sees it as already present and skips it:
 
-  ```
-  bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json set language <detected>
-  ```
+  Run `settings-set` (Commands) with arguments `language <detected>`.
 
   (These are 0.0.1 keys, set at hatch, so they are almost never missing at evolve time.)
 - All other keys: **do nothing** — the finalizer writes them from `state-templates/config.json.template`, the same source `evolve-plan.ts` derives `new_config_keys[].default` from, and reports what it added as `settings_added`. The operator tunes them via `/hermit-settings` afterward.
@@ -136,7 +127,7 @@ Special-default keys — the **only** keys this step writes, because their value
 
 `templates_changed` is a list of classified file objects `{ name, class }`. Each entry represents a file that differs from upstream or is absent. Resolve by class:
 
-- **`missing`**: `templates/<name>` was absent. Copy `<plugin_root>/state-templates/<name>` → `.claude-code-hermit/templates/<name>`. Report: "Restored missing template: `<name>`."
+- **`missing`**: `templates/<name>` was absent. Copy `state-templates/<name>` under the plugin root → `.claude-code-hermit/templates/<name>`. Report: "Restored missing template: `<name>`."
 - **`unmodified`**: operator never customized it (baseline == on-disk, or no manifest entry). Copy upstream over it silently.
 - **`customized-kept`**: operator edited it and the template hasn't moved. **Keep the operator's copy unchanged.** Collect in a summary line at the end: "Kept N operator-customized template(s): `<name>`, ..."
 - **`conflict`**: both the operator and the template changed since hatch.
@@ -166,7 +157,7 @@ If `<project-root>/obsidian/` exists in the target project:
 
 `bin_changed` entries carry `boot_critical: true` (all bin/ wrappers are boot wrappers — a stale one can dead-end the hermit). Resolution by class:
 
-- **`missing`**: wrapper was absent. Copy `<plugin_root>/state-templates/bin/<name>` → `.claude-code-hermit/bin/<name>`. `chmod +x`. Report: "**Restored missing boot wrapper: `<name>`.**"
+- **`missing`**: wrapper was absent. Copy `state-templates/bin/<name>` under the plugin root → `.claude-code-hermit/bin/<name>`. `chmod +x`. Report: "**Restored missing boot wrapper: `<name>`.**"
 - **`unmodified`**: operator never customized it. Copy upstream over it silently.
 - **`customized-kept`**: operator edited it; template hasn't moved. Keep the operator's copy. Summary line: "Kept N operator-customized wrapper(s): `<name>`, ..."
 - **`conflict`** (any context — **no `.new` parking for boot-critical files**): replace with the upstream version (`chmod +x`) and save the operator's copy as `<name>.bak`. Report loudly in the run report and channel (if applicable): "**Boot wrapper `<name>` had local changes — replaced with new version; your copy saved as `<name>.bak`.**"
@@ -177,7 +168,7 @@ If `bin_changed` is empty, skip the copy (still confirm executability for all fi
 
 ### 5c. Update the Docker entrypoint (boot-critical, manifest-managed)
 
-`docker_entrypoint` in the plan is a single classified object `{ name, class, boot_critical }`, or `null` when the project has no deployed `docker-entrypoint.hermit.sh` (non-Docker project — skip this step). The entrypoint is placeholder-free, so it is managed exactly like a boot-critical `bin/` wrapper. On-disk file: `<project-root>/docker-entrypoint.hermit.sh`; upstream: `<plugin_root>/state-templates/docker/docker-entrypoint.hermit.sh.template`. Resolve by class:
+`docker_entrypoint` in the plan is a single classified object `{ name, class, boot_critical }`, or `null` when the project has no deployed `docker-entrypoint.hermit.sh` (non-Docker project — skip this step). The entrypoint is placeholder-free, so it is managed exactly like a boot-critical `bin/` wrapper. On-disk file: `<project-root>/docker-entrypoint.hermit.sh`; upstream: `state-templates/docker/docker-entrypoint.hermit.sh.template` under the plugin root. Resolve by class:
 
 - **`unmodified`**: operator never customized it. Copy upstream over it silently.
 - **`customized-kept`**: operator edited it; template hasn't moved. Keep the operator's copy. Summary line: "Kept operator-customized docker-entrypoint.hermit.sh." **Unless the entry carries `base_path`** — then the sidecar migration below supersedes this action and the file is replaced with upstream, exactly as for `conflict`.
@@ -231,7 +222,7 @@ Validate `<tmp>` before installing it. Bootstrap never reaches these checks.
 1. Scan for conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) and required structure. Compose must still parse as one document with top-level `services` and `volumes`, plus `services.hermit`; Dockerfile must retain its `FROM`, build arguments, entrypoint copy, and final non-root `USER`. On failure, leave the project file untouched (do not install `<tmp>`).
 2. The host wrapper runs `docker compose config -q` before every `up` or `build`. It refuses the action on failure, prints Compose's error, and names the state-tree `.bak` the operator can restore.
 
-After a successful merge, record the new baseline through `manifest-seed.ts` with the source set to the corresponding rendered-from-upstream template in `<plugin_root>/state-templates/docker/`, never the merged project file. Entry shape: `{ "key": "docker/Dockerfile.hermit.template", "file": "<plugin_root>/state-templates/docker/Dockerfile.hermit.template" }` (and `{ "key": "docker/docker-compose.hermit.yml.template", "file": "<plugin_root>/state-templates/docker/docker-compose.hermit.yml.template" }` for compose). This keeps `state/pristine/docker/<template>` and the manifest hash on upstream bytes, so the next change has a verified 3-way base. Record no baseline on `conflict(...)` or `kept(bootstrap, ...)`: the project file still holds the operator's bytes, and a baseline the file never contained would make the next merge read this release's changes as operator deletions and revert them silently.
+After a successful merge, record the new baseline through `manifest-seed.ts` with the source set to the corresponding rendered-from-upstream template in `state-templates/docker/` under the plugin root, never the merged project file. Entry shape: `{ "key": "docker/Dockerfile.hermit.template", "file": "<absolute path to state-templates/docker/Dockerfile.hermit.template under the plugin root>" }` (and `{ "key": "docker/docker-compose.hermit.yml.template", "file": "<absolute path to state-templates/docker/docker-compose.hermit.yml.template under the plugin root>" }` for compose). This keeps `state/pristine/docker/<template>` and the manifest hash on upstream bytes, so the next change has a verified 3-way base. Record no baseline on `conflict(...)` or `kept(bootstrap, ...)`: the project file still holds the operator's bytes, and a baseline the file never contained would make the next merge read this release's changes as operator deletions and revert them silently.
 
 Report the per-entry outcome (`merged(3-way)`, `merged(3-way; <n> conflicts resolved)`, `kept(bootstrap, upstream not merged: <path>)`, `conflict(<n>): upstream copy at <path>`) semicolon-separated across entries — an outcome can itself contain a comma; Step 10 matches on `merged(...)` to emit the rebuild notice.
 
@@ -239,7 +230,7 @@ Report the per-entry outcome (`merged(3-way)`, `merged(3-way; <n> conflicts reso
 - **Which files:** every file that was copied, replaced, or restored in Steps 5/5b/5c. Build one `{ "key": "<prefix>/<name>", "file": "<on-disk path of the new content>" }` entry per such file. Prefixes: `templates/` (file `.claude-code-hermit/templates/<name>`), `bin/` (file `.claude-code-hermit/bin/<name>`), and for the entrypoint the literal key `docker/docker-entrypoint.hermit.sh` (file: the project-root `docker-entrypoint.hermit.sh`).
 - **`customized-kept` files:** do NOT include them — the script preserves their existing manifest entry unchanged via foreign-key preservation.
 - **If `manifest_bootstrap` was true:** include the full managed set — every `templates/` and `bin/` file (and the entrypoint, if deployed), hashing whatever is now on-disk after any overwrites. This is the one-time baseline seeding.
-- **Run** `bun <plugin_root>/scripts/manifest-seed.ts .claude-code-hermit` with `{ "pluginVersion": "<plan.to>", "entries": [ ... ] }` on stdin. The script hashes each on-disk file, merges into the existing `files` map — preserving untouched prefixes, sibling-hermit keys, and the `docker/docker-compose.hermit.yml.template` / `docker/Dockerfile.hermit.template` baselines `/docker-setup` records (Step 10 reads them) — and writes `{ "version": 1, "files": { ... } }`. It refuses to overwrite a present-but-corrupt manifest. - **Ordering:** run this *after* Step 8 has ensured the plugin permissions, so `bun */scripts/manifest-seed.ts*` is allowed. The files resolved in Steps 5/5b/5c are stable on disk, so deferring the manifest write to after Step 8 does not change the recorded hashes.
+- **Run** `manifest-seed` (Commands) with `{ "pluginVersion": "<plan.to>", "entries": [ ... ] }` on stdin. The script hashes each on-disk file, merges into the existing `files` map — preserving untouched prefixes, sibling-hermit keys, and the `docker/docker-compose.hermit.yml.template` / `docker/Dockerfile.hermit.template` baselines `/docker-setup` records (Step 10 reads them) — and writes `{ "version": 1, "files": { ... } }`. It refuses to overwrite a present-but-corrupt manifest. - **Ordering:** run this *after* Step 8 has ensured the plugin permissions, so `bun */scripts/manifest-seed.ts*` is allowed. The files resolved in Steps 5/5b/5c are stable on disk, so deferring the manifest write to after Step 8 does not change the recorded hashes.
 
 ### 6. Update CLAUDE-APPEND block
 
@@ -299,11 +290,9 @@ Same logic as init step 8, but target the file determined by `hatch_target` (res
 
 Run the sync verb — it is the single owner of this list, so do not restate the entries here or diff them by hand. It holds the canonical `HERMIT_ALLOW` (so it can't drift from what `hatch` installs), writes via `fs` (so it works even under the strict hook profile, where an `Edit`/`Write` to `.claude/settings*.json` is denied), and is idempotent:
 
-```
-bun <plugin_root>/scripts/apply-settings.ts <resolved-settings-file> permissions-sync
-```
+Run `apply-settings` (Commands).
 
-where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.claude/settings.json` (committed) per `hatch_target`, and `<plugin_root>` is the baked absolute plugin root.
+where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.claude/settings.json` (committed) per `hatch_target`, using the absolute Commands entry.
 
 **Delegated mode: run it without asking** (a missing `bun` permission breaks hooks, so this is non-optional). It adds every sealed entry the target lacks and removes only entries this plugin shipped in a previous version and has since retired — an operator's own rules are never touched, and a target that is already current is not rewritten at all. Parse its one JSON line, `{"missing":[...],"obsolete":[...],"obsolete_deny":[...]}`, and report the three counts in the step-10 report — naming each `obsolete_deny` entry verbatim, since those are `permissions.deny` rules the operator may have wanted and can re-add by hand. All three empty means the target was already current; say nothing.
 
@@ -314,9 +303,7 @@ where `<resolved-settings-file>` is `.claude/settings.local.json` (local) or `.c
 - **Do not merge `new_config_keys` by hand, and never Edit/Write `config.json`.** The finalizer below re-reads config from disk and applies every still-missing template default itself, in the same atomic write as the version stamp. Operator values and anything Step 2b or Step 4 already wrote are present by then, so they are never revisited. (Under the strict profile a tool write to `config.json` is hook-blocked outright.)
 - **Bump `_hermit_versions` deterministically — do NOT hand-edit this key.** Run the finalizer. It writes the merged defaults and the version bumps atomically, then prints the confirmed on-disk values:
 
-  ```
-  bun <plugin_root>/scripts/evolve-finalize.ts .claude-code-hermit --core=<to> --plugin-root=<plugin_root> [--sibling=<name>=<vNEW> ...]
-  ```
+  Run `evolve-finalize` (Commands) with arguments `--core=<to> --plugin-root=<absolute plugin root from the runner body> [--sibling=<name>=<vNEW> ...]`.
 
   - `<to>` is the plan's `to`. Add one `--sibling=<name>=<vNEW>` for each sibling hermit with a **version gap** that was upgraded in Step 7 (where `name` is the sibling's plugin name and `vNEW` is its `sibling.to`). Omit `--sibling` for no-gap siblings (no version to bump). Omit `--sibling` entirely if no siblings had a gap.
   - **When `plan.up_to_date` is `true` (core current, sibling-only run):** the plan's `to` is still used as `--core=<to>`. Here `to` equals the on-disk stamp, so evolve-finalize re-stamps the same version — a genuine no-op that keeps the finalizer as the single atomic writer. (This is only reached when core is *current*; the config-ahead case never gets here, because the stale-runtime check above stops the run before Step 2. The finalizer independently refuses a lower `--core` with `core_version_regression`.)

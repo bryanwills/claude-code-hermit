@@ -9,7 +9,7 @@ same call and carries its own filing instructions, which this paragraph does not
 ## Inputs (read fresh — do not reuse cached values)
 
 - Every `.claude-code-hermit/compiled/topic-*.md` — read full bodies.
-- Run `bun <plugin_root>/scripts/task-report.ts .claude-code-hermit --recent --limit 3` for normalized task outcomes, titles and lessons. The caller supplies the resolved plugin root. Never open frozen task records. Skip this read if no topic pages exist.
+- Run `task-report` (Commands) for normalized task outcomes, titles and lessons. The caller supplies the resolved plugin root. Never open frozen task records. Skip this read if no topic pages exist.
 - `MEMORY.md` — operator's auto-memory index, in the directory `memory-dir` prints (its path is named in the
   dispatch) — to resolve wikilink targets.
 
@@ -40,4 +40,4 @@ there are no findings, never omit the key.
 The main session renders `topic_findings` as a `Topic pages:` line in the weekly channel summary
 (step 6) when non-empty, and omits the line entirely when `[]`.
 
-Weekly report totals use records with `closed_at` inside the review window. The report includes the `taskStandup` by-person summary and a Duties section from `bun <plugin_root>/scripts/duties.ts summary .claude-code-hermit`, showing requested and observed state separately. Open unconfirmed work stays visibly separate from completed work.
+Weekly report totals use records with `closed_at` inside the review window. The report includes the `taskStandup` by-person summary and a Duties section from `duties-summary` (Commands), showing requested and observed state separately. Open unconfirmed work stays visibly separate from completed work.

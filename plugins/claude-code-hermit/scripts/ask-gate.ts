@@ -42,10 +42,11 @@ import { channelLikelyDown } from './lib/channel-health';
 import { resolve as resolveOutboundChannel } from './resolve-outbound-channel';
 import { runHook } from './lib/hook-input';
 
+const proposalPath = "'" + `${import.meta.dir}/proposal.ts`.replaceAll("'", "'\\''") + "'";
 const REDIRECT_REASON =
   'No interactive operator on this surface (always-on channel session). Do not retry ' +
   'AskUserQuestion. Instead: (1) send the question via the channel reply tool; (2) queue it ' +
-  'durably by running `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro ' +
+  'durably by running `bun ' + proposalPath + ' queue-micro ' +
   '.claude-code-hermit` with a heredoc payload {"tier":1,"question":"...","options":[...]} — ' +
   'never hand-edit state/micro-proposals.json; (3) continue other work — the answer arrives as a ' +
   'channel message. If a human operator is in fact attending this terminal, they can relaunch ' +

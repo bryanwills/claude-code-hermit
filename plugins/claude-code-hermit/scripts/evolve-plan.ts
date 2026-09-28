@@ -104,6 +104,10 @@ function normTrailing(s: string): string {
   return s.replace(/\s+$/, '');
 }
 
+function resolveChangelogRoot(slice: string, pluginRoot: string): string {
+  return slice.replace(/\$\{CLAUDE_PLUGIN_ROOT\}|<plugin_root>/g, () => pluginRoot);
+}
+
 // Slice of CHANGELOG.md entries in the half-open range (from, to], oldest-first.
 // Headers look like "## [1.1.7] - 2026-05-31". Each entry spans from its header
 // to the line before the next header. This is the read that replaces a full
@@ -737,7 +741,7 @@ function computeSiblings(
       try {
         const cl = fs.readFileSync(path.join(installPath, 'CHANGELOG.md'), 'utf8');
         const { slice, versions: vers } = changelogSlice(cl, from, to);
-        sibling.changelog_slice = slice;
+        sibling.changelog_slice = resolveChangelogRoot(slice, installPath);
         sibling.changelog_versions = vers;
       } catch {
         siblingWarnings.push(`${name}: CHANGELOG.md unreadable at ${installPath}`);
@@ -858,7 +862,7 @@ function buildPlan({ hermitDir, pluginRoot, hatchTarget, pluginListJsonPath }: {
   try {
     const cl = fs.readFileSync(path.join(pluginRoot, 'CHANGELOG.md'), 'utf8');
     const { slice, versions } = changelogSlice(cl, from, to);
-    plan.changelog_slice = slice;
+    plan.changelog_slice = resolveChangelogRoot(slice, pluginRoot);
     plan.changelog_versions = versions;
   } catch (e: any) {
     errors.push({ code: 'changelog_unreadable', message: e.message });

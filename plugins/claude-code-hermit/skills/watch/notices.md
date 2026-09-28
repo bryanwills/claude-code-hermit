@@ -41,17 +41,15 @@ for X:
    `record`, append a progress note on that record and leave it open.
 3. When the idle notice carried a matching `GUEST_REPORT:`:
    - If the entry has `record`, pipe the full block into
-     `bun <plugin_root>/scripts/task.ts block .claude-code-hermit <record> --result-stdin`
+     `task-block` (Commands) with arguments `<record> --result-stdin`
      (the result form for a finished recommendation awaiting acceptance) and
      require `listing: "unconfirmed"` in the digest before saying it is recorded.
    - If the entry has `proposal`, resolve it through `proposal.ts resolve-id`
      (proposal-act § Resolving a Proposal ID):
-     ```bash
-     bun <plugin_root>/scripts/proposal.ts resolve-id .claude-code-hermit "<PROP-id>"
-     ```
+     Run `proposal-resolve-id` (Commands) with arguments `"<PROP-id>"`.
      Anything but `MATCH|<filename>` skips the patch and reports the resolver's
      reason. On MATCH, append one Decision line with
-     `bun <plugin_root>/scripts/proposal.ts patch .claude-code-hermit <filename> --stdin`
+     `proposal-patch` (Commands) with arguments `<filename> --stdin`
      and no `--set`; the script reads the file, so do not Read the proposal body.
      Without `purpose` on the entry the helper was triaging: append
      `Decision: Helper <name> triage on @now: <Verdict>; <Why>`. A verdict that

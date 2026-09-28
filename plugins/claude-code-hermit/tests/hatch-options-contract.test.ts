@@ -113,7 +113,13 @@ for (const { rel, verb } of DELEGATORS) {
     const content = fs.readFileSync(file, 'utf-8');
 
     test(`${rel} invokes domain-hatch.ts ${verb}`, () => {
-      expect(content).toContain('domain-hatch.ts');
+      if (rel.endsWith('/reference.md')) {
+        expect(content).toContain('`domain-hatch-preflight` (Commands)');
+        expect(content).toContain('`domain-hatch-ensure-target` (Commands)');
+        expect(fs.readFileSync(path.join(PLUGIN_ROOT, 'agents/evolve-runner.md'), 'utf8')).toContain('domain-hatch.ts preflight');
+      } else {
+        expect(content).toContain('domain-hatch.ts');
+      }
       expect(content).toContain(verb);
     });
 
