@@ -3,8 +3,8 @@
 ## [Unreleased]
 
 ### Fixed
-- Installed instructions use `ha-agent-lab` on the plugin PATH with existing approval checks.
 
+- Installed instructions use `ha-agent-lab` on the plugin PATH with existing approval checks.
 - `ha validate-apply` updates scripts: the `id` is no longer sent in the script body, and alias- or filename-derived script ids follow Home Assistant's lowercase slug rules.
 
 ## [0.4.17] - 2026-09-25
