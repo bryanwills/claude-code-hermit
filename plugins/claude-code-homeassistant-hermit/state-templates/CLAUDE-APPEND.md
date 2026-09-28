@@ -24,7 +24,7 @@ House imperatives arriving on a channel → HA Assist intent tools (`HassTurnOn`
 ### MCP vs CLI
 
 - **MCP (`homeassistant`, tool IDs `mcp__homeassistant__*`)**: read-only by default (`GetLiveContext`, `GetDateTime`). With `ha_assist_control_enabled: true`, HA Assist intent tools are allowed and HA's own expose-to-Assist setting becomes the control boundary.
-- **CLI** (`${CLAUDE_PLUGIN_ROOT}/bin/ha-agent-lab <domain> <command>`): build and analysis work — context refresh, simulation, policy checks, apply, audits, structural writes, `ha trigger-automation`. Full command catalog: `ha-agent-lab --help`.
+- **CLI** (`ha-agent-lab <domain> <command>`): build and analysis work — context refresh, simulation, policy checks, apply, audits, structural writes, `ha trigger-automation`. Full command catalog: `ha-agent-lab --help`.
 
 ### HA Proposal Categories
 
