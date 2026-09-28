@@ -245,7 +245,7 @@ describe('relocation targets received the moved content', () => {
     expect(cr).toContain('Use this protocol for proactive notifications');
     // the protocol body must route through the unified --notice mechanism, not a
     // model-side resolver + reply-tool call.
-    expect(cr.includes('channel-send.ts')).toBe(true);
+    expect(cr.includes('hermit-run channel-send')).toBe(true);
     expect(cr.includes('--notice')).toBe(true);
   });
 

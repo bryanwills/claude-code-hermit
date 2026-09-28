@@ -6,7 +6,7 @@ Use this protocol for proactive notifications (`CLAUDE-APPEND.md` § Operator No
 - **If at least one channel is enabled**, compose the audience version(s) and deliver them in one
   call — do not resolve the channel yourself, the script owns routing:
   ```
-  bun <plugin_root>/scripts/channel-send.ts .claude-code-hermit --notice
+  .claude-code-hermit/bin/hermit-run channel-send .claude-code-hermit --notice
   ```
   with a JSON payload on stdin:
   - plain, client-safe notice → `{ "client": "<text>" }`

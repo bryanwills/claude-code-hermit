@@ -13,7 +13,11 @@ import path from 'node:path';
 import { PLUGIN_ROOT, walkFiles } from './helpers/run';
 
 const SKILLS = path.join(PLUGIN_ROOT, 'skills');
-const DEFINING_SKILLS = ['reflect', 'proposal-act', 'channel-responder', 'channel-setup'] as const;
+const DEFINING_SKILLS = [
+  'reflect', 'proposal-act', 'channel-responder', 'channel-setup',
+  // Read channel-setup's group questionnaire and reflect's queuing procedure.
+  'hermit-settings', 'docker-setup',
+] as const;
 const FORBIDDEN = '${CLAUDE_PLUGIN_ROOT}/';
 const DEFINITION = '`<plugin_root>` in this skill\'s supporting files means `${CLAUDE_PLUGIN_ROOT}`.';
 
