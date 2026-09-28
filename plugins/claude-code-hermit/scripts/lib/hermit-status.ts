@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { isRunnable, listTasks, readTasks } from './tasks';
+import { isRunnable, readExecution, readTasks } from './tasks';
 import { findResident } from './session-registry';
 import { readConfigRaw } from './config-read';
 
@@ -22,6 +22,8 @@ export function dockerTransport(project: string): Transport {
 export function tmuxTransport(project: string, session?: string): Transport {
   if (!session) return 'down';
   const result = inspect('tmux', ['has-session', '-t', `=${session}`], project);
+  // No tmux binary means no host session (a Docker host's runtime.json still names the container's).
+  if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return 'down';
   if (result.error || (result.status !== 0 && result.status !== 1)) return 'unknown';
   return result.status === 0 ? 'up' : 'down';
 }
@@ -35,16 +37,16 @@ export function projectStatus(project: string) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error(`Unreadable or invalid config in ${dir}`);
   const runtime = readRuntime(project);
   const docker = fs.existsSync(path.join(project, 'docker-compose.hermit.yml'));
-  const tasks = listTasks(dir, {}, { registryFallback: !docker });
+  const execution = readExecution(dir, docker ? {} : { registryFallback: true });
   const records = readTasks(dir);
   const transport = docker ? dockerTransport(project) : runtime.runtime_mode === 'interactive'
     ? (findResident(runtime, runtime.config_dir) ? 'up' : 'down') : tmuxTransport(project, runtime.tmux_session);
   return {
     project_dir: project, name: path.basename(project), agent_name: config.agent_name ?? path.basename(project),
     runtime: runtime.runtime_mode ?? (docker ? 'docker' : 'tmux'), transport,
-    execution: tasks.execution.state,
-    age: tasks.execution.at ? Math.max(0, Math.floor((Date.now() - Date.parse(tasks.execution.at)) / 1000)) : null,
-    open: tasks.total, waiting: records.filter(r => r.status === 'open' && r.waiting_on).length,
+    execution: execution.state,
+    age: execution.at ? Math.max(0, Math.floor((Date.now() - Date.parse(execution.at)) / 1000)) : null,
+    open: records.filter(r => r.status === 'open').length, waiting: records.filter(r => r.status === 'open' && r.waiting_on).length,
     working_on: records.find(isRunnable)?.title ?? null,
   };
 }

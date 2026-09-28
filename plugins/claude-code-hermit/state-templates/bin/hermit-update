@@ -69,27 +69,37 @@ if [ ! -f "$PLUGIN_ROOT/scripts/hermit-update.sh" ]; then
     */cache/*/claude-code-hermit/*) MP="${PLUGIN_ROOT#*/cache/}"; MP="${MP%%/*}" ;;
     *) echo "[hermit] Cannot determine marketplace for $PLUGIN_ROOT" >&2; exit 1 ;;
   esac
-  if ! claude plugin update "claude-code-hermit@$MP"; then
-    echo "[hermit] Bootstrap failed. Run: claude plugin update claude-code-hermit@$MP" >&2
-    exit 1
-  fi
-  # Versioned cache directories do not move in place after an update.
-  if [ ! -f "$PLUGIN_ROOT/scripts/hermit-update.sh" ]; then
-    FRESH_ROOT=$(claude plugin list --json | bun -e '
+  # Prints "<scope><TAB><installPath>" for the core install this project loads.
+  _core_install() {
+    claude plugin list --json | bun -e '
       const rows = JSON.parse(require("fs").readFileSync(0, "utf8"));
       const [id, project] = process.argv.slice(1);
       const here = rows.filter(p => p.id === id && p.enabled === true && (p.scope === "user" || p.projectPath === project));
       for (const scope of ["local", "project", "user"]) {
         const matches = here.filter(p => p.scope === scope);
         if (!matches.length) continue;
-        if (matches.length === 1 && typeof matches[0].installPath === "string") console.log(matches[0].installPath);
+        if (matches.length === 1 && typeof matches[0].installPath === "string") console.log(scope + "\t" + matches[0].installPath);
         break;
       }
-    ' "claude-code-hermit@$MP" "$PWD" 2>/dev/null) || FRESH_ROOT=""
+    ' "claude-code-hermit@$MP" "$PWD" 2>/dev/null
+  }
+  # claude plugin update needs the explicit scope; the default misses local and project installs.
+  SCOPE=$(_core_install | cut -f1) || SCOPE=""
+  if [ -z "$SCOPE" ]; then
+    echo "[hermit] claude-code-hermit@$MP is not installed and enabled for $PWD." >&2
+    exit 1
+  fi
+  if ! claude plugin update "claude-code-hermit@$MP" --scope "$SCOPE"; then
+    echo "[hermit] Bootstrap failed. Run: claude plugin update claude-code-hermit@$MP --scope $SCOPE" >&2
+    exit 1
+  fi
+  # Versioned cache directories do not move in place after an update.
+  if [ ! -f "$PLUGIN_ROOT/scripts/hermit-update.sh" ]; then
+    FRESH_ROOT=$(_core_install | cut -f2) || FRESH_ROOT=""
     if [ -n "$FRESH_ROOT" ] && _is_core_root "$FRESH_ROOT"; then PLUGIN_ROOT="$FRESH_ROOT"; fi
   fi
   if [ ! -f "$PLUGIN_ROOT/scripts/hermit-update.sh" ]; then
-    echo "[hermit] Still missing hermit-update.sh. Run: claude plugin update claude-code-hermit@$MP" >&2
+    echo "[hermit] Still missing hermit-update.sh. Run: claude plugin update claude-code-hermit@$MP --scope $SCOPE" >&2
     exit 1
   fi
 fi

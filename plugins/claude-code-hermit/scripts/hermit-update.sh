@@ -349,4 +349,4 @@ if [ "$EVOLVE_SENT" = true ]; then
   echo "  hermit-evolve auto-started (unattended) — hermit config is upgrading."
 fi
 
-"$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null 2>&1 || echo "[hermit] Host CLI installation failed." >&2
+"$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null || echo "[hermit] Host CLI installation failed." >&2

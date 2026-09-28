@@ -106,6 +106,21 @@ test('host install creates bin, is idempotent, warns about PATH, and follows a r
   const child = Bun.spawn(['bash', shim, 'list'], { cwd: f.root, env: { ...f.env }, stdout: 'pipe', stderr: 'pipe' });
   expect(await new Response(child.stdout).text()).toBe('fresh:hermit-cli list\n'); expect(await child.exited).toBe(0);
 });
+test('shim falls back by scope precedence when the bound install is gone', async () => {
+  const f = fixture(); const shim = path.join(f.root, '.local/bin/hermit');
+  expect((await f.run(['install'], f.p)).exitCode).toBe(0);
+  write(path.join(f.core, 'scripts/hermit-exec.sh'), '#!/bin/sh\nprintf "old:%s\\n" "$*"\n');
+  write(path.join(f.fresh, 'scripts/hermit-exec.sh'), '#!/bin/sh\nprintf "fresh:%s\\n" "$*"\n');
+  const shimOut = async () => { const c = Bun.spawn(['bash', shim, 'list'], { cwd: f.root, env: { ...f.env }, stdout: 'pipe', stderr: 'pipe' }); return [await new Response(c.stdout).text(), await c.exited] as const; };
+  // Bound project-scope install removed: this project's local install beats another user install.
+  write(f.env.LIST, JSON.stringify([{ id: 'claude-code-hermit@mp', scope: 'user', enabled: true, installPath: f.core }, { id: 'claude-code-hermit@mp', scope: 'local', enabled: true, projectPath: f.p, installPath: f.fresh }]));
+  expect(await shimOut()).toEqual(['fresh:hermit-cli list\n', 0]);
+  // Only an unrelated project's install left: still usable.
+  write(f.env.LIST, JSON.stringify([{ id: 'claude-code-hermit@mp', scope: 'project', enabled: true, projectPath: '/elsewhere', installPath: f.core }]));
+  expect(await shimOut()).toEqual(['old:hermit-cli list\n', 0]);
+  write(f.env.LIST, '[]');
+  const [, code] = await shimOut(); expect(code).toBe(1);
+});
 test('host install refuses foreign file and notices earlier PATH tool', async () => {
   const f = fixture(); const shim = path.join(f.root, '.local/bin/hermit');
   write(shim, '#!/bin/sh\necho foreign\n');

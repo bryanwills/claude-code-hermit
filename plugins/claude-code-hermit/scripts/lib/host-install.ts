@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { registryDir, registerProject } from './host-registry';
+import { registryDir, registerInMarketplace } from './host-registry';
 import { writeFileAtomic } from './md-write';
 
 export const HOST_MARKER = '# claude-code-hermit: managed host CLI';
@@ -20,7 +20,8 @@ export function installHost(project: string, root: string, binding: Binding): vo
   const dir = registryDir(mp);
   const bindingFile = path.join(dir, 'binding.json');
   const template = fs.readFileSync(path.join(root, 'state-templates/host/hermit'), 'utf8');
-  const content = template.replace('__HERMIT_BINDING__', quote(bindingFile)).replace('__HERMIT_UPDATE_ID__', quote(binding.id));
+  // Function replacers: a string replacement would expand `$'`/`$&` inside the quoted path.
+  const content = template.replace('__HERMIT_BINDING__', () => quote(bindingFile)).replace('__HERMIT_UPDATE_ID__', () => quote(binding.id));
   const paths = (process.env.PATH ?? '').split(path.delimiter).map(p => path.resolve(p || '.'));
   const earlier = paths.map(p => path.join(p, 'hermit')).find(p => {
     try { fs.accessSync(p, fs.constants.X_OK); return fs.statSync(p).isFile(); } catch { return false; }
@@ -33,5 +34,5 @@ export function installHost(project: string, root: string, binding: Binding): vo
   fs.mkdirSync(dir, { recursive: true });
   writeFileAtomic(bindingFile, JSON.stringify(binding) + '\n');
   // Use the bound marketplace even when invoked from the catalog clone.
-  registerProject(project, path.join('' + path.sep, 'cache', mp, 'claude-code-hermit', 'binding'), fs.existsSync(path.join(project, 'docker-compose.hermit.yml')) ? 'docker' : 'tmux');
+  registerInMarketplace(mp, project, fs.existsSync(path.join(project, 'docker-compose.hermit.yml')) ? 'docker' : 'tmux');
 }

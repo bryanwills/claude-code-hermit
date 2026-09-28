@@ -334,7 +334,7 @@ function checkFlag(flags: TaskFlags): string | null {
   return !value || ['null', 'none', 'clear'].includes(value) ? null : value;
 }
 
-export function listTasks(dir: string, flags: TaskFlags = {}, options: { registryFallback?: boolean } = {}) {
+export function listTasks(dir: string, flags: TaskFlags = {}) {
   const records = readTasks(dir);
   const owner = flag(flags, 'owner');
   if (owner && owner !== 'worker:*' && !validOwner(owner)) throw new Error('invalid-owner');
@@ -345,7 +345,7 @@ export function listTasks(dir: string, flags: TaskFlags = {}, options: { registr
     && (!flags['with-check'] || !!r.check)
     && ['conversation', 'requester', 'handle', 'id', 'dedupe-key'].every(key => !flag(flags, key) || r[key === 'dedupe-key' ? 'dedupe_key' : key as 'id'] === flag(flags, key)));
   const rows = selected.slice(0, limit).map(r => ({ id: r.id, handle: r.handle, listing: taskListing(r, records), requester: r.requester, title: r.title, due: r.due, result_rev: r.result_rev, owner: r.owner, result: r.result, waiting_on: r.waiting_on, closed_by: r.closed_by, check: r.check, card_chat_id: r.card_chat_id, card_message_id: r.card_message_id }));
-  return { rows, total: selected.length, omitted: selected.length - rows.length, execution: readExecution(dir, options.registryFallback === false ? {} : { registryFallback: true }) };
+  return { rows, total: selected.length, omitted: selected.length - rows.length, execution: readExecution(dir, { registryFallback: true }) };
 }
 
 export interface Execution { state: 'in_flight' | 'idle' | 'unknown'; turn_id: string | null; at: string | null; source: string | null; cc_session_id: string | null; reason: string | null; registry?: string | null; waitingFor?: string | null; display?: string }

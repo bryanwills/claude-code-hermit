@@ -284,7 +284,7 @@ case "$CMD" in
     echo "Detach with: Ctrl+B then D"
     echo "Status: hermit status"
     _oauth_hint
-    "$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null 2>&1 || echo "[hermit] Host CLI installation failed." >&2
+    "$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null || echo "[hermit] Host CLI installation failed." >&2
     ;;
 
   down)
@@ -486,7 +486,7 @@ case "$CMD" in
     _warn_if_entrypoint_stale
     echo "[hermit] Container restarted."
     _oauth_hint
-    "$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null 2>&1 || echo "[hermit] Host CLI installation failed." >&2
+    "$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null || echo "[hermit] Host CLI installation failed." >&2
     ;;
 
   update)
@@ -804,7 +804,7 @@ JSEOF
     echo "Verify with:  hermit status"
     echo "Attach with:  hermit attach"
     _oauth_hint
-    "$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null 2>&1 || echo "[hermit] Host CLI installation failed." >&2
+    "$SCRIPT_DIR/hermit-run" hermit-cli install >/dev/null || echo "[hermit] Host CLI installation failed." >&2
     ;;
 
   *)

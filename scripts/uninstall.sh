@@ -132,7 +132,7 @@ remove_host_registration() {
   local wrapper
   wrapper=".claude-code-hermit/bin/hermit-run"
   if [ -x "$wrapper" ]; then
-    if ! "$wrapper" hermit-cli prune "$(basename "$PROJECT_ROOT")"; then
+    if ! "$wrapper" hermit-cli prune "$PROJECT_ROOT"; then
       record_failure "host registry cleanup failed" "registry" "could not remove this project's registration"
     fi
   elif [ -f "$wrapper" ]; then

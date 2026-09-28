@@ -46,7 +46,9 @@ function update(mp: string, change: (rows: HostEntry[]) => HostEntry[]): void {
 }
 export function registerProject(project: string, coreRoot: string, runtimeHint = 'tmux'): void {
   const mp = marketplace(coreRoot);
-  if (!mp) return;
+  if (mp) registerInMarketplace(mp, project, runtimeHint);
+}
+export function registerInMarketplace(mp: string, project: string, runtimeHint: string): void {
   const canonical = fs.realpathSync(project);
   const config = JSON.parse(fs.readFileSync(path.join(canonical, '.claude-code-hermit/config.json'), 'utf8'));
   update(mp, rows => {
@@ -58,7 +60,8 @@ export function registerProject(project: string, coreRoot: string, runtimeHint =
 export function prune(mp: string, name?: string): void {
   update(mp, rows => {
     if (!name) return rows.filter(row => entryState(row) !== 'missing');
-    const matches = rows.filter(row => row.name === name || row.agent_name === name);
+    // An absolute path names exactly one project; a bare name may match several.
+    const matches = rows.filter(row => path.isAbsolute(name) ? row.project_dir === name : row.name === name || row.agent_name === name);
     if (matches.length > 1) throw new Error(`Ambiguous name ${name}: ${matches.map(row => row.project_dir).join(', ')}`);
     return rows.filter(row => row !== matches[0]);
   });

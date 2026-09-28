@@ -77,6 +77,8 @@ function list(root: string, cwd: string, json: boolean): void {
   const docker = inspect('docker', ['ps', '-a', '--filter', 'label=com.docker.compose.service=hermit', '--format', '{{.Label "com.docker.compose.project.working_dir"}}'], cwd);
   const tmux = inspect('tmux', ['list-sessions', '-F', '#{session_path}'], cwd);
   for (const [name, result] of [['docker', docker], ['tmux', tmux]] as const) {
+    // A missing binary or an idle tmux server is an empty result, not a failure.
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' || (name === 'tmux' && result.status === 1 && /no server running/.test(result.stderr))) continue;
     if (result.error || result.status !== 0) console.error(`[hermit] ${name} discovery unavailable`);
     else result.stdout.split(/\r?\n/).forEach(discover);
   }

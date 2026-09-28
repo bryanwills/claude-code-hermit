@@ -484,6 +484,10 @@ describe('hermit-update host path', () => {
       fs.copyFileSync(path.join(PLUGIN_ROOT, 'scripts/hermit-exec.sh'), path.join(core, 'scripts/hermit-exec.sh'));
       const claude = path.join(f.proj, '.stub/claude');
       write(claude, `#!/usr/bin/env bash
+if [ "$1 $2" = "plugin list" ]; then
+  printf '[{"id":"claude-code-hermit@test-mp","scope":"local","enabled":true,"projectPath":"%s","installPath":"%s"}]\\n' "$PWD" "$HERMIT_PLUGIN_ROOT"
+  exit 0
+fi
 printf '%s\\n' "$*" >> "$BOOTSTRAP_LOG"
 printf 'printf "bootstrapped\\n"\\n' > "$HERMIT_PLUGIN_ROOT/scripts/hermit-update.sh"
 `);
@@ -492,7 +496,7 @@ printf 'printf "bootstrapped\\n"\\n' > "$HERMIT_PLUGIN_ROOT/scripts/hermit-updat
       });
       expect(r.exitCode).toBe(0);
       expect(r.stdout).toContain('bootstrapped');
-      expect(fs.readFileSync(f.recFile, 'utf8').trim()).toBe('plugin update claude-code-hermit@test-mp');
+      expect(fs.readFileSync(f.recFile, 'utf8').trim()).toBe('plugin update claude-code-hermit@test-mp --scope local');
     } finally { f.wd.cleanup(); }
   });
 
