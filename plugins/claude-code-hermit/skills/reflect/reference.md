@@ -16,7 +16,7 @@ without erroring. `memory_dir` is the auto-memory directory this file calls `mem
 
 - `.claude-code-hermit/state/reflection-state.json` — for `last_resolution_check`, `last_sparse_nudge`
 - `.claude-code-hermit/proposals/PROP-*.md` — for accepted proposals (Resolution Check)
-- Normalized records from `bun <plugin_root>/scripts/task-report.ts .claude-code-hermit --recent --limit 3`: the three most recent outcomes `done`, `cancelled`, or `unconfirmed`. Never open frozen session archives.
+- Normalized records from `task-report` (Commands): the three most recent outcomes `done`, `cancelled`, or `unconfirmed`. Never open frozen session archives.
 - routine fires, failures and cost — via `routines.ts health` in Step 2, never by reading
   `routine-metrics.jsonl` or `cost-log.jsonl` directly
 - `MEMORY.md` — operator's auto-memory index (procedure detection)
@@ -24,9 +24,7 @@ without erroring. `memory_dir` is the auto-memory directory this file calls `mem
 The calling skill passes `phases_json` (the precheck output object listing which phases are due) and
 `last_resolution_check` (the cursor from reflection-state.json) in the dispatch prompt. Read them from
 the prompt; do not re-read reflection-state.json for the cursor (the main session already read it).
-It also passes `plugin_root` (the resolved absolute plugin path) — substitute it for `<plugin_root>`
-below. Do not use the `${CLAUDE_PLUGIN_ROOT}` token: it is not substituted in this file's content and
-is empty as a Bash variable.
+The dispatch prompt also supplies the absolute plugin root for non-command files and the Commands entries used below. Run those entries verbatim with the stated arguments.
 
 ## Step 1 — Resolution Check
 
@@ -42,9 +40,7 @@ Run this step only if `resolution_check` is listed in `phases_json`.
    `tags`, `related_sessions`, and the Evidence section.
 
    **If `success_signal` is non-null** — run the predicate:
-   ```
-   bun <plugin_root>/scripts/proposal.ts success-signal .claude-code-hermit "<accepted_date>" "<accepted_in_session|null>" "<success_signal>"
-   ```
+   Run `proposal-success-signal` (Commands) with arguments `"<accepted_date>" "<accepted_in_session|null>" "<success_signal>"`.
    Parse the one JSON line on stdout. Branch on `verdict`:
    - `INSUFFICIENT_DATA` → skip; add nothing to `resolution_actions` for this proposal.
    - `MET` → auto-resolve. Populate one `resolution_actions` entry:
@@ -107,9 +103,7 @@ Run this once and use its output for every detection below. Do not read
 `routine-metrics.jsonl` or `cost-log.jsonl` yourself — the counting, the 14-day window, and the
 cost attribution are all this script's job:
 
-```
-bun <plugin_root>/scripts/routines.ts health .claude-code-hermit --days 14
-```
+Run `routines-health` (Commands) with arguments `--days 14`.
 
 It prints one JSON object:
 

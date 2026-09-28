@@ -94,5 +94,5 @@ only records that subscription; do not send another message or subscribe again.
    purpose (`--implement`) as `purpose: "implement"`. Do not add `task_id`
    (`task_id` means a Monitor task and drives `TaskStop`). Write the registry back.
 4. Inside an open task record's turn, note the watch and its id through
-   `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with
+   `task-note` (Commands) with arguments `<id>` with
    `- [ACTIVE] <instruction> (started HH:MM)` on stdin. Otherwise skip the note.

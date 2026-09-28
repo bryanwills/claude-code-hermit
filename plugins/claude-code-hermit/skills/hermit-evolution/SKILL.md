@@ -6,6 +6,11 @@ description: "Show how this hermit has evolved: cost trend and source split, rou
 
 Synthesize a coherent evolution report: cost trend and source split, proposal velocity, active routines and watches, top things produced last month, and what grew organically since hatch.
 
+## Commands
+- `cost-report-reflect`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/cost-report.ts reflect .claude-code-hermit`
+- `proposal-metrics`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts metrics .claude-code-hermit`
+- `routines-health`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts health .claude-code-hermit`
+
 ## Step 0 — Channel reply
 
 If this skill was invoked from a channel-arrived message (the inbound prompt contains a `<channel source="...">` tag), reply via that channel's reply tool. Otherwise emit to conversation.
@@ -14,7 +19,7 @@ If this skill was invoked from a channel-arrived message (the inbound prompt con
 
 Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/hermit-evolution/reference.md`. The runner reads the weekly review files, proposal metrics, config, session reports, and OPERATOR.md — and runs `proposal.ts metrics` and `cost-report.ts reflect` — in an isolated context, then returns the assembled evolution report. This keeps those heavy reads off this session's inherited context.
 
-Pass `plugin_root: ${CLAUDE_PLUGIN_ROOT}` in the dispatch prompt — the runner reads `reference.md` as file content, where `${CLAUDE_PLUGIN_ROOT}` is never substituted, so it needs the resolved absolute path to run the scripts and read template/skill paths.
+Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments. Also pass `plugin_root: ${CLAUDE_PLUGIN_ROOT}` for template/skill files, because the runner reads `reference.md` as file content without harness substitution.
 
 **Eval runner return schema** — the runner's return value is a JSON object conforming to this block. The schema is byte-identical in `reference.md` (producer) and here (consumer); a contract test asserts this.
 

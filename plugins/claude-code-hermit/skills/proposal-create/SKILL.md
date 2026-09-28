@@ -17,6 +17,9 @@ Create a proposal only when you discover something with real leverage:
 
 A routine invoking `reflect --check-id <id> --check <namespaced skill>` supplies findings through the normal judge and triage gates with `Evidence Source: scheduled-check/<id>` and `Sessions: none`. Preserve that provenance when creating the proposal.
 
+## Commands
+- `artifact-render`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render <type> .claude-code-hermit`
+
 ## Three-Condition Rule
 
 Only create a proposal if all three are true:

@@ -15,7 +15,7 @@ Configure your sources below. The `Type` column tells the hermit how to fetch ea
 
 Chrome sources use your browser sessions — if you're logged into Reddit/X in Chrome, the hermit reads your personalized feeds. If Chrome isn't connected, these sources are skipped and you'll see a note in your brief.
 
-The `reddit` type also tries the bundled `scripts/reddit-fetch.ts` (unauthenticated JSON API) before falling back to Chrome — see `${CLAUDE_PLUGIN_ROOT}/docs/reddit.md` for setup.
+The `reddit` type also tries the bundled `scripts/reddit-fetch.ts` (unauthenticated JSON API) before falling back to Chrome — see the feed-hermit plugin's `reddit.md` doc for setup.
 
 ## Active Sources
 

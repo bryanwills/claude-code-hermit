@@ -16,7 +16,7 @@ test('routine formatting Read bounds cover exactly the canonical section', () =>
   const json = section.match(/```json\n([^\n]+)\n```/)?.[1];
   expect(json).toBeDefined();
   const args = JSON.parse(json!);
-  expect(args.file_path).toBe('<pluginRoot>/skills/channel-responder/SKILL.md');
+  expect(args.file_path).toBe('${CLAUDE_PLUGIN_ROOT}/skills/channel-responder/SKILL.md');
   expect(args.offset).toBeGreaterThan(0);
   expect(args.limit).toBeGreaterThan(0);
   const start = responder.indexOf('### Message formatting\n');

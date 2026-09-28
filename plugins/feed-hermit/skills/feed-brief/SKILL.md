@@ -52,7 +52,7 @@ Use the original expected ID, not an ID read from the output. On exit 0, consume
 accepted JSON printed by this command; do not re-read the raw file for candidate items.
 The verifier checks run identity and the envelope, not whether network fetches occurred.
 
-**Reconcile against the file, not the reply** (mapping owned by `docs/schema.md` §5). The
+**Reconcile against the file, not the reply** (mapping owned by `${CLAUDE_PLUGIN_ROOT}/docs/schema.md` §5). The
 agent's reply is a claim; only the verified file payload is eligible for reconciliation. This classifies `web`/`rss` sources only —
 `chrome`/`reddit`/`reddit-home`/`x` sources are absent from `sources[]` by design and are
 classified in Phase 2:
@@ -200,7 +200,7 @@ fetch_log:                             # per-source efficiency array from Phase 
   labels. Omit a slot if no category matches.
 - Body: the full brief text as delivered.
 
-The archive frontmatter is a data contract — `docs/schema.md` is the authority for its keys and semantics.
+The archive frontmatter is a data contract — `${CLAUDE_PLUGIN_ROOT}/docs/schema.md` is the authority for its keys and semantics.
 Keep it accurate: it is the data layer for `source-health` and `weekly-digest`.
 
 ### Phase 7 — Write compiled summary

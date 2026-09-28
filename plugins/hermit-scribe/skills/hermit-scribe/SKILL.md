@@ -33,7 +33,7 @@ If the operator named a proposal (`PROP-NNN`):
 4. Derive the Conventional-Commits type, scope, and labels. Write the **raw** (pre-translation) frontmatter `title` and proposal body to temp files, then run:
 
    ```bash
-   bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" classify {category} {title-file} {body-file}
+   bun "${CLAUDE_SKILL_DIR}/file-issue.ts" classify {category} {title-file} {body-file}
    ```
 
    It emits JSON `{type, scope, labels, title_line}` — `title_line` is `<type>(<scope>): <title>` (scope omitted when unresolved). Review it, then use `title_line` as the draft title and hold `labels` for Step 6. (Scope resolution reads `_hermit_versions` from `.claude-code-hermit/config.json`; `hermit-filed` is added by the script — it is not in `labels`.)
@@ -60,7 +60,7 @@ The proposal file under `.claude-code-hermit/proposals/` is NOT modified — tra
 
 Run:
 ```bash
-bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --templates
+bun "${CLAUDE_SKILL_DIR}/file-issue.ts" --templates
 ```
 
 - Exit 0 + filenames printed → hold the filenames for Step 4's preview. This checks the target repo (`HERMIT_GH_REPO`) directly via the GitHub API, not the local checkout, and only the modern `.github/ISSUE_TEMPLATE/` directory form — the legacy single-file `.github/ISSUE_TEMPLATE.md` is intentionally out of scope.
@@ -72,7 +72,7 @@ These filenames are never passed to the Step 3 sanitizer and are never part of t
 
 Run:
 ```bash
-bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --check {id}
+bun "${CLAUDE_SKILL_DIR}/file-issue.ts" --check {id}
 ```
 
 - Exit 0 + URL printed → an issue already exists for this proposal. Show the URL to the operator and ask whether to skip filing or proceed anyway.
@@ -121,19 +121,19 @@ Use the Write tool to create two files inside that directory:
 Substitute the same path from step 5 and append the `labels` from the Step 1 `classify` output as trailing arguments. Do NOT include `hermit-filed` — the script always adds it.
 
 ```bash
-bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --publish \
+bun "${CLAUDE_SKILL_DIR}/file-issue.ts" --publish \
   /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md <type-label> [<scope-label>]
 ```
 
 For example, a `capability` proposal scoped to `homeassistant-hermit`:
 ```bash
-bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --publish \
+bun "${CLAUDE_SKILL_DIR}/file-issue.ts" --publish \
   /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md enhancement homeassistant-hermit
 ```
 
 For an ad-hoc issue (no proposal), omit the label args entirely:
 ```bash
-bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --publish /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md
+bun "${CLAUDE_SKILL_DIR}/file-issue.ts" --publish /tmp/tmp.AbCdEf/title /tmp/tmp.AbCdEf/body.md
 ```
 
 Capture stdout: it is the issue URL on success. Stderr has any error message.
@@ -190,7 +190,7 @@ Run `mktemp -d` and capture the path. Use the Write tool to create:
 **Step 5: run the script.**
 
 ```bash
-bun "$CLAUDE_PLUGIN_ROOT/skills/hermit-scribe/file-issue.ts" --comment {issue-number} /tmp/tmp.AbCdEf/body.md
+bun "${CLAUDE_SKILL_DIR}/file-issue.ts" --comment {issue-number} /tmp/tmp.AbCdEf/body.md
 ```
 
 Capture stdout: it is the comment URL on success. Stderr has any error message.

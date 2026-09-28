@@ -7,6 +7,9 @@ description: Evolves hermit configuration and templates after a plugin update. D
 
 Upgrade the project's hermit configuration after a plugin update.
 
+## Commands
+- `proposal-queue-micro`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit`
+
 ## Execution routing
 
 Every run of this skill (interactive or unattended) delegates steps 0–9 to the `claude-code-hermit:evolve-runner` subagent, so the upgrade's transient churn (changelog slice, migration execution, file diffs) never lands in the calling session. The main loop keeps only step 10 (summary + operator notification).
@@ -22,8 +25,8 @@ Every run of this skill (interactive or unattended) delegates steps 0–9 to the
      - Otherwise ⇒ execution *interactive*, delivery *inline*.
      Only the explicit `unattended` argument authorizes a proactive maintainer notification. A
      direct channel request must answer the channel that invoked it.
-  2. **Bake the absolute plugin root** to thread to the subagent (it cannot resolve it itself — the bare env var `$CLAUDE_PLUGIN_ROOT` is **not** set at Bash runtime, and the value is empty inside subagents). Derive it from this skill's **Base directory**, which the harness injects in the skill invocation context as `<plugin_root>/skills/hermit-evolve`: strip the trailing `/skills/hermit-evolve` to get `plugin_root`. This works in both installed and `--plugin-dir` modes. (In installed mode this equals the harness's `${CLAUDE_PLUGIN_ROOT}` substitution, which step 1 relies on; the Base-directory derivation is the mode-independent source.) **Guard:** confirm both `test -f "<plugin_root>/skills/hermit-evolve/SKILL.md"` and `test -f "<plugin_root>/skills/hermit-evolve/reference.md"` — the subagent reads `reference.md` for steps 0–9, so a missing reference file is just as fatal as a missing SKILL.md. If either fails, **abort** — log `"hermit-evolve aborted: plugin root unresolved; cannot dispatch evolve-runner."` and stop. Do not dispatch with a broken path.
-  3. **Dispatch** the `claude-code-hermit:evolve-runner` subagent via the Agent tool. Pass the baked absolute plugin root and the report contract (below). Do **not** execute steps 0–9 yourself.
+  2. **Check the runner reference:** run `test -f "${CLAUDE_PLUGIN_ROOT}/skills/hermit-evolve/reference.md"`. If it fails, **abort** — log `"hermit-evolve aborted: plugin root unresolved; cannot dispatch evolve-runner."` and stop. Do not dispatch with a broken path.
+  3. **Dispatch** the `claude-code-hermit:evolve-runner` subagent via the Agent tool. Pass the report contract (below); the runner body supplies its own plugin root and Commands entries. Do **not** execute steps 0–9 yourself.
   4. **Go to step 10** with the subagent's returned report.
 
 ## Delegated mode
@@ -35,7 +38,7 @@ Steps 0–9 (in `reference.md`, read only by the `evolve-runner` subagent) are e
 
 ### 10. Report
 
-After a successful upgrade, arm `/claude-code-hermit:later add 1d "doctor stays green after upgrading to <version>" | .claude-code-hermit/bin/hermit-run doctor-check .claude-code-hermit --verdict` (hermit origin, `--timeout-s 120`: the doctor run probes credentials and docker and gets the same budget as its routine). The resolver form survives the next plugin update; a baked `<plugin_root>` path points at a cache directory that may be gone by the time the claim is checked.
+After a successful upgrade, arm `/claude-code-hermit:later add 1d "doctor stays green after upgrading to <version>" | .claude-code-hermit/bin/hermit-run doctor-check .claude-code-hermit --verdict` (hermit origin, `--timeout-s 120`: the doctor run probes credentials and docker and gets the same budget as its routine). The resolver form survives the next plugin update; a baked plugin path points at a cache directory that may be gone by the time the claim is checked.
 
 **Step 10 runs in the main loop** (not the subagent), consuming the `evolve-runner`'s returned report. The subagent's report is the single source for what follows.
 
@@ -90,7 +93,7 @@ conversation. Stop.
 **Project-context reload notice.** If `Context reload` is `required (<names>)`, append this to the summary in every delivery mode: "Project instructions updated for <names>. Run `/compact` to load them now; `/clear` or restarting the Claude session also works. `/reload-plugins` alone does not reload CLAUDE.md." If the field is `no`, omit the notice. Deliver it on a `blocked:` report too — a blocked version bump does not undo a CLAUDE-APPEND write, and a re-run sees the block as already current, so this is the only time the operator hears about it. Never issue `/compact`, `/clear`, or a restart on the operator's behalf.
 
 **Resolve deferrals by execution and delivery mode.** If "Deferred for operator" is non-empty:
-- **Interactive execution:** for each deferred-migration block, present its `instruction` + `options` to the operator via `AskUserQuestion`, then apply the chosen branch inline (this is the only place changelog/migration text re-enters the main loop, and only for the rare deferred step). **A branch that changes `.claude-code-hermit/config.json` is applied with settings-edit verbs, never the Edit or Write tool** — `bun <plugin_root>/scripts/settings-edit.ts .claude-code-hermit/config.json get|set|unset <dotted.path> [value]`, using the plugin root baked in routing step 2. That keeps the change validated and in the settings ledger, and under the strict profile a tool write to `config.json` is hook-blocked outright. If a verb refuses, treat the branch as not applied and fall through to the version-bump caveat below.
+- **Interactive execution:** for each deferred-migration block, present its `instruction` + `options` to the operator via `AskUserQuestion`, then apply the chosen branch inline (this is the only place changelog/migration text re-enters the main loop, and only for the rare deferred step). **A branch that changes `.claude-code-hermit/config.json` is applied with settings-edit verbs, never the Edit or Write tool** — `bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json get|set|unset <dotted.path> [value]`, using the harness-substituted path. That keeps the change validated and in the settings ledger, and under the strict profile a tool write to `config.json` is hook-blocked outright. If a verb refuses, treat the branch as not applied and fall through to the version-bump caveat below.
 - **Unattended execution:** relay each deferred block verbatim ("migration deferred for operator review: <source> — <instruction>") through the selected delivery route: direct reply for direct-channel delivery, maintainer-only notice for automated-maintainer delivery. **Do not apply — never run the migration's settings writes from this session.** If the deferred `instruction` text contains an explicit channel resolution stanza (a fenced `options: [...]` array and an `on_resolve: "..."` skill invocation with an `{answer}` placeholder), additionally queue a micro-proposal entry per `reflect` § Queuing procedure using that exact `options` and `on_resolve` (`tier: 1`, `"kind":"ask"` on the `micro-queued` event) and render the numbered options in the relay, so the operator's reply resolves it through `channel-responder/approvals.md` § Micro-approval response — the same bridge any other skill's bounded ask uses. An `on_resolve` reached this way may only alter hermit config/state, never `.claude/settings*.json` — a boot-time wrapper (e.g. `hermit-start`) applies any resulting permission grant out-of-session, never this session.
 - **Version-bump caveat (all delivery modes):** the subagent already bumped `_hermit_versions` to `<to>` in step 9, having *skipped* the deferred migration. We keep that bump — withholding it would replay the whole oldest-first slice next evolve and double-apply non-idempotent migrations. So if an interactive apply **fails or the operator declines**, report loudly through the selected delivery route: "version already bumped to v`<to>`; migration `<source>` was NOT applied; apply manually: `<instruction>`" — otherwise a rerun-says-up-to-date would silently hide it. On success, report it applied.
 
@@ -108,7 +111,7 @@ upgrade (not blocked or already up to date) and the refreshed `config.json` has 
 ask what actually needs re-arming before loading anything:
 
 ```
-bun <plugin_root>/scripts/routines.ts arm check .claude-code-hermit <plugin_root>
+bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts arm check .claude-code-hermit ${CLAUDE_PLUGIN_ROOT}
 ```
 
 `arm check` is the read-only twin of the daily anchor's verdict — it stamps no fire, so asking

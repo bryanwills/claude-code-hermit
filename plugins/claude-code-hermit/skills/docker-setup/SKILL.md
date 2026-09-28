@@ -3,7 +3,6 @@ name: docker-setup
 description: Host-only, operator-invoked. Generates Docker scaffolding and walks the operator through token setup, build, start, MCP plugin configuration, workspace trust, and verification. Offers to back up and overwrite existing Docker files. Run after /hatch.
 disable-model-invocation: true
 ---
-`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
 
 # Docker Setup
 
@@ -14,6 +13,9 @@ Generate Docker scaffolding for running hermit as an always-on autonomous agent 
 **Important:** Step 0's container check is a hard short-circuit — run it first and abort on `container` before anything else. After confirming host execution, run `docker-preflight.ts` once (Step 1) — it gathers all the read-only signals (docker presence, config existence, WSL path, existing docker files, host `~/.gitconfig`, auto-memory seed, a live non-Docker owner of the state dir) as a single JSON blob, so don't fan those probes out into separate Bash calls. Reuse its result for the git-identity (Step 4) and auto-memory (Step 5) decisions rather than re-probing. Step 2's project-dependency scan stays normal file reads (Read tool) plus analysis. Everything that mutates state or drives the container (file backups, `docker compose`, `tmux`, `mkdir`/`touch` setup-mode, status polls, channel `send-keys`) must run strictly sequentially in its documented order — never batch those.
 
 Templates live in `${CLAUDE_SKILL_DIR}/../../state-templates/docker/`.
+
+## Commands
+- `channel-group-add`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/channel-access.ts "<hermit_state_dir>" group-add`
 
 ## Plan
 

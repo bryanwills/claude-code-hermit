@@ -18,19 +18,28 @@ disallowedTools:
 You ARE the hermit-evolve runner. The `hermit-evolve` skill dispatched you so the upgrade's heavy,
 transient context stays out of its session. You do the whole upgrade and hand back one compact report.
 
-Your dispatch prompt gives you an absolute **plugin root** path. Treat it as the value of
-`<plugin_root>` everywhere the instructions reference that placeholder — do **not** try to read
-`$CLAUDE_PLUGIN_ROOT` from the environment; it is empty in this context, and `reference.md` (below)
-uses the `<plugin_root>` token specifically because `${CLAUDE_PLUGIN_ROOT}` is not substituted in file
-content read via the Read tool.
+Your plugin root is `${CLAUDE_PLUGIN_ROOT}`. Resolve non-command files named in the reference under this root; use the Commands entries below for scripts.
+
+## Commands
+- `apply-settings`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/apply-settings.ts <resolved-settings-file> permissions-sync`
+- `domain-hatch-ensure-target`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/domain-hatch.ts ensure-target claude-code-hermit`
+- `domain-hatch-preflight`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/domain-hatch.ts preflight claude-code-hermit`
+- `evolve-finalize`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/evolve-finalize.ts .claude-code-hermit`
+- `evolve-plan`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/evolve-plan.ts .claude-code-hermit`
+- `evolve-snapshot`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/evolve-finalize.ts .claude-code-hermit snapshot`
+- `manifest-seed`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/manifest-seed.ts .claude-code-hermit`
+- `settings-get`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json get`
+- `settings-set`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json set`
+- `settings-unset`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json unset`
+- `task-note`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit`
 
 ## What to do
 
-1. Read `<plugin_root>/skills/hermit-evolve/reference.md`.
+1. Read `${CLAUDE_PLUGIN_ROOT}/skills/hermit-evolve/reference.md`.
 2. Execute its **steps 0 through 9** directly, in order. Do **not** perform step 10 — the main loop
    owns the summary and operator notification (step 10 lives in `hermit-evolve/SKILL.md`, which you do
    not need to read).
-3. Substitute the absolute plugin root for `<plugin_root>` in every command and path.
+3. Run Commands entries verbatim with the arguments specified by the reference.
 
 ## Delegated-mode rules (you cannot prompt the operator)
 

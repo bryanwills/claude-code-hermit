@@ -42,7 +42,7 @@ class Forge {
     cwd: root,
     env: { ...process.env, CLAUDE_PROJECT_DIR: root, FORGE_API_TOKEN: 'fixture', FORGE_ORG: 'test-org', FORGE_TEST_REQUEST: request },
   });
-  return { result, request };
+  return { result, request, root };
 }
 
 test('deploy executes the resolved request without a confirmation flag', () => {
@@ -70,4 +70,19 @@ test('invalid targets still fail before dispatch', () => {
   expect(result.exitCode).toBe(1);
   expect(result.stderr.toString()).toContain('No server matching');
   expect(() => readFileSync(request)).toThrow();
+});
+
+
+test('PATH wrapper preserves output, status and caller project discovery', () => {
+  for (const args of [['preview-deploy', 'test-server', 'test.example'], ['server-reboot', 'missing-server']]) {
+    const { result, root } = run(...args);
+    writeFileSync(join(root, '.claude-code-hermit/config.json'), '{}');
+    const wrapped = Bun.spawnSync([join(import.meta.dir, '../bin/forge.php'), ...args], {
+      cwd: root,
+      env: { ...process.env, CLAUDE_PROJECT_DIR: '', FORGE_API_TOKEN: 'fixture', FORGE_ORG: 'test-org' },
+    });
+    expect(wrapped.exitCode).toBe(result.exitCode);
+    expect(wrapped.stdout.toString()).toBe(result.stdout.toString());
+    expect(wrapped.stderr.toString()).toBe(result.stderr.toString());
+  }
 });

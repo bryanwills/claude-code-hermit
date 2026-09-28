@@ -2,7 +2,6 @@
 name: reflect
 description: Reflect on recent work and propose improvements if patterns are noticed.
 ---
-`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
 
 Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 
@@ -13,6 +12,17 @@ Pause and think about your recent work.
 **Silent by default.** Only notify the operator (per CLAUDE.md § Operator Notification) if reflect produces an outcome: a proposal candidate, a micro-approval, a resolved proposal, a graduated observation, or a cost spike.
 
 Rare-branch procedures live in `${CLAUDE_PLUGIN_ROOT}/skills/reflect/branches.md`. "Read branches.md § X" means: read that section now and follow it exactly — it is normative.
+
+## Commands
+- `proposal-success-signal`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts success-signal .claude-code-hermit`
+- `routines-health`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts health .claude-code-hermit`
+- `task-report`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task-report.ts .claude-code-hermit --recent --limit 3`
+- `observations-observe`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit`
+- `proposal-anchor`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit`
+- `proposal-gate`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts gate .claude-code-hermit`
+- `proposal-metrics`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts metrics .claude-code-hermit`
+- `proposal-queue-micro`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts queue-micro .claude-code-hermit`
+- `task-note`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit`
 
 ## Quick mode
 
@@ -78,6 +88,8 @@ outside that bounded evidence set needs another targeted adapter read, not an ar
 5. Rebuild and read the proposals index (metadata only, no file bodies): run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts index .claude-code-hermit`, then read `state/proposals-index.json` for each proposal's `id`, `status`, `title`, `source`, `created`, `accepted_date`, `related_sessions` (rows flagged `unparseable` have no frontmatter block; skip them). Also tail the last 100 lines of `state/proposal-metrics.jsonl` (inline, single read): count `responded` and `micro-resolved` events by `action`, `triage-verdict` events by `verdict` — feeds the operator-value and Component Health checks.
 
 6. **Dispatch the eval runner.** Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/reflect/reference.md`. The dispatch prompt carries: this run's `Anchor:` line as its first line (`bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit`; non-zero exit → rerun with the absolute state dir the error names in place of `.claude-code-hermit`, do not dispatch), `plugin_root` (resolved absolute path — `${CLAUDE_PLUGIN_ROOT}` is not substituted in `reference.md`), the precheck `phases-json`, the `last_resolution_check` cursor (from `state/reflection-state.json`), and the execution observation from `task.ts list` (controls the routine check). The `Anchor:` line's `memory_dir` is the auto-memory directory `reference.md` expects under the name `memory-dir`.
+
+   Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments.
 
    **Failure policy:** null/malformed runner JSON → fail open: skip the apply steps, carry forward empty candidate lists, do not advance the cursor, append `[HH:MM] reflect — analysis-runner failed; introspection-only` to the Progress Log, continue.
 

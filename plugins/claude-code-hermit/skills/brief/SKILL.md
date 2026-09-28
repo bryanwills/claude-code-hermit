@@ -6,6 +6,13 @@ description: Returns a 5-line executive summary of recent work. Checks open resi
 
 Provide a concise executive summary of recent task activity. Designed for morning check-ins, phone/channel consumption, and quick status updates.
 
+## Commands
+- `duties-summary`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/duties.ts summary .claude-code-hermit`
+- `proposal-index`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts index .claude-code-hermit`
+- `task-list`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts list .claude-code-hermit`
+- `task-report`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task-report.ts .claude-code-hermit`
+- `artifact-render`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render <type> .claude-code-hermit`
+
 ## Always-On Delivery Rule
 
 If `config.always_on` is `true`, deliver all operator-facing output per `CLAUDE-APPEND.md § Operator Notification`. The terminal is unmonitored in always-on mode. For the push-fallback branch, condense the brief to a single line (per § Operator Notification push format): include whichever of open proposal count and active heartbeat alerts are present and non-zero; omit zero or unavailable fields. Example: `Brief: 16 proposals open, 1 alert — open CC to view`. In interactive mode, output to terminal. This applies to all flags below.
@@ -19,6 +26,8 @@ Before composing any brief, determine the dispatch mode:
 3. Run `bun ${CLAUDE_PLUGIN_ROOT}/scripts/duties.ts summary .claude-code-hermit` for requested and observed duty lines.
 
 Read these bounded digests fresh each turn. With no flag and open resident records, summarize those records in main. Otherwise dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/brief/reference.md`, passing `plugin_root` (resolved absolute path), `mode` (`morning`, `evening`, `daily`, or `default-no-session`), `today` (ISO date), and `context_recovery` for morning.
+
+Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments.
 
 Readers use `task-report.ts` for normalized task outcomes. Never open frozen session archives. If the runner fails or returns malformed JSON, use the current task list and duty digest; do not fall back to archives.
 

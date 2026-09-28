@@ -52,7 +52,7 @@ if (fs.existsSync(appendPath)) {
   ok('keeps the zones rule', append.includes('get-athlete-zones'));
   ok('keeps full-history authority', append.includes('get-athlete-stats'));
   ok('keeps the fitness-lab mediation boundary', append.includes('fitness-lab.ts'));
-  ok('points at the schema for state wiring', append.includes('docs/knowledge-schema.md'));
+  ok('points at the schema for state wiring', append.includes('`knowledge-schema.md` doc'));
 
   // The state contracts the APPEND stopped enumerating must exist where it points.
   const schemaPath = path.join(import.meta.dir, '..', 'docs', 'knowledge-schema.md');

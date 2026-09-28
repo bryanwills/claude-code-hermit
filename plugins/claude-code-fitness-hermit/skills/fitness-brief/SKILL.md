@@ -40,7 +40,7 @@ orientation — a custom `--slot` follows whichever branch matches its resolved 
      `/claude-code-fitness-hermit:activity-deep-dive <id>` (cap 3; inside an open record's turn, pipe skipped IDs into
      `.claude-code-hermit/bin/hermit-run task note .claude-code-hermit <task-id>`, otherwise skip the note). Advance the cursor file to the highest new ID.
      Hold the newest new activity's id/name/sport for step 4 — do **not** write
-     `state/strava-pending-rpe.json` here. That file's writer contract (see `docs/knowledge-schema.md`
+     `state/strava-pending-rpe.json` here. That file's writer contract (see `${CLAUDE_PLUGIN_ROOT}/docs/knowledge-schema.md`
      and `CLAUDE.md` § Memory Conventions) is
      write-only-after-confirmed-delivery, precisely so a failed or push-only send can't bind
      a future RPE reply to an activity the operator was never actually told about.
@@ -79,7 +79,7 @@ orientation — a custom `--slot` follows whichever branch matches its resolved 
    - The single most recent prior brief lives in `compiled/brief-morning-<date>.md` /
      `compiled/brief-evening-<date>.md` if continuity would genuinely add something —
      reading just that one file is optional judgment, not a required step. These briefs
-     accumulate daily with no retention cap (per `docs/knowledge-schema.md`), so never
+     accumulate daily with no retention cap (per `${CLAUDE_PLUGIN_ROOT}/docs/knowledge-schema.md`), so never
      glob-read the whole `brief-*.md` set.
 
 4. **Deliver** per the Operator Notification protocol in CLAUDE.md (core resolves the

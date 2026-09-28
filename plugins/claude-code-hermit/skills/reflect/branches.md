@@ -1,4 +1,4 @@
-Record notes only inside an open record's turn, using `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+Record notes only inside an open record's turn, using `task-note` (Commands) with arguments `<id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 
 # Reflect — Branch Procedures
 
@@ -48,9 +48,7 @@ All branches proceed via § Candidate processing.
 Invoked from SKILL.md (quick mode and scheduled reflect) whenever ≥1 candidate exists. The Three-Condition Rule, evidence integrity rule, gate sequence, tier routing, and queuing procedures below are normative.
 
 **Pin the root.** Once per reflect run, before any judge, triage, or eval-runner dispatch. If this run already has the `Anchor:` line, reuse it. Otherwise:
-```bash
-bun <plugin_root>/scripts/proposal.ts anchor .claude-code-hermit
-```
+Run `proposal-anchor` (Commands).
 Its stdout is one whole `Anchor: root=… memory_dir=…` line, already carrying the `Anchor:` prefix — paste it verbatim as the first line of every subsequent judge, triage, scheduled-checks gate, and eval-runner dispatch this run, and do not re-prefix it. On a non-zero exit there is no line to paste: do not dispatch, rerun with the absolute state dir the error names in place of `.claude-code-hermit`.
 
 ### Three-Condition Rule
@@ -111,11 +109,10 @@ Artifact: <machine-written state file> — <cited value/pattern>   (optional)
 `scheduled-check/<id>` and `operator-request` share the same bypass policy at every gate (skip recurrence, enforce consequence + actionability). They are **kept distinct on purpose**: `scheduled-check/<id>` carries the check identifier for telemetry and debugging; `operator-request` marks human-initiated flows (a proposal the operator asked for directly).
 
 The judge returns one verdict line per candidate, matched by `<title>`. For each candidate, record its line:
-```bash
-bun <plugin_root>/scripts/proposal.ts gate .claude-code-hermit --gate judge --caller reflect <<'HERMIT_GATE'
+Run `proposal-gate` (Commands) with arguments `--gate judge --caller reflect` and the following stdin payload:
+```text
 Title: <title>
 Verdict: <the judge's line for this candidate, verbatim>
-HERMIT_GATE
 ```
 - `PROCEED|ACCEPT` — proceed with the candidate at its original tier.
 - `PROCEED|DOWNGRADE:<N>` — proceed at the revised tier `N`. When the judge's reason contains `quarantine: external origin`, the judge itself already forced `N` to 3 — route to `proposal-create` and pass `Evidence Origin: external-content` through so proposal-create can write the operator-visible provenance line in the PROP body. reflect does not write the PROP body itself.
@@ -154,11 +151,10 @@ Artifact: <the candidate's Artifact: line, verbatim, when it has one>
 ```
 
 The gate returns one verdict block per candidate, matched by `<title>`. Line 1 of each block is that candidate's verdict; lines 2+ are additive metadata (`closest_prop`, `aligned`, `operator_excerpt`, `overlap_compiled`, `prior_discussion`, `failed_condition`) — read for context if useful, but do not treat as part of the verdict for branching. For each candidate, record its verdict line (use `"caller":"reflect"` on a normal reflect run, or `"caller":"scheduled-checks"` when invoked via § Scheduled checks):
-```bash
-bun <plugin_root>/scripts/proposal.ts gate .claude-code-hermit --gate triage --caller reflect <<'HERMIT_GATE'
+Run `proposal-gate` (Commands) with arguments `--gate triage --caller reflect` and the following stdin payload:
+```text
 Title: <title>
 Verdict: <that candidate's line 1, verbatim>
-HERMIT_GATE
 ```
 - `PROCEED|CREATE` — proceed
 - `DROP|DUPLICATE:<PROP-ID>`; link to existing proposal in open record notes instead, do not create
@@ -174,10 +170,9 @@ After validating with `claude-code-hermit:reflection-judge`, choose exactly one 
 3. **Proposal candidate** — classify tier (§ Proposal Tier Classification) for every candidate reaching this outcome, batch them all through the Proposal triage gate together, then per candidate on its own token: Tier 1/2 `PROCEED|CREATE` → queue micro-approval in `state/micro-proposals.json`; Tier 3 `PROCEED|CREATE` → call `/claude-code-hermit:proposal-create` (exception: procedure-capture candidates skip the separate pre-gate — see § Procedure capture).
 
 Sub-threshold observations do not surface to the operator in steady state. Append them to the observations ledger with a short stable pattern label — the label goes on stdin, so apostrophes in it are safe:
-```bash
-bun <plugin_root>/scripts/observations.ts observe .claude-code-hermit reflect-noticed --origin=own-work <<'HERMIT_OBSERVATION'
+Run `observations-observe` (Commands) with arguments `reflect-noticed --origin=own-work` and the following stdin payload:
+```text
 <short pattern label>
-HERMIT_OBSERVATION
 ```
 They graduate via SKILL.md step 3b. Pass `--origin=external-content` instead of `own-work` when the observation derives from an open task record note carrying an `[origin: external]` marker (copy the marker deterministically, don't infer from content). Reuse the exact label when re-observing a known pattern; grouping is by string equality. Only append when a genuine pattern is noticed.
 
@@ -192,10 +187,9 @@ Every micro-proposal question must include: **[observed pattern + duration] + [c
 
 Queuing procedure:
 
-```bash
-bun <plugin_root>/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
+Run `proposal-queue-micro` (Commands) and the following stdin payload:
+```text
 {"tier":<1|2>,"question":"<full question text>","options":["<label>", ...],"on_resolve":"<full skill invocation with an {answer} placeholder>"}
-HERMIT_MP
 ```
 `options` and `on_resolve` are optional — used by channel-bridged asks from other skills (see `channel-responder` § Channel-safe ask bridge) as well as reflect's own future N-way candidates. When `on_resolve` is present, the script forces `tier: 1` regardless of the caller-supplied tier (so tier-1 readers like heartbeat keep working unchanged) and tags the metrics event `"kind":"ask"` (a bounded ask is not a yes/no approval, so `generate-summary.ts`/`weekly-review.ts` exclude it from approval-rate calculations).
 
@@ -212,9 +206,7 @@ Component Health improves existing components. This subsection is the symmetric 
 
 After ≥8 procedure-capture candidates surfaced, run:
 
-```
-bun <plugin_root>/scripts/proposal.ts metrics .claude-code-hermit --source=procedure-capture
-```
+Run `proposal-metrics` (Commands) with arguments `--source=procedure-capture`.
 
 Triage-survival < 25% or acceptance < 30% → disable procedure capture rather than tune it. `INSUFFICIENT` output means the ≥8-verdict sample hasn't been reached yet; do not read thresholds until it does.
 
@@ -297,10 +289,9 @@ Queue as a Tier-3 candidate by calling `/claude-code-hermit:proposal-create` —
 - `## Agent Draft` when `proposed_agent_name` is set (see `proposal-create` for format)
 
 Then exactly one bridged ask via `proposal.ts queue-micro`:
-```bash
-bun <plugin_root>/scripts/proposal.ts queue-micro .claude-code-hermit <<'HERMIT_MP'
+Run `proposal-queue-micro` (Commands) and the following stdin payload:
+```text
 {"tier":2,"question":"<pattern + duration> + <consequence> + save it and run <skill name> on <schedule>?","options":["accept","dismiss"],"on_resolve":"/claude-code-hermit:proposal-act {answer} PROP-NNN","proposal_id":"PROP-NNN"}
-HERMIT_MP
 ```
 (the script forces `tier: 1` for bridged entries; that is expected). The channel message renders `1. accept / 2. dismiss` with the reply hint format already normative above (`Reply "MP-YYYYMMDD-N <number or label>"`), because a bare yes/no is ambiguous against an options entry.
 

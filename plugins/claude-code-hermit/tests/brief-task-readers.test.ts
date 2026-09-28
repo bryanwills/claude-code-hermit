@@ -18,7 +18,8 @@ describe('task-based reader instructions', () => {
   test('reflection and weekly evaluation consume bounded normalized records', () => {
     for (const path of ['skills/reflect/reference.md', 'skills/weekly-review/reference.md']) {
       const text = read(path);
-      expect(text).toContain('task-report.ts .claude-code-hermit --recent --limit 3');
+      expect(text).toContain('`task-report` (Commands)');
+      expect(read(path.replace('reference.md', 'SKILL.md'))).toContain('task-report.ts .claude-code-hermit --recent --limit 3');
       expect(text).not.toContain('S-*-REPORT.md');
       expect(text).not.toContain('session_state');
     }

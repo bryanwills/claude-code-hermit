@@ -8,6 +8,9 @@ Every hermit ships with the same dashboard: status, brief, proposals, weekly, co
 
 This skill replaces that default with a page designed around **this** hermit, and does it in a way that stays free to keep current: you design once, and what you leave behind is a small program that rebuilds the page from the hermit's own files every time the page refreshes.
 
+## Commands
+- `artifact-render`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render <type> .claude-code-hermit`
+
 ## The one rule that shapes everything
 
 **You design the page. A script renders it — every time, forever, without you.**
@@ -100,7 +103,7 @@ Before installing it: back up any existing `dashboard-render.ts` (the operator m
 
 ## 4. Publish and hand it over
 
-Publish the rendered page following `docs/artifacts.md` § Shared refresh procedure — same `dashboard` state key, same URL as the default page had, so nothing else changes and the operator's existing link keeps working.
+Publish the rendered page following `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md` § Shared refresh procedure — same `dashboard` state key, same URL as the default page had, so nothing else changes and the operator's existing link keeps working.
 
 Then give the operator the URL and invite reactions in plain language. Don't present a checklist; show them the page and let them tell you what's wrong with it. "Move X up", "drop the cost card", "add last week's total" are all just edits to the renderer.
 
@@ -109,7 +112,7 @@ If the hermit runs `permission_mode: auto`, note that unattended refreshes may h
 ## Living with it
 
 - **"Change my dashboard"** → same skill: read the current renderer, edit it, re-run, republish. Don't start over unless they want a redesign.
-- **"Refresh it now"** → run the renderer and republish per `docs/artifacts.md`; no redesign needed.
+- **"Refresh it now"** → run the renderer and republish per `${CLAUDE_PLUGIN_ROOT}/docs/artifacts.md`; no redesign needed.
 - **"Remove my custom dashboard"** → delete `dashboard-render.ts`; the default page comes back on the next refresh, same URL.
 - **The page shows what's on disk.** It's refreshed by the hermit's rhythm (briefs, weekly review, proposal events), not live. If a section needs to be fresher than that, the fix is a routine that updates the underlying file — or one that runs the render and publish step — not a change to this page.
 - **Data first, page second.** If the operator wants something the hermit doesn't currently record, the dashboard is the wrong place to solve it: the hermit needs to start writing that file (a routine, a heartbeat item, a brief step). Say so rather than faking it with a literal.

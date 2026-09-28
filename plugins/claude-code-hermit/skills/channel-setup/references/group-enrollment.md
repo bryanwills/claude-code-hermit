@@ -22,9 +22,7 @@ Read the channel config and its resolved `access.json`: `channels.<channel>.stat
 4. When passive is **Yes** and `ackReaction` is a non-empty string, ask once: **Turn off the plugin-global seen-emoji?** Options: **Turn off** (default, also stops the emoji on your DMs for this channel); **Keep**. Missing or empty `ackReaction` asks nothing. Pass `--ack-off` only for Turn off.
 5. Validate the ID and trigger IDs as numeric strings; reject the channel's `maintainer_channel_id`. Encode nickname patterns as a JSON array of strings and validate each as a case-insensitive regex. Make one call, substituting every value explicitly:
 
-   ```bash
-   bun <plugin_root>/scripts/channel-access.ts "<hermit_state_dir>" group-add <channel> <id> --mention <yes|no> --allow <id1,id2|none> --shared <yes|no> --passive <yes|no> [--nicknames '<json array of strings>'] [--ack-off]
-   ```
+   Run `channel-group-add` (Commands) with arguments `<channel> <id> --mention <yes|no> --allow <id1,id2|none> --shared <yes|no> --passive <yes|no> [--nicknames '<json array of strings>'] [--ack-off]`.
 
    Omit `--nicknames` for no new patterns. The script replaces this group's mention and sender settings, updates its `shared_chats` and `passive_chats` membership while preserving other IDs, unions channel-wide nickname patterns, and preserves the seen-emoji unless explicitly turned off.
 6. Relay `OK|` as confirmation with the returned mention, allow, shared, passive, patterns, and ack values. Changes apply on the next message with no restart. On `ERROR|`, report the token and stop writing. `partial-config-written` means config landed but access did not: relay **re-run the same command**. A hook refusal means **refused in bypass mode; pair or enrol from a normal terminal session**. Never retry a denied call through another writer.

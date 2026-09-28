@@ -1289,7 +1289,7 @@ describe('procedure capture contract', () => {
   }
 
   test('reflect procedure-capture kill criteria must invoke the metrics verb', () => {
-    expect(procedureCaptureKillSection()).toContain('proposal.ts metrics');
+    expect(procedureCaptureKillSection()).toContain('`proposal-metrics` (Commands)');
   });
 
   test('reflect kill criteria must document the 25%/30% kill thresholds', () => {
@@ -1611,14 +1611,14 @@ describe('stop payload snapshot', () => {
 // Guards against the `echo $CLAUDE_PLUGIN_ROOT` pattern being reintroduced.
 // That bare env-var form always returns empty at Bash runtime (in all modes),
 // causing load to abort and leaving all CronCreates unregistered. The
-// mode-independent fix derives pluginRoot from the skill's Base directory.
+// fix uses harness-substituted paths and copies them into cron prompts.
 // ============================================================
 
 describe('hermit-routines plugin-root resolution contract', () => {
   const skillContent = read(path.join(SKILLS, 'hermit-routines', 'SKILL.md'));
 
-  test('SKILL.md derives pluginRoot from Base directory, not echo $CLAUDE_PLUGIN_ROOT', () => {
-    expect(skillContent).toContain('Base directory');
+  test('SKILL.md uses braced plugin-root paths, not echo $CLAUDE_PLUGIN_ROOT', () => {
+    expect(skillContent).toContain('test -f "${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts"');
     expect(skillContent).not.toContain('echo $CLAUDE_PLUGIN_ROOT');
   });
 
@@ -1846,10 +1846,10 @@ describe('hermit-evolve delegation contract', () => {
     expect(fs.existsSync(path.join(SKILLS, 'hermit-evolve', 'reference.md'))).toBe(true);
   });
 
-  test('SKILL.md guards both SKILL.md and reference.md before dispatch', () => {
+  test('SKILL.md guards reference.md before dispatch', () => {
     // reference.md is load-bearing for evolve-runner post-split; a guard that only
     // checks SKILL.md would dispatch into a broken read if reference.md were missing.
-    expect(skill).toContain('skills/hermit-evolve/SKILL.md');
+    expect(skill).toContain('test -f "${CLAUDE_PLUGIN_ROOT}/skills/hermit-evolve/reference.md"');
     expect(skill).toContain('skills/hermit-evolve/reference.md');
   });
 
@@ -2238,36 +2238,6 @@ describe('capability-brainstorm delegation contract', () => {
     const block = (text: string) => extractBlock(text, '<!-- brainstorm-eval-schema:start -->', '<!-- brainstorm-eval-schema:end -->');
     expect(block(refFile)).toBe(block(skill));
   });
-});
-
-// ============================================================
-// reference.md plugin-root contract (TestReferencePluginRootContract)
-//
-// The skill-eval-runner reads each reference.md via the Read tool, where the
-// `${CLAUDE_PLUGIN_ROOT}` token is NOT substituted (it is only text-substituted
-// in skill markdown loaded by the harness in installed mode, and is empty as a
-// Bash variable). Any executable path in a reference.md must therefore use the
-// `<plugin_root>` value passed in the dispatch prompt, never `${CLAUDE_PLUGIN_ROOT}/`.
-// Mirrors the #395 regression guard for hermit-routines. A plain `${CLAUDE_PLUGIN_ROOT}`
-// mention (the warning telling the runner not to use it) is allowed; only the
-// path form `${CLAUDE_PLUGIN_ROOT}/` is forbidden.
-// ============================================================
-
-describe('reference.md plugin-root contract', () => {
-  const refFiles = fs.readdirSync(SKILLS)
-    .map((d) => path.join(SKILLS, d, 'reference.md'))
-    .filter((p) => fs.existsSync(p));
-
-  test('at least one reference.md exists', () => {
-    expect(refFiles.length).toBeGreaterThan(0);
-  });
-
-  for (const refPath of refFiles) {
-    const rel = path.relative(SKILLS, refPath);
-    test(`${rel} uses no \${CLAUDE_PLUGIN_ROOT}/ path (must use <plugin_root>)`, () => {
-      expect(read(refPath)).not.toContain('${CLAUDE_PLUGIN_ROOT}/');
-    });
-  }
 });
 
 // ============================================================
@@ -3887,7 +3857,8 @@ describe('hermit-evolve permission delegation contract', () => {
   );
 
   test('Step 8 delegates to apply-settings.ts permissions-sync', () => {
-    expect(evolveRef).toMatch(/apply-settings\.ts <resolved-settings-file> permissions-sync/);
+    expect(step8).toContain('`apply-settings` (Commands)');
+    expect(fs.readFileSync(path.join(PLUGIN_ROOT, 'agents/evolve-runner.md'), 'utf8')).toContain('apply-settings.ts <resolved-settings-file> permissions-sync');
   });
 
   test('Step 8 no longer hand-enumerates the per-script allow-list', () => {

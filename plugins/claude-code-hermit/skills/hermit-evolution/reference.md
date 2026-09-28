@@ -7,7 +7,7 @@ returns the assembled evolution report. The calling main session decides where t
 
 ## Inputs (read fresh — do not reuse cached values)
 
-The calling skill passes `plugin_root` (the resolved absolute plugin path) in the dispatch prompt. Substitute that value wherever `<plugin_root>` appears below. Do not use the `${CLAUDE_PLUGIN_ROOT}` token — it is not substituted in this file's content and is empty as a Bash variable.
+The dispatch prompt supplies the absolute plugin root for non-command files and the Commands entries used below. Run those entries verbatim with the stated arguments.
 
 Gracefully skip any file, glob, or script that doesn't exist or exits non-zero.
 
@@ -21,21 +21,21 @@ Steps are independent — read files and run scripts concurrently where possible
    step 5 is unavailable.
 3. `.claude-code-hermit/state/proposal-metrics.jsonl` — scan from the end (most recent first); stop
    at entries older than 30 days. Use `resolved_at` and `created_at` to compute resolution days.
-4. Run `bun <plugin_root>/scripts/proposal.ts metrics .claude-code-hermit` and
+4. Run `proposal-metrics` (Commands) and
    capture stdout. Skip gracefully if unavailable. (Steps 4 and 5 may run concurrently.)
-5. Run `bun <plugin_root>/scripts/cost-report.ts reflect .claude-code-hermit 30` and capture
+5. Run `cost-report-reflect` (Commands) with arguments `30` and capture
    stdout. This produces a 30-day cost breakdown including a `### Cost by source` section. Skip
    gracefully if unavailable.
 6. `.claude-code-hermit/config.json` — read `routines[]` (id, schedule, enabled), `monitors[]`
    (id, enabled), `heartbeat.every`.
-7. Run `bun <plugin_root>/scripts/routines.ts health .claude-code-hermit --days 30` and capture
+7. Run `routines-health` (Commands) with arguments `--days 30` and capture
    stdout — one JSON object with per-routine `fires`, `failures`, `incomplete`, `cost_usd` and a
    `source` status. Skip gracefully if unavailable. Do not read `routine-metrics.jsonl` directly.
 8. Read the last 30 days of records through `scripts/lib/task-report.ts`. Use their outcomes, lessons and source paths. List filenames in `.claude-code-hermit/compiled/` created in the last 30 days.
-9. `.claude-code-hermit/OPERATOR.md` and `<plugin_root>/state-templates/OPERATOR.md` —
+9. `.claude-code-hermit/OPERATOR.md` and `state-templates/OPERATOR.md` under the plugin root —
    read both.
 10. List dirs under `.claude/skills/` in the target project root and under
-    `<plugin_root>/skills/`.
+    `skills/` under the plugin root.
 
 ## Analysis
 
@@ -60,7 +60,7 @@ and describe each in one line. Label: _inferred — no operator-used signal exis
 
 **Grown since hatch (approximated):** From step 9, diff `.claude-code-hermit/OPERATOR.md`
 against the template and note sections the operator added or meaningfully filled in. From step 10,
-list skill names present under `.claude/skills/` but absent from `<plugin_root>/skills/`
+list skill names present under `.claude/skills/` but absent from `skills/` under the plugin root
 — those are organically created. Label: _approximated — no hatch baseline stored._
 
 ## Return Value

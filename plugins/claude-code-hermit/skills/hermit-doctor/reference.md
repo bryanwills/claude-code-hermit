@@ -1,4 +1,4 @@
-Record notes only inside an open record's turn, using `bun <plugin_root>/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+Record notes only inside an open record's turn, using `task-note` (Commands) with arguments `<id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 
 # Hermit Doctor: What each check looks at
 

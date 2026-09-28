@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Issue commands resolve the bundled script through the skill directory.
+
 ## [0.1.6] - 2026-09-16
 
 ### Changed

@@ -217,7 +217,7 @@ describe('watch progressive disclosure', () => {
     expect(registration).toContain('do not write the registry');
     expect(registration).toContain('class: "peer-idle"');
     expect(registration).toContain('Do not add `task_id`');
-    expect(registration).toContain('task.ts note');
+    expect(registration).toContain('`task-note` (Commands)');
     for (const body of [reuse, session]) {
       expect(body).not.toMatch(/steps [3-9][–-][3-9]/);
     }
@@ -230,11 +230,11 @@ describe('watch progressive disclosure', () => {
       const body = fs.readFileSync(path.join(SKILLS_DIR, file), 'utf8');
       expect(body).not.toContain('${CLAUDE_PLUGIN_ROOT}');
     }
-    expect(watch.slice(0, 1_000)).toContain('means `${CLAUDE_PLUGIN_ROOT}`');
-    expect(watch.slice(0, 1_000)).toContain('read as a sibling reference');
+    expect(watch).toContain('## Commands');
+    expect(watch).toContain('- `task-note`:');
     const notices = fs.readFileSync(path.join(watchDir, 'notices.md'), 'utf8');
-    for (const command of ['task.ts block', 'proposal.ts resolve-id', 'proposal.ts patch']) {
-      expect(notices).toContain(`bun <plugin_root>/scripts/${command} .claude-code-hermit`);
+    for (const command of ['task-block', 'proposal-resolve-id', 'proposal-patch']) {
+      expect(notices).toContain('`' + command + '` (Commands)');
     }
   });
 });

@@ -2,11 +2,17 @@
 name: channel-responder
 description: Handles inbound messages tagged <channel source=...> from Claude Code Channels, routing replies, task work, approvals, and operator controls with session context.
 ---
-`<plugin_root>` in this skill's supporting files means `${CLAUDE_PLUGIN_ROOT}`.
 
 # Channel Responder
 
 When a message arrives via a channel:
+
+## Commands
+- `observations-observe`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/observations.ts observe .claude-code-hermit`
+- `proposal-index`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts index .claude-code-hermit`
+- `proposal-micro`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts micro .claude-code-hermit`
+- `routines-health`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/routines.ts health .claude-code-hermit`
+- `settings-get-routines`: `bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.json get routines`
 
 ## 0. Reply via the channel
 

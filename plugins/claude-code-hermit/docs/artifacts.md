@@ -48,7 +48,7 @@ Every script-rendered artifact type (dashboard, proposals page, weekly review) f
 the same five steps; only the render script, `<title>`, and `state/artifacts.json` key
 differ per type (called out in each subsection below):
 
-1. Run the type's render script (e.g. `bun ${CLAUDE_PLUGIN_ROOT}/scripts/artifact.ts render dashboard .claude-code-hermit`)
+1. Run `artifact-render` (Commands) with the artifact type (e.g. `dashboard`) as `<type>`
    and parse stdout JSON (`path`, `bytes`, `hash`).
 2. Read `.claude-code-hermit/state/artifacts.json` (if present). **Compare `<key>.backend`
    against the active backend before anything else** — an entry with **no** `backend` field

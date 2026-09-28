@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Installed documentation pointers no longer contain unresolved plugin-root tokens; briefing schema reads use the loaded plugin path.
+
 ## [0.2.1] - 2026-09-25
 
 ### Removed

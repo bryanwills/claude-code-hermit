@@ -38,6 +38,7 @@ test('wrapped service calls retain native approval and policy denials', async ()
   const root = fixture();
   const strict = fixture('strict');
   for (const executable of [
+    'ha-agent-lab',
     'FOO=bar /plugin/bin/ha-agent-lab',
     'FOO=bar bun /plugin/claude-code-homeassistant-hermit/src/cli.ts',
     'bun run /plugin/claude-code-homeassistant-hermit/src/cli.ts',
