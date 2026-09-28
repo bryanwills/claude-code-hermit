@@ -8,7 +8,8 @@ afterAll(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive
 const cli = path.resolve(import.meta.dir, '../scripts/hermit-cli.ts');
 function write(file: string, content: string) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, content, { mode: 0o755 }); }
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cli-')); roots.push(root);
+  // Canonical root: the CLI resolves projects to realpaths (macOS tmpdir is a /var -> /private/var symlink).
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'hermit-cli-'))); roots.push(root);
   const core = path.join(root, 'plugins/cache/mp/claude-code-hermit/1');
   const fresh = path.join(root, 'plugins/cache/mp/claude-code-hermit/2');
   const bin = path.join(root, 'tools'); const log = path.join(root, 'calls');
@@ -105,6 +106,13 @@ test('host install creates bin, is idempotent, warns about PATH, and follows a r
   fs.copyFileSync(f.env.FRESH_LIST, f.env.LIST);
   const child = Bun.spawn(['bash', shim, 'list'], { cwd: f.root, env: { ...f.env }, stdout: 'pipe', stderr: 'pipe' });
   expect(await new Response(child.stdout).text()).toBe('fresh:hermit-cli list\n'); expect(await child.exited).toBe(0);
+});
+test('core lookup matches a projectPath reported through a symlink', async () => {
+  const f = fixture(); const alias = path.join(f.root, 'alias'); fs.symlinkSync(f.p, alias);
+  write(f.env.LIST, JSON.stringify([{ id: 'claude-code-hermit@mp', scope: 'project', enabled: true, projectPath: alias, installPath: f.core }]));
+  const r = await f.run(['docker', 'logs'], f.p);
+  expect(r.stderr).not.toContain('not installed'); expect(r.exitCode).toBe(0);
+  expect(f.calls()).toContain(`old|${f.p}|logs`);
 });
 test('shim falls back by scope precedence when the bound install is gone', async () => {
   const f = fixture(); const shim = path.join(f.root, '.local/bin/hermit');

@@ -40,11 +40,13 @@ export function hostInstall(project: string) {
   if (result.error || result.status !== 0) throw new Error('Could not read claude plugin list --json');
   const list = JSON.parse(result.stdout);
   if (!Array.isArray(list)) throw new Error('Invalid claude plugin list --json');
-  const resolved = resolvePlugin(list, 'claude-code-hermit', project);
+  // `project` is a realpath; compare Claude Code's projectPath the same way (macOS /var -> /private/var, symlinked folders).
+  const canonical = (p: unknown) => { if (typeof p !== 'string') return p; try { return fs.realpathSync(p); } catch { return p; } };
+  const resolved = resolvePlugin(list.map(p => ({ ...p, projectPath: canonical(p?.projectPath) })), 'claude-code-hermit', project);
   if (isResolveError(resolved)) throw new Error(resolved.message);
   const ranks = ['local', 'project', 'user'];
   const entry = list.filter(p => p.enabled === true && p.id?.startsWith('claude-code-hermit@') && p.installPath === resolved.installPath
-    && (p.scope === 'user' || p.projectPath === project)).sort((a, b) => ranks.indexOf(a.scope) - ranks.indexOf(b.scope))[0];
+    && (p.scope === 'user' || canonical(p.projectPath) === project)).sort((a, b) => ranks.indexOf(a.scope) - ranks.indexOf(b.scope))[0];
   if (!entry) throw new Error('Core installation binding is unavailable');
   return { id: entry.id as string, scope: entry.scope as string, projectPath: entry.projectPath as string | undefined, installPath: resolved.installPath };
 }
