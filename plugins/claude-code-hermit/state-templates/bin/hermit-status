@@ -1,33 +1,6 @@
 #!/usr/bin/env bash
-# Quick status check, no Claude Code or tokens.
-# Prints the current task digest.
-# Run from project root: .claude-code-hermit/bin/hermit-status
+# Read-only status, resolved from the installed core.
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-AGENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROJECT_DIR="$(cd "$AGENT_DIR/.." && pwd)"
-PROJECT_NAME="$(basename "$PROJECT_DIR")"
-AGENT_NAME=$(bun -e "try { console.log(JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).agent_name || 'hermit'); } catch { console.log('hermit'); }" "$AGENT_DIR/config.json")
-
-# Docker container status
-DOCKER_STATE=""
-COMPOSE="$PROJECT_DIR/docker-compose.hermit.yml"
-if command -v docker &>/dev/null && [ -f "$COMPOSE" ] && docker info &>/dev/null; then
-  DC=(docker compose -f "$COMPOSE")
-  SERVICE=$(cd "$PROJECT_DIR" && "${DC[@]}" ps --status running --format '{{.Service}}' 2>/dev/null | head -1 || true)
-  if [ -n "$SERVICE" ]; then
-    DOCKER_STATE="docker:up"
-  else
-    DOCKER_STATE="docker:down"
-  fi
-fi
-
-echo "$AGENT_NAME ($PROJECT_NAME)${DOCKER_STATE:+ | $DOCKER_STATE}"
-"$SCRIPT_DIR/hermit-run" task list "$AGENT_DIR" --open
-
-if [ "$DOCKER_STATE" = "docker:up" ]; then
-  echo "  attach: .claude-code-hermit/bin/hermit-docker attach"
-elif [ -z "$DOCKER_STATE" ]; then
-  echo "  attach: .claude-code-hermit/bin/hermit-attach"
-fi
+cd "$SCRIPT_DIR/../.."
+exec "$SCRIPT_DIR/hermit-run" hermit-status "$@"

@@ -134,7 +134,7 @@ Before archive traversal, multi-file search or delegated execution, apply **Cont
   - The `user-prompt-pipeline.ts` `UserPromptSubmit` pause stage has already set or cleared `state/operator-pause.json`. No state action remains; acknowledgements use the channel.
   - The `!` prefix is required. Bare "pause"/"stop"/"resume"/"snooze 2h" changes no pause state; classify bare "stop" as Emergency.
   - Self-addressed commands also work: `!pause@<your handle>`, `@<your handle> !pause`, or Discord's leading `<@your id>`. Ignore commands addressed to other bots. A mention does not make a bare word binding: `<@you> pause` remains conversation.
-  - **Never attempt to resume yourself while paused.** `pause-gate.ts` denies every tool except channel reply, including Bash running `hermit-pause.ts off`, and returns the pause reason. Resume requires exact `!resume` from the operator or their own `.claude-code-hermit/bin/hermit-pause off`.
+  - **Never attempt to resume yourself while paused.** `pause-gate.ts` denies every tool except channel reply, including Bash running `hermit-pause.ts off`, and returns the pause reason. Resume requires exact `!resume` from the operator or their own `hermit pause off`.
 
 - **Emergency** ("abort", "revert", "rollback", or "stop")
   - Bare "stop" is **cooperative, not binding**. `!stop` or `!pause` blocks every tool except channel reply.

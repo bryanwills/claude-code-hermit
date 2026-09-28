@@ -25,7 +25,7 @@ claude plugin install claude-code-dev-hermit@claude-code-hermit --scope local
 /claude-code-dev-hermit:hatch
 
 # Boot the hermit (core)
-.claude-code-hermit/bin/hermit-start
+hermit start
 ```
 
 ---
@@ -65,7 +65,7 @@ The wizard asks for protected branches and hook profile, and offers Context7. De
 ### 3. Boot the hermit (core)
 
 ```
-.claude-code-hermit/bin/hermit-start
+hermit start
 ```
 
 Boots the hermit in a tmux session — sessions, routines, heartbeat, and the learning loop, with detach/reattach so it survives SSH drops. Append `--no-tmux` for a foreground run.

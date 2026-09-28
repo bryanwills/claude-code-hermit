@@ -264,7 +264,7 @@ Manual steps remaining:
 Go always-on (recommended):
   - Docker:     /claude-code-hermit:docker-setup
       Builds the container and walks you through channel pairing in one go.
-  - Bare tmux:  .claude-code-hermit/bin/hermit-start
+  - Bare tmux:  hermit start
       For channels (Discord/Telegram) with tmux, run
       /claude-code-hermit:channel-setup first.
 

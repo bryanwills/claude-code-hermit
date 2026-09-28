@@ -20,25 +20,25 @@ tmux is required. Channels are optional.
 
 ```bash
 cd /path/to/your/project
-.claude-code-hermit/bin/hermit-start
+hermit start
 ```
 
 This reads `config.json`, starts a tmux session with your configured channels and permissions, and auto-runs `/claude-code-hermit:resident-start`. To stop:
 
 ```bash
-.claude-code-hermit/bin/hermit-stop        # graceful resident shutdown
-.claude-code-hermit/bin/hermit-stop --force # immediate kill
+hermit stop        # graceful resident shutdown
+hermit stop --force # immediate kill
 ```
 
 To pause/resume the running session without stopping it (also triggerable from a channel via the `!pause`/`!resume`/`!snooze <dur>` message commands):
 
 ```bash
-.claude-code-hermit/bin/hermit-pause on|off|snooze <dur>|status
+hermit pause on|off|snooze <dur>|status
 ```
 
 **Config options:** If `remote: true`, adds `--remote-control` and names the session after `agent_name`. If `remote: false`, boot writes `isolatePeerMachines: true`, so cross-machine peer messages require operator approval. If `model` is set, passes it to Claude Code.
 
-**Restarting dead sessions.** The first tmux always-on boot (`hermit-start`) registers the watchdog scheduler on a 5-minute schedule (systemd user timer on Linux/WSL2, LaunchAgent on macOS, a cron line printed as fallback). That tick restarts dead sessions, nudges wedged ones, and keeps long-running context compacted. A boot that cannot write the resident launch overlay refuses to start; the watchdog keeps retrying until the cause is cleared. The overlay carries `pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify` instead of plugin-manifest entries and is read at launch only. The first registration also sets `watchdog.enabled: true` in `config.json`; a repair re-run of install leaves that setting as you have it. Opt out with `.claude-code-hermit/bin/hermit-watchdog uninstall` — it removes the timer and sets both flags off. Setting `watchdog.scheduler_enabled: false` by hand only stops future boots from re-registering; an already-installed timer keeps ticking. On Linux add `loginctl enable-linger` if the hermit has to come back after a reboot before anyone logs in. Docker hermits need none of this: the entrypoint runs the same watchdog on its own cycle, and the container restart policy handles a dead session.
+**Restarting dead sessions.** The first tmux always-on boot (`hermit-start`) registers the watchdog scheduler on a 5-minute schedule (systemd user timer on Linux/WSL2, LaunchAgent on macOS, a cron line printed as fallback). That tick restarts dead sessions, nudges wedged ones, and keeps long-running context compacted. A boot that cannot write the resident launch overlay refuses to start; the watchdog keeps retrying until the cause is cleared. The overlay carries `pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify` instead of plugin-manifest entries and is read at launch only. The first registration also sets `watchdog.enabled: true` in `config.json`; a repair re-run of install leaves that setting as you have it. Opt out with `hermit watchdog uninstall` — it removes the timer and sets both flags off. Setting `watchdog.scheduler_enabled: false` by hand only stops future boots from re-registering; an already-installed timer keeps ticking. On Linux add `loginctl enable-linger` if the hermit has to come back after a reboot before anyone logs in. Docker hermits need none of this: the entrypoint runs the same watchdog on its own cycle, and the container restart policy handles a dead session.
 
 ### Manual tmux (alternative)
 
@@ -238,7 +238,7 @@ A hermit can equally run on the plain claude.ai sign-in itself — `auth_mode: l
 You can also renew from a terminal at any time:
 
 ```bash
-.claude-code-hermit/bin/hermit-docker setup-token
+hermit docker setup-token
 ```
 
 Notes:
@@ -295,7 +295,6 @@ Type=forking
 User=your-username
 WorkingDirectory=/home/your-username/my-project
 ExecStart=/home/your-username/my-project/.claude-code-hermit/bin/hermit-start
-ExecStop=/home/your-username/my-project/.claude-code-hermit/bin/hermit-stop
 Restart=on-failure
 RestartSec=10
 
@@ -303,8 +302,10 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+Alongside `ExecStart=`, add `ExecStop=/home/your-username/my-project/.claude-code-hermit/bin/hermit-stop` under `[Service]`. Scheduler commands call the project wrappers directly so recovery does not depend on the host shim.
+
 **macOS (launchd):** Create a plist in `~/Library/LaunchAgents/` that runs `hermit-start` at login. The SessionStart hook reloads session context automatically.
 
 **Docker:** `restart: unless-stopped` handles it automatically — see [Always-On Setup](always-on.md). The entrypoint's SIGTERM trap ensures graceful session close on system shutdown.
 
-A manual `claude --resume` or a new Claude session launched from a shell opened through `hermit-attach` is a guest. Guests ignore channel messages, including sessions that inherit the resident's environment. The verdict is taken at session start and never revisited, so a guest keeps leaving channel messages alone even after the resident stops. Recognising an environment-inheriting session needs the resident's `session_pid` stamp in `state/runtime.json`, and a session already running when the plugin update lands is only classified at its next start. Use `.claude-code-hermit/bin/hermit-start --resume` to bring an old transcript back as the resident.
+A manual `claude --resume` or a new Claude session launched from a shell opened through `hermit-attach` is a guest. Guests ignore channel messages, including sessions that inherit the resident's environment. The verdict is taken at session start and never revisited, so a guest keeps leaving channel messages alone even after the resident stops. Recognising an environment-inheriting session needs the resident's `session_pid` stamp in `state/runtime.json`, and a session already running when the plugin update lands is only classified at its next start. Use `hermit start --resume` to bring an old transcript back as the resident.

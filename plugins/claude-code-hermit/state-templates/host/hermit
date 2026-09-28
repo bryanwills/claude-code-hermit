@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# claude-code-hermit: managed host CLI
+set -euo pipefail
+BINDING=__HERMIT_BINDING__
+UPDATE_ID=__HERMIT_UPDATE_ID__
+if ! INSTALL_PATH=$(claude plugin list --json | bun -e '
+const fs = require("fs");
+try {
+  const binding = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const list = JSON.parse(fs.readFileSync(0, "utf8"));
+  const matches = list.filter(p => p.id === binding.id && p.scope === binding.scope && p.projectPath === binding.projectPath);
+  if (matches.length !== 1 || typeof matches[0].installPath !== "string") process.exit(1);
+  console.log(matches[0].installPath);
+} catch { process.exit(1); }
+' "$BINDING"); then
+  echo "[hermit] Host binding or core install missing. Run: claude plugin update $UPDATE_ID" >&2
+  exit 1
+fi
+if [ ! -f "$INSTALL_PATH/scripts/hermit-exec.sh" ]; then
+  echo "[hermit] Host core missing. Run: claude plugin update $UPDATE_ID" >&2
+  exit 1
+fi
+exec bash "$INSTALL_PATH/scripts/hermit-exec.sh" hermit-cli "$@"

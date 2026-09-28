@@ -15,7 +15,7 @@ Both run your hermit unattended between tasks with heartbeat, monitors, and chan
 | Environment      | Pinned, reproducible image (Node, Bun, project packages)      | Whatever is installed on the host                          |
 | Host services    | Reach localhost DBs/dev servers via mounts or `network_mode`  | Native, no networking setup                                |
 | Hardening        | Opt-in `/docker-security` overlay (LAN containment, sysctls)  | Deny patterns and hooks only                               |
-| Setup cost       | Image build on first `up` (slower first run)                  | `bin/hermit-start`, no build                               |
+| Setup cost       | Image build on first `up` (slower first run)                  | `hermit start`, no build                               |
 
 Isolation is a spectrum rather than a Docker-or-nothing choice, and Claude Code's own [sandbox environments](https://code.claude.com/docs/en/sandbox-environments) page compares the options — the bash sandbox, the sandbox runtime, containers, VMs. A boundary is required for `bypassPermissions` and is defense in depth under the default `auto` mode.
 
@@ -48,7 +48,7 @@ Run after `/claude-code-hermit:hatch`:
 /claude-code-hermit:docker-setup
 ```
 
-**Already running this hermit in tmux on this box?** Stop it first with `.claude-code-hermit/bin/hermit-stop`. Both instances share the same `.claude-code-hermit/` state dir, so the container's entrypoint refuses to boot beside a live host instance and goes inert instead. The wizard checks for this before it builds anything and will tell you to stop the host hermit.
+**Already running this hermit in tmux on this box?** Stop it first with `hermit stop`. Both instances share the same `.claude-code-hermit/` state dir, so the container's entrypoint refuses to boot beside a live host instance and goes inert instead. The wizard checks for this before it builds anything and will tell you to stop the host hermit.
 
 The resident launch overlay carries `pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify` instead of the plugin manifest. It is read at launch only, so restart the resident after an upgrade to load the rewritten overlay.
 
@@ -65,9 +65,9 @@ The wizard scans your project for dependencies, asks about auth, and generates f
 
 | Need | Where it lives | How it takes effect | Upgrade guarantee |
 | ---- | -------------- | ------------------- | ----------------- |
-| apt package | inside the operator block of `Dockerfile.hermit` (`docker.packages` in `config.json` is read only at render time, so setting it installs nothing on its own) | rebuild on the host: `.claude-code-hermit/bin/hermit-docker restart --build` | with a baseline and an upstream move the merge is mechanical and only overlapping lines are resolved by the hermit; with no baseline the file is kept, the upstream copy parked under `.claude-code-hermit/state/`, and the operator told; with no upstream move the file is left alone. Re-check it after an upgrade |
-| release binary, `pip`/`npm -g`, env export, directory, side service, pre-session check | `<project-root>/docker-entrypoint.hermit-local.sh` (`HERMIT_ENTRY_PHASE` `pre-boot` / `pre-launch`; persist under `.claude.local/`) | `.claude-code-hermit/bin/hermit-docker restart` (no rebuild); `set -euo pipefail`, failures abort boot | upgrades never touch the sidecar |
-| volume, port, capability, base image | one contiguous commented block in `docker-compose.hermit.yml`, or the operator block of `Dockerfile.hermit` | `.claude-code-hermit/bin/hermit-docker restart --build` or `.claude-code-hermit/bin/hermit-docker restart`, as the change requires | with a baseline and an upstream move the merge is mechanical and only overlapping lines are resolved by the hermit; with no baseline the file is kept, the upstream copy parked under `.claude-code-hermit/state/`, and the operator told; with no upstream move the file is left alone. Re-check the block after every evolve |
+| apt package | inside the operator block of `Dockerfile.hermit` (`docker.packages` in `config.json` is read only at render time, so setting it installs nothing on its own) | rebuild on the host: `hermit restart --build` | with a baseline and an upstream move the merge is mechanical and only overlapping lines are resolved by the hermit; with no baseline the file is kept, the upstream copy parked under `.claude-code-hermit/state/`, and the operator told; with no upstream move the file is left alone. Re-check it after an upgrade |
+| release binary, `pip`/`npm -g`, env export, directory, side service, pre-session check | `<project-root>/docker-entrypoint.hermit-local.sh` (`HERMIT_ENTRY_PHASE` `pre-boot` / `pre-launch`; persist under `.claude.local/`) | `hermit restart` (no rebuild); `set -euo pipefail`, failures abort boot | upgrades never touch the sidecar |
+| volume, port, capability, base image | one contiguous commented block in `docker-compose.hermit.yml`, or the operator block of `Dockerfile.hermit` | `hermit restart --build` or `hermit restart`, as the change requires | with a baseline and an upstream move the merge is mechanical and only overlapping lines are resolved by the hermit; with no baseline the file is kept, the upstream copy parked under `.claude-code-hermit/state/`, and the operator told; with no upstream move the file is left alone. Re-check the block after every evolve |
 
 The hermit routes this through `/claude-code-hermit:docker-customize` when asked in chat.
 
@@ -78,7 +78,7 @@ The wizard also checks `.claude/settings.json` permissions to detect tools your 
 ## First Run
 
 ```bash
-.claude-code-hermit/bin/hermit-docker up
+hermit start
 ```
 
 This builds the image, starts the container, and prints the tmux attach command.
@@ -126,7 +126,7 @@ docker run -d --name hermit-fleet-pidns --restart unless-stopped --init alpine s
 Set `docker.fleet_mesh` to `true` in each hermit's `.claude-code-hermit/config.json`, re-run `/docker-setup`, then apply the rendered files:
 
 ```bash
-.claude-code-hermit/bin/hermit-docker update
+hermit update
 ```
 
 Every hermit in the mesh must run as the **same host UID**. The shared socket directory is `0700` and the shared `sessions/` volume is owned by whichever hermit mounted it first, so a hermit started by a different host user cannot read either: Claude Code silently falls back to `/tmp` for its inbox socket and the hermit stays invisible to its peers, with only a `[hermit] Cannot secure socket directory` line in `hermit-docker logs` to say so. Compose reads the UID from `${UID:-1000}` in the launching shell.
@@ -139,14 +139,14 @@ The generated Compose file uses `pid: "container:hermit-fleet-pidns"` so peer re
 
 | Action    | Command                                                       |
 | --------- | ------------------------------------------------------------- |
-| Start     | `.claude-code-hermit/bin/hermit-docker up`                    |
-| Stop      | `.claude-code-hermit/bin/hermit-docker down`                  |
-| Force stop| `.claude-code-hermit/bin/hermit-docker down --force`          |
-| Attach    | `.claude-code-hermit/bin/hermit-docker attach`                |
-| Shell     | `.claude-code-hermit/bin/hermit-docker bash`                  |
-| Logs      | `.claude-code-hermit/bin/hermit-docker logs -f`               |
-| Restart   | `.claude-code-hermit/bin/hermit-docker restart`               |
-| Status    | `.claude-code-hermit/bin/hermit-status`                       |
+| Start     | `hermit start`                    |
+| Stop      | `hermit stop`                  |
+| Force stop| `hermit stop --force`          |
+| Attach    | `hermit attach`                |
+| Shell     | `hermit docker bash`                  |
+| Logs      | `hermit docker logs -f`               |
+| Restart   | `hermit restart`               |
+| Status    | `hermit status`                       |
 
 `hermit-docker up` starts the container and prints the attach command.
 `hermit-docker attach` connects to the hermit's tmux session. Detach with Ctrl+B, D.
@@ -161,7 +161,7 @@ All bin scripts are pure bash — no Claude Code process, no tokens burned.
 **OAuth login (recommended for Pro/Max):** After the container starts for the first time, run `claude /login` inside it:
 
 ```bash
-.claude-code-hermit/bin/hermit-docker login
+hermit docker login
 ```
 
 This opens a browser URL for OAuth. Complete the login and credentials are saved to the container's named volume — they persist across restarts. The entrypoint waits for credentials on first boot, then starts automatically.
@@ -223,9 +223,9 @@ It installs the plugin (requires [Bun](https://bun.sh)), writes the bot token to
 ## Pausing the Hermit
 
 ```bash
-.claude-code-hermit/bin/hermit-docker down   # graceful close + stop
+hermit stop   # graceful close + stop
 # ... do your thing ...
-.claude-code-hermit/bin/hermit-docker up     # hermit recovers and resumes
+hermit start     # hermit recovers and resumes
 ```
 
 `down` waits for a graceful execution boundary before stopping (see [Graceful Shutdown](#graceful-shutdown) below for the exact sequence). On `up`, the resident reads execution state and open task records.
@@ -237,18 +237,17 @@ To queue work for the hermit to pick up next, use `/claude-code-hermit:proposal-
 ## Quick Status
 
 ```bash
-.claude-code-hermit/bin/hermit-status
+hermit status
 ```
 
-No tokens burned. Prints agent, project, docker state, then `task list --open` JSON:
+No tokens burned. Prints transport, execution and its age in seconds, open and waiting task counts, and the first runnable task:
 
 ```
-atlas (myproject) | docker:up
-{"rows":[{"id":"T-20260916-120000","title":"Add input validation","listing":[]}],"total":1,"omitted":0,"execution":{"state":"idle"}}
-  attach: .claude-code-hermit/bin/hermit-docker attach
+NAME       RUNTIME  TRANSPORT  EXECUTION  AGE  OPEN  WAITING  WORKING ON
+myproject  docker   up         idle       10   1     0        Add input validation
 ```
 
-When Docker is running, the attach command is printed automatically.
+Use `hermit attach` to connect, `hermit status --json` for one JSON document, and `hermit list` for all registered or discovered hermits. A running sidecar without the `hermit` service reports transport `down`; a failed Docker inspection reports `unknown`.
 
 ---
 
@@ -296,7 +295,7 @@ Adjust with `/hermit-settings env`.
 | --- | --- |
 | Ubuntu 26.04 default user conflicts at UID 1000 | `userdel -r ubuntu` before `useradd` — handled by Dockerfile |
 | Volume paths must match host | `${PWD}:${PWD}`, not `/app` or `/project` |
-| OAuth credentials expired | Re-run `.claude-code-hermit/bin/hermit-docker login` and restart with `hermit-docker restart` |
+| OAuth credentials expired | Re-run `hermit docker login` and restart with `hermit-docker restart` |
 | Entrypoint exits after tmux spawns | Entrypoint polls `tmux has-session` to keep PID 1 alive. SIGTERM trap handles graceful close. |
 | `.local` mDNS hostnames don't resolve | Use IP addresses in service URLs, even with `network_mode: host` |
 | Workspace trust prompt on first run | Attach once, press Enter, detach |
@@ -310,7 +309,7 @@ Adjust with `/hermit-settings env`.
 
 See [How do I move my hermit to another machine?](faq.md#how-do-i-move-my-hermit-to-another-machine) for the base steps, then handle these Docker-specific additions:
 
-1. **Stop the container before leaving the source:** `.claude-code-hermit/bin/hermit-docker down`
+1. **Stop the container before leaving the source:** `hermit stop`
 2. **Auth credentials are in the named volume** (`claude-config`) — they do not migrate with the project. Re-authenticate on the destination with `hermit-docker login` after the container is up
 3. **Rebuild the image on the destination:** run `/claude-code-hermit:docker-setup` (or bring up the existing compose file if the host environment is identical)
 

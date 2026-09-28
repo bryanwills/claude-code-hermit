@@ -45,7 +45,7 @@ claude plugin install claude-code-hermit@claude-code-hermit --scope local
 
 `--scope local` keeps the hermit personal to this folder rather than committing it to the repo for everyone. `/hatch` asks the shared-vs-personal question separately.
 
-> **Upgrading is not a second `curl`.** Once installed, use `.claude-code-hermit/bin/hermit-update` (local/tmux), `.claude-code-hermit/bin/hermit-docker update` (Docker), or `claude plugin update claude-code-hermit@claude-code-hermit --scope local`. Re-running the installer is harmless but moves nothing.
+> **Upgrading is not a second `curl`.** Once installed, use `hermit update` (local/tmux), `hermit update` (Docker), or `claude plugin update claude-code-hermit@claude-code-hermit --scope local`. Re-running the installer is harmless but moves nothing.
 
 ---
 
@@ -155,8 +155,8 @@ See [Always-On Setup](always-on.md) for the full guide — auth, channels, pausi
 **Without Docker?** You can run directly in tmux:
 
 ```bash
-.claude-code-hermit/bin/hermit-start
-.claude-code-hermit/bin/hermit-stop
+hermit start
+hermit stop
 ```
 
 To activate a channel in tmux mode, run `/claude-code-hermit:channel-setup` — it adds the channel to `config.json` if you skipped that at hatch, installs the plugin, configures the token, and guides pairing. `hermit-start` passes `--channels` automatically on boot.

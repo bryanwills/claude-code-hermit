@@ -36,7 +36,7 @@ Run the pre-flight probe once and parse its JSON: `bun ${CLAUDE_PLUGIN_ROOT}/scr
 1. If `dockerVersion` is null: "Docker isn't installed — grab it from https://docs.docker.com/get-docker/ and come back!"
 2. If `configExists` is false: "Run `/claude-code-hermit:hatch` first, then come back."
 3. If `isWSL` is true: abort — "Clone inside WSL2 (e.g. `/home/you/project`) and run from there."
-4. If `liveOwner` is non-null (`{ mode, ageSecs }`): abort: "A live `<mode>` hermit owns this project's state (activity `<ageSecs>`s ago). Stop it first with `.claude-code-hermit/bin/hermit-stop` (run it from a separate terminal if this session *is* that hermit), then re-run this skill." Drop the parenthetical when `ageSecs` is null. The container's entrypoint refuses to boot beside it and goes inert, so this must abort before anything is backed up, written, or built. Do not offer to stop it for the operator, and do not suggest `HERMIT_FORCE_BOOT=1`: that override is for split-state recovery, not for a hermit that is simply still running. If the operator reports that `hermit-stop` itself refused ("No tmux session … but state activity Ns ago"), the recorded owner is a stale record, not a live hermit — the liveness it sees is this session's own; have them follow the `pgrep -af "claude --channels"` line `hermit-stop` prints, kill any orphan it names, and re-run `hermit-stop` once nothing is left.
+4. If `liveOwner` is non-null (`{ mode, ageSecs }`): abort: "A live `<mode>` hermit owns this project's state (activity `<ageSecs>`s ago). Stop it first with `hermit stop` (run it from a separate terminal if this session *is* that hermit), then re-run this skill." Drop the parenthetical when `ageSecs` is null. The container's entrypoint refuses to boot beside it and goes inert, so this must abort before anything is backed up, written, or built. Do not offer to stop it for the operator, and do not suggest `HERMIT_FORCE_BOOT=1`: that override is for split-state recovery, not for a hermit that is simply still running. If the operator reports that `hermit-stop` itself refused ("No tmux session … but state activity Ns ago"), the recorded owner is a stale record, not a live hermit — the liveness it sees is this session's own; have them follow the `pgrep -af "claude --channels"` line `hermit-stop` prints, kill any orphan it names, and re-run `hermit-stop` once nothing is left.
 5. If any of `existing.dockerfile` / `existing.entrypoint` / `existing.compose` is true:
    - List them, then ask with `AskUserQuestion` (header: "Docker files"): **No — keep existing** (abort; remove or rename manually, then re-run) / **Yes — back up** (move to docker-backup/ and regenerate).
    - "Yes — back up" → move to `docker-backup/`, continue
@@ -352,6 +352,12 @@ docker-compose.hermit.yml      — orchestration config
 
 **Build and start:**
 
+Install the host operator command from the project root before either deployment path:
+
+```bash
+.claude-code-hermit/bin/hermit-run hermit-cli install
+```
+
 **Quick:** silently treat as `Yes — build now` and proceed directly to the build sub-section below. No prompt.
 
 **Advanced:** ask with `AskUserQuestion` (header: "Deploy"): **Yes — build now** (run hermit-docker up immediately) / **No — manual** (print commands to run later).
@@ -362,16 +368,16 @@ docker-compose.hermit.yml      — orchestration config
 Manual deployment guide
 ──────────────────────
 1. Start the container:
-   .claude-code-hermit/bin/hermit-docker up
+   hermit start
 
 2. (Subscription auth only) From a second terminal, complete login:
-   .claude-code-hermit/bin/hermit-docker login
+   hermit docker login
 
    Then, optionally (recommended), mint the long-lived token so future renewals need only a browser tap and no server access — skip it and you'll re-run `hermit-docker login` from a terminal when the `/login` credentials expire:
-   .claude-code-hermit/bin/hermit-docker setup-token
+   hermit docker setup-token
 
 3. Accept first-run prompts (press Ctrl+B D to detach when done):
-   .claude-code-hermit/bin/hermit-docker attach
+   hermit attach
 
    Screen 1 — Workspace trust: press Enter to accept.
    Screen 2 — Permission mode acknowledgement (appears for bypassPermissions AND auto; skip for acceptEdits/default/dontAsk):
@@ -382,14 +388,14 @@ Manual deployment guide
    /claude-code-hermit:channel-setup
 
 5. Verify everything is healthy:
-   .claude-code-hermit/bin/hermit-status
+   hermit status
 
 Re-run /claude-code-hermit:docker-setup any time you want guided help.
 ```
 
 **If "Yes — build now":**
 1. Pre-create all channel state directories on the host so Docker doesn't create them as root on first mount — if a bind-mount source doesn't exist, `docker compose up` creates it owned by root, making it unwritable by the `claude` user inside the container. For each configured channel run `mkdir -p .claude.local/channels/<plugin>`. Then run `mkdir -p .claude-code-hermit/state && touch .claude-code-hermit/state/.setup-mode` to put the container in setup mode (suppresses the bootstrap prompt so channel pairing commands land on an idle REPL, not a busy session turn), and `rm -f .claude-code-hermit/state/.boot-conflict` — the entrypoint only clears that marker at its own §4b guard, minutes into the boot, so a marker left by an earlier inert container would otherwise read as this boot's verdict. Then run `docker compose -f docker-compose.hermit.yml up -d --build` — builds and starts. Help fix errors (daemon not running, network, disk). Use `docker compose` directly here rather than `.claude-code-hermit/bin/hermit-docker up`: its trailing attach/detach echo is operator hand-off text, which step 9 delivers at the right moment.
-2. **Verify the container stayed running:** Poll `docker compose -f docker-compose.hermit.yml ps --status running --format '{{.Service}}'` every 2s for up to 10s, checking `.claude-code-hermit/state/.boot-conflict` on each tick. If the marker exists, the container is up but **inert**: the entrypoint found a live non-Docker instance owning this project's state and is holding PID 1 without starting claude, so `ps --status running` reports it healthy and every later step (login, trust, pairing) would run against a container with no tmux session. Show the marker's contents, then stop with: "Container is up but inert. Stop the other instance (`.claude-code-hermit/bin/hermit-stop`), then `.claude-code-hermit/bin/hermit-docker restart`." (Step 1's `liveOwner` gate catches this before the build; this poll covers a host hermit restarted mid-wizard.) An absent marker at this point is **not** an all-clear: the entrypoint writes it at §4b, after the credential wait and the first-run plugin install, so on a first boot it cannot exist yet — the first-run acceptance poll below re-checks it once the container has had time to get there. If the service appears and no marker exists — continue to the next sub-section. If it never appears after 10s, run `docker compose -f docker-compose.hermit.yml logs --tail=30 hermit` and show the output. Suggest a targeted fix based on the log:
+2. **Verify the container stayed running:** Poll `docker compose -f docker-compose.hermit.yml ps --status running --format '{{.Service}}'` every 2s for up to 10s, checking `.claude-code-hermit/state/.boot-conflict` on each tick. If the marker exists, the container is up but **inert**: the entrypoint found a live non-Docker instance owning this project's state and is holding PID 1 without starting claude, so `ps --status running` reports it healthy and every later step (login, trust, pairing) would run against a container with no tmux session. Show the marker's contents, then stop with: "Container is up but inert. Stop the other instance (`hermit stop`), then `hermit restart`." (Step 1's `liveOwner` gate catches this before the build; this poll covers a host hermit restarted mid-wizard.) An absent marker at this point is **not** an all-clear: the entrypoint writes it at §4b, after the credential wait and the first-run plugin install, so on a first boot it cannot exist yet — the first-run acceptance poll below re-checks it once the container has had time to get there. If the service appears and no marker exists — continue to the next sub-section. If it never appears after 10s, run `docker compose -f docker-compose.hermit.yml logs --tail=30 hermit` and show the output. Suggest a targeted fix based on the log:
    - **Daemon not running** → `docker info` errors → start Docker Desktop or `sudo systemctl start docker`, then re-run this skill
    - **Build failure** → read the build error line in the log above; fix the Dockerfile or missing dependency
    - **Missing `.env` var** → `docker compose -f docker-compose.hermit.yml config 2>&1 | grep -i error` names it
@@ -399,7 +405,7 @@ Re-run /claude-code-hermit:docker-setup any time you want guided help.
 **Login (subscription auth only):** If operator chose subscription auth, proceed only once the container is confirmed running. Guide them through login:
 1. Tell them: "The container is waiting for you to log in. Run this from another terminal:"
    ```
-   .claude-code-hermit/bin/hermit-docker login
+   hermit docker login
    ```
    This opens a claude REPL inside the container. Type `/login`, follow the URL in a browser, then paste the code back when prompted. Type `/exit` when done — the hermit starts automatically.
 2. Ask with `AskUserQuestion` (header: `"Login"`) — `"Done — login succeeded"` / `"Failed — couldn't complete login"`. Do **not** poll logs in a loop. Do **not** rebuild or restart the container. `hermit-docker login` already verifies `.credentials.json` and exits non-zero if absent, so a "Done" answer means creds are present.
@@ -420,22 +426,22 @@ Ask with `AskUserQuestion` (header: `"Auth method"`) — **Sign in with claude.a
    ```
    .claude-code-hermit/bin/hermit-run settings-edit .claude-code-hermit/config.json set auth_mode login
    ```
-2. Note for the summary: renewal is due in about 30 days, the hermit asks over the channel 3 days ahead, and it takes one browser tap with no server access — it stages the new sign-in and applies it on its own restart. Remote Control is available on this credential; converting to a long-lived token any time is `.claude-code-hermit/bin/hermit-docker setup-token`. Continue to first-run acceptance.
+2. Note for the summary: renewal is due in about 30 days, the hermit asks over the channel 3 days ahead, and it takes one browser tap with no server access — it stages the new sign-in and applies it on its own restart. Remote Control is available on this credential; converting to a long-lived token any time is `hermit docker setup-token`. Continue to first-run acceptance.
 
 **Long-lived token:**
 1. Tell them: "One more step and this hermit never needs server access again. Run:"
    ```
-   .claude-code-hermit/bin/hermit-docker setup-token
+   hermit docker setup-token
    ```
    It prints a sign-in link, takes the code back, writes the token to the container's config volume, and restarts the hermit. The token is never printed and never stored in `.env`.
 2. Ask with `AskUserQuestion` (header: `"Token"`) — `"Done"` / `"Failed"`. On `"Failed"`, the hermit still works on the `/login` credentials from the previous step; tell the operator that plainly and that they can retry `hermit-docker setup-token` any time. Do not block setup on it.
-3. On success, note for the summary: renewal is due in a year, the hermit will ask over the channel 3 days ahead, and it takes one browser tap with no server access. Remote Control does not work on this credential today — switching back is `.claude-code-hermit/bin/hermit-docker login`. Continue to first-run acceptance.
+3. On success, note for the summary: renewal is due in a year, the hermit will ask over the channel 3 days ahead, and it takes one browser tap with no server access. Remote Control does not work on this credential today — switching back is `hermit docker login`. Continue to first-run acceptance.
 
 **First-run acceptance (workspace trust + bypass mode):** Before asking the operator to attach, verify the tmux session exists inside the container (the entrypoint may still be installing plugins):
 ```
 docker compose -f docker-compose.hermit.yml exec -T hermit tmux has-session -t <TMUX_SESSION_NAME>
 ```
-If the session is not ready, retry every 5s until one of two **outcomes** lands: the tmux session appears (continue), or `.claude-code-hermit/state/.boot-conflict` appears (stop). This is where an inert container actually surfaces, since the entrypoint reaches its §4b guard only after the credential wait and the first-run plugin install, well past step 8.2's poll. On the marker, show its contents and stop with the same message step 8.2 uses ("Container is up but inert. Stop the other instance (`.claude-code-hermit/bin/hermit-stop`), then `.claude-code-hermit/bin/hermit-docker restart`."); do not continue to workspace trust or channel pairing. A first run installs plugins over the network, so a slow boot here is normal: give up only after 10 minutes with neither outcome, then show the last 30 lines of entrypoint logs (`docker compose logs --tail=30 hermit`) and stop.
+If the session is not ready, retry every 5s until one of two **outcomes** lands: the tmux session appears (continue), or `.claude-code-hermit/state/.boot-conflict` appears (stop). This is where an inert container actually surfaces, since the entrypoint reaches its §4b guard only after the credential wait and the first-run plugin install, well past step 8.2's poll. On the marker, show its contents and stop with the same message step 8.2 uses ("Container is up but inert. Stop the other instance (`hermit stop`), then `hermit restart`."); do not continue to workspace trust or channel pairing. A first run installs plugins over the network, so a slow boot here is normal: give up only after 10 minutes with neither outcome, then show the last 30 lines of entrypoint logs (`docker compose logs --tail=30 hermit`) and stop.
 
 Note: a running tmux session does **not** mean claude has finished booting — it may still be sitting on an acceptance screen waiting for input.
 
@@ -443,7 +449,7 @@ Once the session exists, tell the operator:
 
 > "Attach now and accept two prompts in order — claude will look frozen until you do, and later steps will misdiagnose it as a crash if you skip this:"
 > ```
-> .claude-code-hermit/bin/hermit-docker attach
+> hermit attach
 > ```
 > **Screen 1 — Workspace trust** (always): You'll see "Accessing workspace … Quick safety check: Is this a project you created or one you trust?" — press **Enter** to accept.
 >
@@ -534,22 +540,22 @@ bun ${CLAUDE_PLUGIN_ROOT}/scripts/settings-edit.ts .claude-code-hermit/config.js
 
 This only flips `.watchdog.enabled` — the other watchdog tuning keys (`stale_factor`, `wedge_floor`, `escalate_after`, `operator_grace`) are preserved, the whole config is validated, and the change lands in the settings ledger. Never write `config.json` with Edit/Write or a shell redirect; direct `Edit` calls raise an approval prompt (seeded ask rule) and skip validation and the ledger.
 
-Run `.claude-code-hermit/bin/hermit-status` and show output. `no session` is the expected output on a fresh setup — it means the container is up and will start its first session on the next cron routine or channel message. Do **not** add `sleep` before `hermit-status`; if you need to wait for a session to appear, use `Monitor` with an `until`-loop (not chained sleeps).
+Run `.claude-code-hermit/bin/hermit-status` and show output. The table reports transport, execution and its age, open and waiting task counts, and the first runnable task. Transport `up` means the `hermit` service is running; a sidecar alone reports `down`. Execution can be `unknown` until the first execution stamp appears. Do **not** add `sleep` before the status check.
 
 If healthy:
 ```
 You're all set! Your hermit is live and running autonomously.
 
-  .claude-code-hermit/bin/hermit-docker up        — start container
-  .claude-code-hermit/bin/hermit-docker down      — graceful stop (--force to skip)
-  .claude-code-hermit/bin/hermit-docker attach    — connect to tmux session
-  .claude-code-hermit/bin/hermit-docker bash      — shell into container
-  .claude-code-hermit/bin/hermit-docker login     — subscription login (first boot)
-  .claude-code-hermit/bin/hermit-docker setup-token — (optional) mint/renew the long-lived login token
-  .claude-code-hermit/bin/hermit-docker logs -f   — follow logs
-  .claude-code-hermit/bin/hermit-docker restart   — restart container
-  .claude-code-hermit/bin/hermit-docker update    — rebuild image + update plugins (durable pin move) + auto-evolve
-  .claude-code-hermit/bin/hermit-status           — quick check
+  hermit start               — start container
+  hermit stop                — graceful stop (--force to skip)
+  hermit attach              — connect to tmux session
+  hermit docker bash         — shell into container
+  hermit docker login        — subscription login (first boot)
+  hermit docker setup-token  — (optional) mint/renew the long-lived login token
+  hermit docker logs -f      — follow logs
+  hermit restart             — restart container
+  hermit update              — update host core, rebuild image, update plugins and auto-evolve
+  hermit status              — quick check
 ```
 
 If something looks wrong, help diagnose — suggest concrete next steps.
@@ -560,7 +566,7 @@ If something looks wrong, help diagnose — suggest concrete next steps.
 
 **Why `.hermit` suffix?** The project may already have its own `Dockerfile` / `docker-compose.yml`. Hermit-namespaced files avoid conflicts.
 
-**Customizing the boot: `docker-entrypoint.hermit-local.sh`.** `docker-entrypoint.hermit.sh` is hermit-managed — `hermit-evolve` replaces it whenever upstream changes, so edits there are lost on upgrade (parked as a `.bak`, and re-homed into the sidecar automatically when a baseline is available). The supported place is `<project-root>/docker-entrypoint.hermit-local.sh`, which upgrades never touch. It is **sourced** at two points, with `HERMIT_ENTRY_PHASE` naming which: `pre-boot` (channel dirs exist, env resolved, before plugins install — extra packages, env, mounts) and `pre-launch` (immediately before `hermit-start` — side services, last-second overrides). It inherits `set -euo pipefail`, so a failing command aborts the boot exactly as an in-file edit would: guard anything optional with `|| true`. It lives on the project bind mount, so edits apply on `.claude-code-hermit/bin/hermit-docker restart` with no rebuild.
+**Customizing the boot: `docker-entrypoint.hermit-local.sh`.** `docker-entrypoint.hermit.sh` is hermit-managed — `hermit-evolve` replaces it whenever upstream changes, so edits there are lost on upgrade (parked as a `.bak`, and re-homed into the sidecar automatically when a baseline is available). The supported place is `<project-root>/docker-entrypoint.hermit-local.sh`, which upgrades never touch. It is **sourced** at two points, with `HERMIT_ENTRY_PHASE` naming which: `pre-boot` (channel dirs exist, env resolved, before plugins install — extra packages, env, mounts) and `pre-launch` (immediately before `hermit-start` — side services, last-second overrides). It inherits `set -euo pipefail`, so a failing command aborts the boot exactly as an in-file edit would: guard anything optional with `|| true`. It lives on the project bind mount, so edits apply on `hermit restart` with no rebuild.
 
 **Channel state: `*_STATE_DIR` env vars and bind-mounts.** Why MCP servers need OS env rather than `settings.local.json`, and why the channel state dir is bind-mounted rather than symlinked, are in [Always-On — channel state](../../docs/always-on.md). The one thing to carry while running this skill: pre-create each `.claude.local/channels/<plugin>/` on the host **before** `docker compose up`, or Docker creates it root-owned and the `claude` user can't write to it.
 

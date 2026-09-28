@@ -31,7 +31,7 @@ A Dockerfile rendered before the operator block existed has no such markers. Add
 # --- end operator ---
 ```
 
-Then rebuild on the host: `.claude-code-hermit/bin/hermit-docker restart --build` (it needs the container running; from stopped, `.claude-code-hermit/bin/hermit-docker up --build`).
+Then rebuild on the host: `hermit restart --build` (it needs the container running; from stopped, `hermit start --build`).
 
 Tell the operator: `docker.packages` in `config.json` is read only when the templates are rendered, so setting it installs nothing on its own. Re-check the file after an upgrade.
 
@@ -46,7 +46,7 @@ The managed entrypoint sources the sidecar twice, with `HERMIT_ENTRY_PHASE` nami
 
 It inherits `set -euo pipefail`. Guard optional commands with `|| true`. Anchor every path to `${PROJECT_DIR}`, which the managed entrypoint exports: the sidecar is sourced into that shell, so a bare relative path lands in the wrong tree as soon as an earlier block has `cd`'d, and it cannot be replayed from a session with a different cwd. Create the file with `#!/usr/bin/env bash` if absent (it is sourced, so no `chmod +x`). Append; never overwrite existing content. Run `bash -n` on the file after writing it. Run the same commands once now so they take effect this session.
 
-Applies on `.claude-code-hermit/bin/hermit-docker restart`. No rebuild.
+Applies on `hermit restart`. No rebuild.
 
 Shape of an appended block:
 

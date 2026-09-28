@@ -9,7 +9,7 @@ AGENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_FILE="$AGENT_DIR/state/runtime.json"
 
 if [ ! -f "$RUNTIME_FILE" ]; then
-  echo "[hermit] No runtime found — run bin/hermit-start first." >&2
+  echo "[hermit] No runtime found — run hermit start first." >&2
   exit 1
 fi
 
@@ -30,11 +30,11 @@ case "$RUNTIME_MODE" in
     ;;
   tmux)
     if [ -z "$TMUX_SESSION" ]; then
-      echo "[hermit] No tmux session recorded — run bin/hermit-start to launch." >&2
+      echo "[hermit] No tmux session recorded — run hermit start to launch." >&2
       exit 1
     fi
     if ! tmux has-session -t "=$TMUX_SESSION" 2>/dev/null; then
-      echo "[hermit] Session \"$TMUX_SESSION\" is not alive — run bin/hermit-start to relaunch." >&2
+      echo "[hermit] Session \"$TMUX_SESSION\" is not alive — run hermit start to relaunch." >&2
       exit 1
     fi
     exec tmux attach -t "$TMUX_SESSION"
