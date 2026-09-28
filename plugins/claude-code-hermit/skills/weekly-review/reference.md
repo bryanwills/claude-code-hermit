@@ -9,7 +9,7 @@ same call and carries its own filing instructions, which this paragraph does not
 ## Inputs (read fresh — do not reuse cached values)
 
 - Every `.claude-code-hermit/compiled/topic-*.md` — read full bodies.
-- Run `task-report` (Commands) for normalized task outcomes, titles and lessons. The caller supplies the resolved plugin root. Never open frozen task records. Skip this read if no topic pages exist.
+- Run `task-report` (Commands) for normalized task outcomes, titles and lessons. Never open frozen task records. Skip this read if no topic pages exist.
 - `MEMORY.md` — operator's auto-memory index, in the directory `memory-dir` prints (its path is named in the
   dispatch) — to resolve wikilink targets.
 

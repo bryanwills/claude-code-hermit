@@ -81,8 +81,9 @@ for (const plugin of fs.readdirSync(PLUGINS)) {
       test(`${path.relative(root, file)} Commands names resolve in every reader`, () => {
         const names = [...read(file).matchAll(/`([a-z0-9]+(?:-[a-z0-9]+)*)` \(Commands\)/g)].map((match) => match[1]);
         const readers = new Set<string>();
-        if (!docs.includes(file)) readers.add(path.join(skills, path.relative(skills, file).split(path.sep)[0], 'SKILL.md'));
+        // Only evolve-runner reads hermit-evolve/reference.md; the skill just dispatches it.
         if (plugin === 'claude-code-hermit' && path.relative(skills, file) === 'hermit-evolve/reference.md') readers.add(path.join(root, 'agents/evolve-runner.md'));
+        else if (!docs.includes(file)) readers.add(path.join(skills, path.relative(skills, file).split(path.sep)[0], 'SKILL.md'));
         for (const [pair, target] of pairs) {
           if (target === file && CROSS_READERS[plugin]?.[pair] === 'commands') readers.add(path.join(skills, pair.split(' -> ')[0], 'SKILL.md'));
         }

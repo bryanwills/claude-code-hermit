@@ -27,7 +27,7 @@ Before composing any brief, determine the dispatch mode:
 
 Read these bounded digests fresh each turn. With no flag and open resident records, summarize those records in main. Otherwise dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/brief/reference.md`, passing `plugin_root` (resolved absolute path), `mode` (`morning`, `evening`, `daily`, or `default-no-session`), `today` (ISO date), and `context_recovery` for morning.
 
-Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments. Also pass `plugin_root: ${CLAUDE_PLUGIN_ROOT}` for non-command plugin files.
+Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments.
 
 Readers use `task-report.ts` for normalized task outcomes. Never open frozen session archives. If the runner fails or returns malformed JSON, use the current task list and duty digest; do not fall back to archives.
 

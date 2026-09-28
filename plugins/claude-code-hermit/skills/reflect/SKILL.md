@@ -89,7 +89,7 @@ outside that bounded evidence set needs another targeted adapter read, not an ar
 
 6. **Dispatch the eval runner.** Dispatch `claude-code-hermit:skill-eval-runner` pointed at `${CLAUDE_PLUGIN_ROOT}/skills/reflect/reference.md`. The dispatch prompt carries: this run's `Anchor:` line as its first line (`bun ${CLAUDE_PLUGIN_ROOT}/scripts/proposal.ts anchor .claude-code-hermit`; non-zero exit → rerun with the absolute state dir the error names in place of `.claude-code-hermit`, do not dispatch), `plugin_root` (resolved absolute path — `${CLAUDE_PLUGIN_ROOT}` is not substituted in `reference.md`), the precheck `phases-json`, the `last_resolution_check` cursor (from `state/reflection-state.json`), and the execution observation from `task.ts list` (controls the routine check). The `Anchor:` line's `memory_dir` is the auto-memory directory `reference.md` expects under the name `memory-dir`.
 
-Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments. Also pass `plugin_root: ${CLAUDE_PLUGIN_ROOT}` for non-command plugin files.
+   Copy this skill's Commands entries verbatim into the dispatch prompt (already absolute); the runner uses them with the reference's arguments.
 
    **Failure policy:** null/malformed runner JSON → fail open: skip the apply steps, carry forward empty candidate lists, do not advance the cursor, append `[HH:MM] reflect — analysis-runner failed; introspection-only` to the Progress Log, continue.
 

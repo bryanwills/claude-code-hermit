@@ -3,7 +3,7 @@ name: watch
 description: Background watching via the CC Monitor tool. Starts subprocesses that stream events as conversation notifications — zero token cost when quiet. Supports declared config watches (auto-registered on session start) and ad-hoc operator-invoked watches.
 ---
 
-Record notes only inside an open record's turn, using `bun ${CLAUDE_PLUGIN_ROOT}/scripts/task.ts note .claude-code-hermit <id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
+Record notes only inside an open record's turn, using `task-note` (Commands) with arguments `<id>` with the note on stdin. Otherwise skip record notes. Never edit a task file directly.
 
 # Watch
 
