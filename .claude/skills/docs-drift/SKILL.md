@@ -242,7 +242,10 @@ Ask which actionable findings to apply: all, selected finding numbers, or none.
 The audit itself is not approval to edit.
 
 For approved findings, edit only the current working tree, surgically, matching
-each document's style. Never edit a tag.
+each document's style. Never edit a tag. Shortening a doc means condensing the
+wording and keeping the content: removing a section or content block needs
+per-item operator confirmation, and install, upgrade and recovery steps always
+stay (compressed to a few lines plus a link if needed).
 
 After applying:
 
