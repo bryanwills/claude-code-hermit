@@ -6,16 +6,16 @@ Direct CLI execution outside Claude Code has no confirmation-only checkpoint; va
 
 ### Write previews
 
-Preview and relay the canonical target and request before every write. For a deploy or reboot, run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php preview-deploy <server> <site>` (or `preview-reboot`), relay the canonical target to the operator, then run the write command for native approval.
+Preview and relay the canonical target and request before every write. For a deploy or reboot, run `forge.php preview-deploy <server> <site>` (or `preview-reboot`), relay the canonical target to the operator, then run the write command for native approval.
 
 A wrong reboot causes an outage. A wrong deploy targets the wrong site.
 
 ### Tools
 
-Skills self-advertise through their own `SKILL.md` descriptions — they are not catalogued here. The curated `php forge.php` commands cover the hot paths; run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php --help` for the full catalog. Any other SDK call goes through generic dispatch: `call <method>` reads; writes need `preview <method>` then `execute <plan-id>`, a single-use hash-checked plan the operator approves. Secrets and DELETE are denied — `forge.php policy` shows the boundary. Args are a JSON array on stdin, with IDs as bare numbers (SDK params are typed ints; `strict_types` rejects `"123"`). Never pass the org slug — it is prepended automatically, except for global methods like `organizations`:
+Skills self-advertise through their own `SKILL.md` descriptions — they are not catalogued here. The curated `php forge.php` commands cover the hot paths; run `forge.php --help` for the full catalog. Any other SDK call goes through generic dispatch: `call <method>` reads; writes need `preview <method>` then `execute <plan-id>`, a single-use hash-checked plan the operator approves. Secrets and DELETE are denied — `forge.php policy` shows the boundary. Args are a JSON array on stdin, with IDs as bare numbers (SDK params are typed ints; `strict_types` rejects `"123"`). Never pass the org slug — it is prepended automatically, except for global methods like `organizations`:
 
 ```bash
-echo '[123]' | php ${CLAUDE_PLUGIN_ROOT}/php/forge.php call databases
+echo '[123]' | forge.php call databases
 ```
 
 The `forge-failed-deploys` routine routes estate findings through reflection gates into the proposal pipeline.
@@ -26,7 +26,7 @@ Anything operator-facing (deploy success/failure, escalations) is relayed via th
 
 ### Credentials
 
-- **Never `cat`, `echo`, `grep`, or Read `.env`** to check the token — run `php ${CLAUDE_PLUGIN_ROOT}/php/forge.php check` instead. It self-reports `missing`/`invalid`/`unreachable`/`ok` without revealing the value.
+- **Never `cat`, `echo`, `grep`, or Read `.env`** to check the token — run `forge.php check` instead. It self-reports `missing`/`invalid`/`unreachable`/`ok` without revealing the value.
 
 ### Secret hygiene
 

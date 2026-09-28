@@ -1,5 +1,11 @@
 # Changelog — laravel-forge-hermit
 
+## [Unreleased]
+
+### Fixed
+
+- Installed instructions use `forge.php` on the plugin PATH, preserving the caller’s project directory.
+
 ## [0.0.17] - 2026-09-25
 
 ### Added
