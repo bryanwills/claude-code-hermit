@@ -20,7 +20,7 @@ Routines `morning-brief`, `evening-brief`, `weekly-load-review`, and `monday-pla
 
 ### Conventions
 
-State and artifact wiring — activity notes, the Strava cursor, weekly load baselines, subjective notes, and the pending-RPE record — is documented in `${CLAUDE_PLUGIN_ROOT}/docs/knowledge-schema.md`.
+State and artifact wiring — activity notes, the Strava cursor, weekly load baselines, subjective notes, and the pending-RPE record — is documented in the claude-code-fitness-hermit plugin's `knowledge-schema.md` doc.
 
 ### Fitness Proposal Categories
 
