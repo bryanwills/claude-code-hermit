@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.7] - 2026-09-28
 
 ### Changed
 - `watch` loads session-watch and peer/self-exit notice procedures only when needed, with shared guards, Monitor expiry renewal and duty recording kept in the main skill
