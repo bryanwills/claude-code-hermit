@@ -54,11 +54,15 @@ export function heartbeatCommand(hermitDir: string, config: Json): string {
 /**
  * Does a registered monitor command match the one this checkout would register?
  * Claude Code can cache one release as both `<ver>` and `<ver>-<sha12>`, and a
- * session may run skills from either copy, so the root's hash suffix is ignored.
+ * session may run skills from either copy, so the root's hash suffix is ignored
+ * when only one side carries it. Two different suffixes are two different builds.
  */
+const SHA_SUFFIX = /-[0-9a-f]{12}(?="\/scripts\/)/;
 export function sameMonitorCommand(registered: unknown, expected: string): boolean {
-  const canonical = (cmd: string) => cmd.replace(/-[0-9a-f]{12}(?="\/scripts\/)/, '');
-  return typeof registered === 'string' && canonical(registered) === canonical(expected);
+  if (typeof registered !== 'string') return false;
+  if (registered === expected) return true;
+  return SHA_SUFFIX.test(registered) !== SHA_SUFFIX.test(expected)
+    && registered.replace(SHA_SUFFIX, '') === expected.replace(SHA_SUFFIX, '');
 }
 
 /**

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { checkHeartbeat, checkRoutineMonitor } from '../scripts/doctor-check';
+import { sameMonitorCommand } from '../scripts/lib/heartbeat/monitor-cmd';
 import { freshDirFactory } from './helpers/workdir';
 
 import { monitorFixture, type FixtureOpts } from './helpers/monitor-fixture';
@@ -160,6 +161,12 @@ describe('doctor monitor command drift', () => {
     registerFrom(p, (cmd) => cmd.replace('"/scripts/', '-5954e0f6849a"/scripts/'));
     expect(checkHeartbeat(p).status).toBe('ok');
     expect(checkRoutineMonitor(p).status).toBe('ok');
+  });
+
+  test('two different sha suffixes are two builds, not one release', () => {
+    const cmd = (root: string) => `bash "${root}"/scripts/monitor-supervisor.sh heartbeat "/h"`;
+    expect(sameMonitorCommand(cmd('/c/1.4.7-5954e0f6849a'), cmd('/c/1.4.7'))).toBe(true);
+    expect(sameMonitorCommand(cmd('/c/1.4.7-5954e0f6849a'), cmd('/c/1.4.7-0123456789ab'))).toBe(false);
   });
 
   test('a registration from another version dir is drift', () => {
