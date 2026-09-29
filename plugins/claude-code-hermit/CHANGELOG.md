@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Claude Sonnet 5.5 turns are costed at its own rates and no longer flagged as an unpriced model; the `sonnet` alias prices as Sonnet 5.5
+
 ## [1.4.7] - 2026-09-28
 
 ### Changed
