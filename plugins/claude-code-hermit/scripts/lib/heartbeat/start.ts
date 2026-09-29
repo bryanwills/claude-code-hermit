@@ -92,8 +92,7 @@ export async function commitHeartbeatArm(
 
 function cmdCheck(hermitDir: string, config: Json): void {
   const health = heartbeatHealth(hermitDir, config, resolveHermitNowMs());
-  const live = readJson(livenessPath(hermitDir));
-  if (health.reason === 'command-drift' && typeof live?.pid === 'number' && pidAlive(live.pid)) {
+  if (health.reason === 'restart-required') {
     process.stdout.write('RESTART_REQUIRED|command-drift\n');
     return;
   }

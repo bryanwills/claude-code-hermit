@@ -95,14 +95,39 @@ test('begin preserves native liveness', async () => {
   expect(fs.readFileSync(file, 'utf8')).toBe(before);
 });
 
-test('command drift with a live supervisor requires restart', async () => {
-  const f = fixture();
+function driftRoutineLeg(f: ReturnType<typeof fixture>, pid: number) {
   const file = path.join(f.state, 'routine-monitor.runtime.json');
   const runtime = JSON.parse(fs.readFileSync(file, 'utf8'));
   runtime.command = 'bash /old/plugin/scripts/monitor-supervisor.sh';
   fs.writeFileSync(file, JSON.stringify(runtime));
-  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ pid: process.pid }));
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ pid }));
+}
+
+test('command drift with a live supervisor requires restart', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, process.pid);
   expect((await arm(f.hermit, ['begin'])).stdout).toBe('RESTART_REQUIRED|command-drift\n');
+});
+
+test('anchor skips instead of arming when a restart is required', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, process.pid);
+  expect((await arm(f.hermit, ['anchor'])).stdout).toBe('SKIP|restart-required:routines\n');
+});
+
+test('anchor names every leg that needs a restart', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, process.pid);
+  const file = path.join(f.state, 'heartbeat-monitor.runtime.json');
+  fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), command: 'old-command' }));
+  fs.writeFileSync(path.join(f.state, 'heartbeat-liveness.json'), JSON.stringify({ pid: process.pid }));
+  expect((await arm(f.hermit, ['check'])).stdout).toBe('SKIP|restart-required:routines,heartbeat\n');
+});
+
+test('command drift with a dead supervisor still arms', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, 2147483647);
+  expect((await arm(f.hermit, ['check'])).stdout).toBe('ARM|routines|routines:command-drift\n');
 });
 
 test('both legs registered from the sha-suffixed sibling cache dir check healthy', async () => {
@@ -179,6 +204,7 @@ test('begin reset always plans, removes cursor, and renders the anchor prompt', 
   expect(result.stdout).toContain('ACTIVATE:/claude-code-hermit:monitor-activate');
   expect(result.stdout).toContain('ANCHOR_PROMPT_BEGIN\n[hermit-routine:heartbeat-restart]');
   expect(result.stdout).toContain('arm anchor');
+  expect(result.stdout).toContain('SKIP|paused, report that the resident is paused');
   expect(result.stdout).toContain('finish heartbeat-restart cron-create');
   expect(fs.existsSync(path.join(f.state, 'routine-schedule.json'))).toBe(false);
 });

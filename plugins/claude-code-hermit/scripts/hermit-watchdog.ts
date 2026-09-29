@@ -1259,19 +1259,12 @@ function bootGraceElapsed(world: World = REAL_WORLD): boolean {
   return markerAgeSecs !== null && markerAgeSecs >= BOOT_GATE_GRACE_SECS;
 }
 
-/** A live supervisor on a drifted command makes the arming verbs answer RESTART_REQUIRED, so a re-arm is futile. */
-function supervisorAlive(livenessFile: string, world: World = REAL_WORLD): boolean {
-  const live = world.files.readJson(path.join(world.paths.stateDir, livenessFile));
-  return typeof live?.pid === 'number' && pidAlive(live.pid);
-}
-
 /** Recoverable heartbeatHealth reason, or null; boot drift waits out the bootstrap grace. */
 function heartbeatMonitorStale(config: Json, world: World = REAL_WORLD): string | null {
   const health = heartbeatHealth(world.paths.hermitRoot, config, world.clock.nowMs());
   if (health.healthy) return null;
   if (health.reason === 'boot-mismatch') return bootGraceElapsed(world) ? health.reason : null;
-  if (health.reason === 'command-drift') return supervisorAlive('heartbeat-liveness.json', world) ? null : health.reason;
-  return ['liveness-stale', 'liveness-absent', 'liveness-predates-start', 'interval-drift'].includes(health.reason) ? health.reason : null;
+  return ['liveness-stale', 'liveness-absent', 'liveness-predates-start', 'interval-drift', 'command-drift'].includes(health.reason) ? health.reason : null;
 }
 
 /** Recoverable routineHealth reason, or null; fallback retains its own boot gate. */
@@ -1286,8 +1279,7 @@ function routineMonitorStale(config: Json, world: World = REAL_WORLD): string | 
   if (monitorBootStale(monRt, world)) return 'boot-mismatch';
   if (monRt.mode === 'croncreate-fallback') return null; // CronCreate fallback (no Monitor)
   const health = routineHealth(world.paths.hermitRoot, world.clock.nowMs());
-  if (health.reason === 'command-drift') return supervisorAlive('routine-monitor-liveness.json', world) ? null : health.reason;
-  return !health.healthy && ['liveness-stale', 'liveness-absent', 'liveness-predates-start', 'launch-drift'].includes(health.reason) ? health.reason : null;
+  return !health.healthy && ['liveness-stale', 'liveness-absent', 'liveness-predates-start', 'launch-drift', 'command-drift'].includes(health.reason) ? health.reason : null;
 }
 
 /** Damper open when the given re-arm timestamp is older than MONITOR_REARM_DAMPER_SECS

@@ -2682,6 +2682,19 @@ test('monitor-rearm still handles stale liveness with a live supervisor', withHe
   expect(events(h)).toContain('monitor-rearm');
 }));
 
+test('command drift with a live supervisor is not re-armed', withHermit(async (h) => {
+  writeConfig(h);
+  writeFakeTmux(h, 0);
+  writeFakePgrep(h, 1);
+  fs.writeFileSync(state(h, '.boot-id'), 'native-boot\n');
+  writeState(h, 'heartbeat-monitor.runtime.json', { command: 'bash /old/plugin/scripts/monitor-supervisor.sh', boot_id: 'native-boot', started_at: isoAgo(9) });
+  writeState(h, 'heartbeat-liveness.json', { pid: process.pid, last_peek_at: isoAgo(8) });
+  writeState(h, 'execution.json', { state: 'idle', cc_session_id: 'resident-boundary', at: new Date(Date.now() - 61000).toISOString() });
+  await watchdog(h, 'run');
+  expect(events(h)).not.toContain('monitor-rearm');
+  expect(tmuxCalls(h)).not.toContain('/claude-code-hermit:heartbeat start');
+}));
+
 test('stale heartbeat liveness → monitor-rearm event, only heartbeat start injected', withHermit(async (h) => {
   writeConfig(h); // heartbeat every 2h → threshold 6h; no routines
   // Trusted but stale: last tick 8h ago, monitor registered 9h ago.

@@ -8,7 +8,7 @@ import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { isGuest } from '../guest-marker';
 import { pidAlive } from '../lockfile';
-import { heartbeatHealth, PLUGIN_ROOT, livenessReason, sameMonitorCommand, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
+import { commandDriftReason, heartbeatHealth, PLUGIN_ROOT, livenessReason, sameMonitorCommand, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
 import { commitHeartbeatArm, prepareHeartbeatArm } from '../heartbeat/start';
 import { bootMismatch, monitorFreshness, waitForFirstTick } from '../monitor-health';
 import { isPaused } from '../pause';
@@ -119,7 +119,7 @@ function monitorHealth(ctx: Context): LegHealth {
     return { healthy: false, reason: 'boot-mismatch' };
   }
   if (!sameMonitorCommand(runtime.command, routineCommand(ctx.hermitDir)) && ctx.scheduled.length > 0) {
-    return { healthy: false, reason: 'command-drift' };
+    return { healthy: false, reason: commandDriftReason(ctx.hermitDir, 'routine-monitor-liveness.json') };
   }
   if (ctx.scheduled.length > 0 && runtime.launch !== 'native') {
     return { healthy: false, reason: 'launch-drift' };
@@ -181,7 +181,9 @@ function renderAnchorPrompt(ctx: Context): string {
   return [
     `[hermit-routine:${ANCHOR_ID}]`,
     `Run: ${cli} arm anchor ${ctx.hermitDir} ${ctx.pluginRoot}`,
-    'If the first line is SKIP, or is an ARM line whose reason starts with check-error, stop and report that line — the check could not read state, so there is nothing safe to re-arm.',
+    'If the first line is SKIP|restart-required, report that the resident must be restarted to pick up the new plugin path, and stop.',
+    'If it is SKIP|paused, report that the resident is paused and stop.',
+    'If it is any other SKIP, or is an ARM line whose reason starts with check-error, stop and report that line: the check could not read state, so there is nothing safe to re-arm.',
     'If it is HEALTHY, reply with one short healthy line and stop without TaskStop, Monitor, Cron, or file writes.',
     'If it is ARM and the legs include routines, invoke /claude-code-hermit:hermit-routines load: it arms the heartbeat leg too, so do not also invoke /claude-code-hermit:heartbeat start.',
     'If it is ARM and heartbeat is the only leg, invoke /claude-code-hermit:heartbeat start.',
@@ -210,6 +212,9 @@ function armVerdict(ctx: Context): { line: string; healthy: boolean; paused: boo
   if (routines.healthy && heartbeat.healthy) {
     return { line: `HEALTHY|${summary(ctx, heartbeat)}`, healthy: true, paused: false };
   }
+  // A restart-required leg makes `load` answer RESTART_REQUIRED for both legs, so an ARM here only wakes a futile load.
+  const restart = [routines.reason === 'restart-required' ? 'routines' : null, heartbeat.reason === 'restart-required' ? 'heartbeat' : null].filter(Boolean);
+  if (restart.length > 0) return { line: `SKIP|restart-required:${restart.join(',')}`, healthy: false, paused: false };
   const legs = [!routines.healthy ? 'routines' : null, !heartbeat.healthy ? 'heartbeat' : null].filter(Boolean);
   const reasons = [!routines.healthy ? `routines:${routines.reason}` : null, !heartbeat.healthy ? `heartbeat:${heartbeat.reason}` : null].filter(Boolean);
   return { line: `ARM|${legs.join(',')}|${reasons.join(',')}`, healthy: false, paused: false };
@@ -244,12 +249,9 @@ function cmdBegin(ctx: Context, flags: string[]): void {
   // on `--fallback`, the one path that never plans the heartbeat leg.
   const heartbeat = fallback ? null : heartbeatHealth(ctx.hermitDir, ctx.config, ctx.nowMs);
   const routines = monitorHealth(ctx);
-  for (const [health, file] of [[heartbeat, 'heartbeat-liveness.json'], [fallback ? null : routines, 'routine-monitor-liveness.json']] as const) {
-    const live = readJson(path.join(ctx.hermitDir, 'state', file));
-    if (health?.reason === 'command-drift' && typeof live?.pid === 'number' && pidAlive(live.pid)) {
-      process.stdout.write('RESTART_REQUIRED|command-drift\n');
-      return;
-    }
+  if (heartbeat?.reason === 'restart-required' || (!fallback && routines.reason === 'restart-required')) {
+    process.stdout.write('RESTART_REQUIRED|command-drift\n');
+    return;
   }
   if (heartbeat && !reset && heartbeat.healthy && routines.healthy) {
     process.stdout.write(`HEALTHY|${summary(ctx, heartbeat)}\n`);

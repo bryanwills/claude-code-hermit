@@ -37,7 +37,6 @@ import { compileCron } from './lib/cron-match';
 import { secondMostRecentMatch } from './lib/backup';
 import { findResident } from './lib/session-registry';
 import { bootMismatch } from './lib/monitor-health';
-import { pidAlive } from './lib/lockfile';
 import { routineHealth } from './lib/routines/arm';
 import { heartbeatHealth } from './lib/heartbeat/monitor-cmd';
 import { effectiveHeartbeatMode } from './lib/heartbeat/control';
@@ -1322,7 +1321,7 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
     if (health.reason === 'boot-mismatch') {
       return { id: 'heartbeat', status: 'fail', detail: 'heartbeat monitor registered by a previous boot — re-arm with /claude-code-hermit:heartbeat start' };
     }
-    if (health.reason === 'command-drift' && supervisorAlive(stateDir, 'heartbeat-liveness.json')) {
+    if (health.reason === 'restart-required') {
       return { id: 'heartbeat', status: 'warn', detail: DRIFT_RESTART_DETAIL('heartbeat monitor') };
     }
     if (['runtime-missing', 'interval-drift', 'command-drift'].includes(health.reason)) {
@@ -1364,12 +1363,6 @@ function checkHeartbeat(p: DoctorPaths = PATHS) {
   } catch (e: any) {
     return { id: 'heartbeat', status: 'fail', detail: `check failed: ${e.message}` };
   }
-}
-
-/** A live supervisor on a drifted command makes the arming verbs answer RESTART_REQUIRED, so a re-arm is futile. */
-function supervisorAlive(stateDir: string, livenessFile: string): boolean {
-  const live = readJson(path.join(stateDir, livenessFile));
-  return typeof live?.pid === 'number' && pidAlive(live.pid);
 }
 
 const DRIFT_RESTART_DETAIL = (leg: string) =>
@@ -1437,7 +1430,7 @@ function checkRoutineMonitor(p: DoctorPaths = PATHS) {
         const tickStr = lastPeekAt === null ? 'never' : `${Math.round((now - lastPeekAt) / 60000)}m ago${health.reason === 'liveness-predates-start' ? ' (predates current monitor — stale)' : ''}`;
         return { id: 'routine-monitor', status: 'fail', detail: `routine-monitor not ticking — Monitor subprocess spawn likely blocked (seccomp / nested-userns in container). Last tick: ${tickStr}.` };
       }
-      if (health.reason === 'command-drift' && supervisorAlive(stateDir, 'routine-monitor-liveness.json')) {
+      if (health.reason === 'restart-required') {
         return { id: 'routine-monitor', status: 'warn', detail: DRIFT_RESTART_DETAIL('routine-monitor') };
       }
       const rearm = ['runtime-missing', 'command-drift', 'launch-drift', 'anchor-drift', 'anchor-old'].includes(health.reason)

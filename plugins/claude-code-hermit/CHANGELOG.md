@@ -20,6 +20,7 @@
 - Docker setup explains transport and execution status separately instead of treating absent session state as healthy.
 - Doctor and the routine anchor no longer report heartbeat and routine-monitor `command-drift` when the plugin runs from Claude Code's identical `<version>-<sha>` cache copy
 - Doctor warns to restart the resident on `command-drift` with a live supervisor, instead of failing with re-arm advice the verbs refuse
+- The daily routine anchor answers `SKIP|restart-required` on `command-drift` with a live supervisor, instead of waking a routine load that can only report a restart
 
 ### Upgrade Instructions
 1. On Docker hosts, rerun `.claude-code-hermit/bin/hermit-docker update` once from the project root on the host. The refreshed wrapper bootstraps the host core if needed and installs `hermit` after the update.
