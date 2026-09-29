@@ -207,7 +207,7 @@ function emitGuestBanner(agentDir: string): void {
     const peerName = residentPeerName(agentDir);
     console.log(`---Guest Session--- A managed hermit session is already running here.${peerName ? ` Resident: @${safe(peerName)}. SendMessage it GUEST_REPORT: when finished.` : ''} Work normally; resident duties belong to the hermit.`);
   } else {
-    console.log('---Guest Session--- Start the resident with .claude-code-hermit/bin/hermit-start.');
+    console.log('---Guest Session--- Start the resident with hermit start.');
   }
 }
 

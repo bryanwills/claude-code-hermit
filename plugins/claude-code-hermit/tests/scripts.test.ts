@@ -190,7 +190,7 @@ describe('static file checks', () => {
   });
 
   test('hermit-docker update refreshes marketplaces (core first), then moves the pin', () => {
-    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-docker'), 'utf8');
+    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hermit-docker.sh'), 'utf8');
     // Durable `plugin update` per plugin with explicit scope...
     expect(src).toContain('claude plugin update');
     expect(src).toContain('--scope');
@@ -207,7 +207,7 @@ describe('static file checks', () => {
   });
 
   test('hermit-update refreshes marketplaces (core first), then moves the pin', () => {
-    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-update'), 'utf8');
+    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hermit-update.sh'), 'utf8');
     expect(src).toContain('claude plugin update');
     expect(src).toContain('--scope');
     const marketplaceIdx = src.indexOf('claude plugin marketplace update');
@@ -219,7 +219,7 @@ describe('static file checks', () => {
   });
 
   test('hermit-docker warns when the container runs a stale baked entrypoint', () => {
-    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-docker'), 'utf8');
+    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hermit-docker.sh'), 'utf8');
     // The guard content-hashes the on-disk entrypoint against the image's baked copy.
     expect(src).toContain('_warn_if_entrypoint_stale()');
     expect(src).toContain('/home/claude/docker-entrypoint.sh');
@@ -232,11 +232,11 @@ describe('static file checks', () => {
     // `update` warns only in --plugins-only mode (rebuild modes fix it inline).
     expect(src).toContain('[ "$PLUGINS_ONLY" = true ] && _warn_if_entrypoint_stale');
     // ...and flags a needed second rebuild when the async evolve chain ran.
-    expect(src).toContain('run \'hermit-docker update\' once more');
+    expect(src).toContain('run \'hermit update\' once more');
   });
 
   test('hermit-docker setup-token gates on the container core version', () => {
-    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-docker'), 'utf8');
+    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hermit-docker.sh'), 'utf8');
     expect(src).toContain('_require_core_version_at_least()');
     expect(src).toContain('sort -V');
     // The gate runs before the mint dispatch, so a stale clone is caught up front.
@@ -248,7 +248,7 @@ describe('static file checks', () => {
   });
 
   test('hermit-docker login switches a running hermit through the staged relay', () => {
-    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-docker'), 'utf8');
+    const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hermit-docker.sh'), 'utf8');
     const login = src.slice(src.indexOf('\n  login)'), src.indexOf('\n  logs)'));
 
     // A running container already has a tmux server, so the sign-in goes through the
@@ -276,8 +276,7 @@ describe('static file checks', () => {
     const src = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'hermit-exec.sh'), 'utf8');
     expect(src).not.toContain('may be corrupted');
     expect(src).toContain('may predate this command');
-    expect(src).toContain('hermit-docker update');
-    expect(src).toContain('claude plugin update claude-code-hermit');
+    expect(src).toContain('hermit update');
   });
 });
 
@@ -294,7 +293,7 @@ describe('hermit-docker running-container gate', () => {
     fs.mkdirSync(binDir, { recursive: true });
     fs.mkdirSync(stateDir, { recursive: true });
 
-    for (const name of ['hermit-docker', 'hermit-attach']) {
+    for (const name of ['hermit-docker', 'hermit-attach', 'hermit-run']) {
       const dest = path.join(binDir, name);
       fs.copyFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', name), dest);
       fs.chmodSync(dest, 0o755);
@@ -341,6 +340,7 @@ exit 0
       callsFile,
       env: {
         PATH: `${stubDir}:${process.env.PATH}`,
+        HERMIT_PLUGIN_ROOT: PLUGIN_ROOT, HOME: proj, CLAUDE_CONFIG_DIR: path.join(proj, 'config'), CLAUDE_CODE_PLUGIN_CACHE_DIR: path.join(proj, 'plugins'),
         DOCKER_STUB_CALLS: callsFile,
         DOCKER_STUB_MODE: mode,
       },
@@ -376,7 +376,7 @@ exit 0
         });
         expect(r.exitCode).toBe(1);
         expect(r.stderr).toContain('[hermit] Container is not running. Start it first:');
-        expect(r.stderr).toContain('.claude-code-hermit/bin/hermit-docker up');
+        expect(r.stderr).toContain('hermit start');
         expect(r.stderr).not.toContain('Could not query Docker Compose');
       }
     } finally {
@@ -443,6 +443,8 @@ describe('hermit-update host path', () => {
       path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-update'),
       path.join(binDir, 'hermit-update'),
     );
+    fs.copyFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-run'), hermit(proj, 'bin', 'hermit-run'));
+    fs.chmodSync(hermit(proj, 'bin', 'hermit-run'), 0o755);
     write(hermit(proj, 'config.json'),
       JSON.stringify({ tmux_session_name: 'hermit-{project_name}', _hermit_versions: { 'claude-code-hermit': '1.2.0' } }));
 
@@ -463,7 +465,7 @@ describe('hermit-update host path', () => {
     fs.chmodSync(path.join(stub, 'claude'), 0o755);
     fs.chmodSync(path.join(stub, 'tmux'), 0o755);
 
-    return { wd, proj, recFile, mpRecFile, env: { PATH: `${stub}:${process.env.PATH}` } };
+    return { wd, proj, recFile, mpRecFile, env: { HERMIT_PLUGIN_ROOT: PLUGIN_ROOT, HOME: proj, CLAUDE_CONFIG_DIR: path.join(proj, 'config'), CLAUDE_CODE_PLUGIN_CACHE_DIR: path.join(proj, 'plugins'), PATH: `${stub}:${process.env.PATH}` } };
   }
 
   const listThreeScopes = (proj: string) => JSON.stringify([
@@ -471,6 +473,32 @@ describe('hermit-update host path', () => {
     { id: 'some-user@official', scope: 'user', enabled: true, version: '0.5.0', projectPath: '/elsewhere' },
     { id: 'cross@mp', scope: 'local', enabled: true, version: '9.9.9', projectPath: '/other/project' },
   ]);
+
+  test('stale host core bootstraps once through claude', async () => {
+    const f = fixture({ listJson: listThreeScopes });
+    try {
+      const core = path.join(f.proj, 'plugins/marketplaces/test-mp/plugins/claude-code-hermit');
+      fs.mkdirSync(path.join(core, '.claude-plugin'), { recursive: true });
+      fs.mkdirSync(path.join(core, 'scripts'), { recursive: true });
+      write(path.join(core, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'claude-code-hermit' }));
+      fs.copyFileSync(path.join(PLUGIN_ROOT, 'scripts/hermit-exec.sh'), path.join(core, 'scripts/hermit-exec.sh'));
+      const claude = path.join(f.proj, '.stub/claude');
+      write(claude, `#!/usr/bin/env bash
+if [ "$1 $2" = "plugin list" ]; then
+  printf '[{"id":"claude-code-hermit@test-mp","scope":"local","enabled":true,"projectPath":"%s","installPath":"%s"}]\\n' "$PWD" "$HERMIT_PLUGIN_ROOT"
+  exit 0
+fi
+printf '%s\\n' "$*" >> "$BOOTSTRAP_LOG"
+printf 'printf "bootstrapped\\n"\\n' > "$HERMIT_PLUGIN_ROOT/scripts/hermit-update.sh"
+`);
+      const r = await runBash(hermit(f.proj, 'bin', 'hermit-update'), {
+        cwd: f.proj, env: { ...f.env, HERMIT_PLUGIN_ROOT: core, BOOTSTRAP_LOG: f.recFile },
+      });
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toContain('bootstrapped');
+      expect(fs.readFileSync(f.recFile, 'utf8').trim()).toBe('plugin update claude-code-hermit@test-mp --scope local');
+    } finally { f.wd.cleanup(); }
+  });
 
   test('updates project plugin with full id + scope; skips user + cross-project', async () => {
     const f = fixture({ listJson: listThreeScopes });
@@ -558,6 +586,8 @@ describe('hermit-docker up host tmux guard', () => {
     fs.mkdirSync(hermit(proj, 'bin'), { recursive: true });
     fs.mkdirSync(hermit(proj, 'state'), { recursive: true });
     fs.copyFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-docker'), hermit(proj, 'bin', 'hermit-docker'));
+    fs.copyFileSync(path.join(PLUGIN_ROOT, 'state-templates', 'bin', 'hermit-run'), hermit(proj, 'bin', 'hermit-run'));
+    fs.chmodSync(hermit(proj, 'bin', 'hermit-run'), 0o755);
     write(hermit(proj, 'config.json'), JSON.stringify({ tmux_session_name: 'hermit-demo' }));
     write(path.join(proj, 'docker-compose.hermit.yml'), 'services: {}\n');
     write(hermit(proj, 'state', 'runtime.json'), JSON.stringify(runtime));
@@ -570,7 +600,7 @@ describe('hermit-docker up host tmux guard', () => {
     for (const f of ['docker', 'tmux', 'sleep']) fs.chmodSync(path.join(stub, f), 0o755);
     try {
       const r = await runBash(hermit(proj, 'bin', 'hermit-docker'), {
-        args: [cmd], cwd: proj, env: { PATH: `${stub}:${process.env.PATH}`, ...env },
+        args: [cmd], cwd: proj, env: { HERMIT_PLUGIN_ROOT: PLUGIN_ROOT, HOME: proj, CLAUDE_CONFIG_DIR: path.join(proj, 'config'), CLAUDE_CODE_PLUGIN_CACHE_DIR: path.join(proj, 'plugins'), PATH: `${stub}:${process.env.PATH}`, ...env },
       });
       const calls = fs.existsSync(dockerLog) ? fs.readFileSync(dockerLog, 'utf8') : '';
       return { ...r, booted: calls.includes('up -d') };

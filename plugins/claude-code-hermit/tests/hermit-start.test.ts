@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  registerHostProjectOnBoot,
   DEFAULT_CONFIG,
   loadConfig,
   getEnabledChannels,
@@ -478,8 +479,8 @@ describe('duplicateSessionRefusal', () => {
     const text = lines!.join('\n');
     expect(text).toContain('hermit-proj');
     expect(text).toContain('state/runtime.json is missing');
-    expect(text).toContain('.claude-code-hermit/bin/hermit-stop');
-    expect(text).toContain('.claude-code-hermit/bin/hermit-start');
+    expect(text).toContain('hermit stop');
+    expect(text).toContain('hermit start');
   });
 
   // The stub an interrupted hermit-stop leaves behind: updateRuntimeField() seeds
@@ -2219,4 +2220,15 @@ test('both launch paths set launcher-only residency', () => {
   const src = fs.readFileSync(HERMIT_START_TS, 'utf8');
   expect(src).toContain("process.env.HERMIT_RESIDENT = '1';");
   expect(src).toContain('export HERMIT_RESIDENT=1');
+});
+
+test('host registry failure is non-fatal at startup', () => {
+  const prior = process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR;
+  const blocked = path.join(tmpdir, 'blocked');
+  fs.writeFileSync(blocked, 'not a directory');
+  fs.mkdirSync(path.join(tmpdir, '.claude-code-hermit'), { recursive: true });
+  fs.writeFileSync(path.join(tmpdir, '.claude-code-hermit/config.json'), '{}');
+  process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR = blocked;
+  try { expect(() => registerHostProjectOnBoot(tmpdir, path.join(tmpdir, 'cache/mp/claude-code-hermit/1'))).not.toThrow(); }
+  finally { if (prior === undefined) delete process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR; else process.env.CLAUDE_CODE_PLUGIN_CACHE_DIR = prior; }
 });

@@ -131,7 +131,7 @@ describe('final next-steps keys off deployment', () => {
   });
 
   test('tmux points at the boot script', () => {
-    expect(renderFinal(observe(hatched()), 'tmux')).toContain('bin/hermit-start');
+    expect(renderFinal(observe(hatched()), 'tmux')).toContain('hermit start');
   });
 
   test('interactive points at resident-start', () => {

@@ -37,7 +37,7 @@ add superpowers obra/superpowers-marketplace
 Then restart the container to install it:
 
 ```bash
-.claude-code-hermit/bin/hermit-docker restart
+hermit restart
 ```
 
 ---
@@ -84,4 +84,4 @@ All enabled session checks run once per task completion. Unavailable or failing 
 | Enable during Docker setup | `/docker-setup` wizard step 7b |
 | Enable/disable after setup | `/hermit-settings docker` |
 | Check what's installed | `docker exec <container> claude plugin list` |
-| Force reinstall | Remove the cache dir and restart: `.claude-code-hermit/bin/hermit-docker restart` |
+| Force reinstall | Remove the cache dir and restart: `hermit restart` |

@@ -343,9 +343,9 @@ Ask with `AskUserQuestion` (header: `"Ports conflict"`):
 Cannot start container — docker-compose.hermit.yml still publishes ports on hermit.
 Those ports are now published by hermit-netguard via the overlay.
 Delete the `ports:` block from docker-compose.hermit.yml, then run:
-  .claude-code-hermit/bin/hermit-docker up
+  hermit start
 ```
-Stop here. Tell the operator: "Overlay and config have been written — just delete the base `ports:` block first, then run `.claude-code-hermit/bin/hermit-docker up`."
+Stop here. Tell the operator: "Overlay and config have been written — just delete the base `ports:` block first, then run `hermit start`."
 
 If operator chose to restart now AND container was running before this skill (and the hard gate passed):
 

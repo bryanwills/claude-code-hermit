@@ -128,6 +128,38 @@ stop_session() {
 
 # ----------------------------------------------------------------- plugin ----
 
+remove_host_registration() {
+  local wrapper
+  wrapper=".claude-code-hermit/bin/hermit-run"
+  if [ -x "$wrapper" ]; then
+    if ! "$wrapper" hermit-cli prune "$PROJECT_ROOT"; then
+      record_failure "host registry cleanup failed" "registry" "could not remove this project's registration"
+    fi
+  elif [ -f "$wrapper" ]; then
+    record_failure "host registry wrapper is not executable" "registry" "could not run $wrapper"
+  fi
+}
+
+remove_unused_host_shim() {
+  local shim installs
+  shim="$HOME/.local/bin/hermit"
+  [ -f "$shim" ] || return 0
+  grep -Fxq '# claude-code-hermit: managed host CLI' "$shim" || return 0
+  # Failure to inspect is not evidence that the last core install is gone.
+  installs="$(claude plugin list --json 2>/dev/null)" || return 0
+  if printf '%s' "$installs" | bun -e '
+    try {
+      const rows = JSON.parse(require("fs").readFileSync(0, "utf8"));
+      if (!Array.isArray(rows) || rows.some(p => typeof p.id !== "string")) process.exit(1);
+      process.exit(rows.some(p => p.id.startsWith("claude-code-hermit@")) ? 1 : 0);
+    } catch { process.exit(1); }
+  '; then
+    if ! rm "$shim"; then
+      record_failure "host shim cleanup failed" "host CLI" "could not remove $shim"
+    fi
+  fi
+}
+
 uninstall_plugin() {
   local local_output project_output combined
 
@@ -273,7 +305,9 @@ main() {
 
   remove_watchdog
   stop_session
+  remove_host_registration
   uninstall_plugin
+  remove_unused_host_shim
   maybe_delete_state
   print_cleanup_prompt
   print_auto_memory_notice
