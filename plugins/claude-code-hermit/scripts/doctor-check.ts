@@ -1373,7 +1373,7 @@ function supervisorAlive(stateDir: string, livenessFile: string): boolean {
 }
 
 const DRIFT_RESTART_DETAIL = (leg: string) =>
-  `${leg} command-drift: its supervisor still runs the previous plugin path; restart the resident to pick up the new one`;
+  `${leg} command-drift: its supervisor is still running; restart the resident to re-register it`;
 
 // Routine fallback owns its boot gate; monitor mode consumes the arming verdict.
 function checkRoutineMonitor(p: DoctorPaths = PATHS) {
