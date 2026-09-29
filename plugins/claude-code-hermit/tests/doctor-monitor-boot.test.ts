@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { checkHeartbeat, checkRoutineMonitor } from '../scripts/doctor-check';
+import { sameMonitorCommand } from '../scripts/lib/heartbeat/monitor-cmd';
 import { freshDirFactory } from './helpers/workdir';
 
 import { monitorFixture, type FixtureOpts } from './helpers/monitor-fixture';
@@ -134,6 +135,64 @@ describe('doctor heartbeat startup graces', () => {
     const p = fixture();
     seed(p, 60, 70, 7200);
     expect(checkHeartbeat(p).status).toBe('ok');
+  });
+});
+
+// Claude Code can cache one release as `<ver>` and `<ver>-<sha12>`; which copy runs
+// the check must not decide drift.
+describe('doctor monitor command drift', () => {
+  function registerFrom(p: ReturnType<typeof fixture>, rewrite: (cmd: string) => string, pid?: number) {
+    for (const [runtime, liveness] of [
+      ['heartbeat-monitor.runtime.json', 'heartbeat-liveness.json'],
+      ['routine-monitor.runtime.json', 'routine-monitor-liveness.json'],
+    ]) {
+      const file = path.join(p.stateDir, runtime);
+      const rt = JSON.parse(fs.readFileSync(file, 'utf8'));
+      writeJson(file, { ...rt, command: rewrite(rt.command) });
+      if (pid !== undefined) {
+        const live = path.join(p.stateDir, liveness);
+        writeJson(live, { ...JSON.parse(fs.readFileSync(live, 'utf8')), pid });
+      }
+    }
+  }
+
+  test('a registration from the sha-suffixed sibling cache dir is not drift', () => {
+    const p = fixture();
+    registerFrom(p, (cmd) => cmd.replace('"/scripts/', '-5954e0f6849a"/scripts/'));
+    expect(checkHeartbeat(p).status).toBe('ok');
+    expect(checkRoutineMonitor(p).status).toBe('ok');
+  });
+
+  test('two different sha suffixes are two builds, not one release', () => {
+    const cmd = (root: string) => `bash "${root}"/scripts/monitor-supervisor.sh heartbeat "/h"`;
+    expect(sameMonitorCommand(cmd('/c/1.4.7-5954e0f6849a'), cmd('/c/1.4.7'))).toBe(true);
+    expect(sameMonitorCommand(cmd('/c/1.4.7-5954e0f6849a'), cmd('/c/1.4.7-0123456789ab'))).toBe(false);
+  });
+
+  test('a registration from another version dir is drift', () => {
+    const p = fixture();
+    registerFrom(p, (cmd) => cmd.replace('"/scripts/', '-1.4.6"/scripts/'));
+    expect(checkHeartbeat(p).detail).toContain('command-drift');
+    expect(checkRoutineMonitor(p).detail).toContain('command-drift');
+  });
+
+  test('drift with a live supervisor warns to restart the resident', () => {
+    const p = fixture({ commandDrift: true });
+    registerFrom(p, (cmd) => cmd, process.pid);
+    for (const r of [checkHeartbeat(p), checkRoutineMonitor(p)]) {
+      expect(r.status).toBe('warn');
+      expect(r.detail).toContain('restart the resident');
+    }
+  });
+
+  test('drift with no live supervisor still fails with re-arm advice', () => {
+    const p = fixture({ commandDrift: true });
+    const heartbeat = checkHeartbeat(p);
+    expect(heartbeat.status).toBe('fail');
+    expect(heartbeat.detail).toContain('/claude-code-hermit:heartbeat start');
+    const routine = checkRoutineMonitor(p);
+    expect(routine.status).toBe('fail');
+    expect(routine.detail).toContain('/claude-code-hermit:hermit-routines load');
   });
 });
 
