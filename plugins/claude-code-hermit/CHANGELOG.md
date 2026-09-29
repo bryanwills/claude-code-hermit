@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.8] - 2026-09-29
 
 ### Added
 - The host `hermit` command provides `start`, `stop`, `restart`, `attach`, `update`, `docker`, `pause`, `watchdog`, and `run` from any folder with an optional registered project or agent name.
