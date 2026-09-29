@@ -115,6 +115,15 @@ test('anchor skips instead of arming when a restart is required', async () => {
   expect((await arm(f.hermit, ['anchor'])).stdout).toBe('SKIP|restart-required:routines\n');
 });
 
+test('anchor names every leg that needs a restart', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, process.pid);
+  const file = path.join(f.state, 'heartbeat-monitor.runtime.json');
+  fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, 'utf8')), command: 'old-command' }));
+  fs.writeFileSync(path.join(f.state, 'heartbeat-liveness.json'), JSON.stringify({ pid: process.pid }));
+  expect((await arm(f.hermit, ['check'])).stdout).toBe('SKIP|restart-required:routines,heartbeat\n');
+});
+
 test('command drift with a dead supervisor still arms', async () => {
   const f = fixture();
   driftRoutineLeg(f, 2147483647);
