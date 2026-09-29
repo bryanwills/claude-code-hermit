@@ -204,6 +204,7 @@ test('begin reset always plans, removes cursor, and renders the anchor prompt', 
   expect(result.stdout).toContain('ACTIVATE:/claude-code-hermit:monitor-activate');
   expect(result.stdout).toContain('ANCHOR_PROMPT_BEGIN\n[hermit-routine:heartbeat-restart]');
   expect(result.stdout).toContain('arm anchor');
+  expect(result.stdout).toContain('SKIP|paused, report that the resident is paused');
   expect(result.stdout).toContain('finish heartbeat-restart cron-create');
   expect(fs.existsSync(path.join(f.state, 'routine-schedule.json'))).toBe(false);
 });

@@ -182,6 +182,7 @@ function renderAnchorPrompt(ctx: Context): string {
     `[hermit-routine:${ANCHOR_ID}]`,
     `Run: ${cli} arm anchor ${ctx.hermitDir} ${ctx.pluginRoot}`,
     'If the first line is SKIP|restart-required, report that the resident must be restarted to pick up the new plugin path, and stop.',
+    'If it is SKIP|paused, report that the resident is paused and stop.',
     'If it is any other SKIP, or is an ARM line whose reason starts with check-error, stop and report that line: the check could not read state, so there is nothing safe to re-arm.',
     'If it is HEALTHY, reply with one short healthy line and stop without TaskStop, Monitor, Cron, or file writes.',
     'If it is ARM and the legs include routines, invoke /claude-code-hermit:hermit-routines load: it arms the heartbeat leg too, so do not also invoke /claude-code-hermit:heartbeat start.',
