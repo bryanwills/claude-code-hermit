@@ -28,6 +28,7 @@ import { frontmatterBlock, isModelInvocationDisabled } from './helpers/skill-fro
 import { validateCronSchedule, validate } from '../scripts/validate-config';
 import { resolve, resolveMaintainerTarget } from '../scripts/resolve-outbound-channel';
 import { resolvePaths, checkConfig } from '../scripts/doctor-check';
+import { PRICING_VERIFIED } from '../scripts/lib/pricing';
 
 const SCRIPTS = path.join(PLUGIN_ROOT, 'scripts');
 const SKILLS = path.join(PLUGIN_ROOT, 'skills');
@@ -2930,21 +2931,21 @@ describe('doctor model-pricing-known check', () => {
     writeConfig(dir, { ...BASE_CONFIG, model: 'claude-opus-4-8' });
     const report = await runDoctorCheck(dir);
     expect(priceCheck(report).status).toBe('ok');
-    expect(priceCheck(report).detail).toContain('pricing verified 2026-09-29');
+    expect(priceCheck(report).detail).toContain(`pricing verified ${PRICING_VERIFIED}`);
   }), 20000);
 
   test('dated haiku snapshot is priced; unknown id is named', withTmpdir(async (dir) => {
     writeConfig(dir, { ...BASE_CONFIG, model: 'claude-haiku-4-5-20251001' });
     const okReport = await runDoctorCheck(dir);
     expect(priceCheck(okReport).status).toBe('ok');
-    expect(priceCheck(okReport).detail).toContain('pricing verified 2026-09-29');
+    expect(priceCheck(okReport).detail).toContain(`pricing verified ${PRICING_VERIFIED}`);
 
     writeConfig(dir, { ...BASE_CONFIG, model: 'claude-nova-9' });
     const warnReport = await runDoctorCheck(dir);
     const c = priceCheck(warnReport);
     expect(c.status).toBe('warn');
     expect(c.detail).toContain('claude-nova-9');
-    expect(c.detail).toContain('pricing verified 2026-09-29');
+    expect(c.detail).toContain(`pricing verified ${PRICING_VERIFIED}`);
   }), 20000);
 
   test('unknown routine model → warn naming the routine', withTmpdir(async (dir) => {

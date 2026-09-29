@@ -25,7 +25,7 @@ describe('resolvePricing', () => {
   test('tier alias sonnet → sonnet-5-5, not exact', () => {
     const r = resolvePricing('sonnet');
     expect(r.exact).toBe(false);
-    expect(r.rates).toEqual(PRICING['claude-sonnet-5-5']);
+    expect(r.rates).toBe(PRICING['claude-sonnet-5-5']);
   });
 
   test('claude-opus-5-5 is exact', () => {
