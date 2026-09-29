@@ -1,5 +1,9 @@
 # Troubleshooting
 
+## `hermit` runs a different tool
+
+Use `~/.local/bin/hermit` or adjust PATH so `~/.local/bin` comes before the other tool. The installer reports both paths and never overwrites a foreign `~/.local/bin/hermit`.
+
 ---
 
 ## Channels Not Responding
@@ -44,7 +48,7 @@ Periodic plugin checks are ordinary routines. For example, a weekly check uses `
 
 **Fixed in hermit-start.ts** (v1.0.16+): the env file written before launching the tmux session now derives and exports `CLAUDE_PLUGIN_ROOT` from hermit-start.ts's own location. Upgrade hermit to get the fix; no operator action needed.
 
-**If still occurring after upgrade:** verify the always-on session was restarted (Docker: `.claude-code-hermit/bin/hermit-docker down && .claude-code-hermit/bin/hermit-docker up`; tmux: stop the running `bin/hermit-start` session and relaunch). The env file is only written at launch.
+**If still occurring after upgrade:** verify the always-on session was restarted (Docker: `hermit stop && hermit start`; tmux: stop the running `hermit start` session and relaunch). The env file is only written at launch.
 
 ---
 
@@ -142,7 +146,7 @@ Common causes:
 - **Network issues during build:** `apt-get` or `npm install` fails. Check your network, proxy settings, and Docker DNS config.
 - **npm permission errors:** Claude Code installs globally. The Dockerfile sets `NPM_CONFIG_PREFIX` for the `claude` user — if you modified the Dockerfile, ensure this is preserved.
 - **Ubuntu 26.04 default user conflict:** UID 1000 is taken by the default `ubuntu` user. The generated Dockerfile runs `userdel -r ubuntu` first — don't remove this line.
-- **Rebuild after config changes:** setting `docker.packages` in config.json installs nothing on its own — the list is read only when the Docker templates are rendered. Add the package inside the operator block of `Dockerfile.hermit`, then rebuild: `.claude-code-hermit/bin/hermit-docker restart --build` (it needs the container running; from stopped, `.claude-code-hermit/bin/hermit-docker up --build`). See [Customizing the container](always-on.md#customizing-the-container).
+- **Rebuild after config changes:** setting `docker.packages` in config.json installs nothing on its own — the list is read only when the Docker templates are rendered. Add the package inside the operator block of `Dockerfile.hermit`, then rebuild: `hermit restart --build` (it needs the container running; from stopped, `hermit start --build`). See [Customizing the container](always-on.md#customizing-the-container).
 
 ## Upgrade Says Nothing to Update
 
@@ -156,7 +160,7 @@ Common causes:
 Check logs first:
 
 ```bash
-.claude-code-hermit/bin/hermit-docker logs
+hermit docker logs
 ```
 
 Common causes:
@@ -183,11 +187,11 @@ To check or drive it yourself:
 
 ```bash
 # What auth is this hermit on, and when does it expire?
-.claude-code-hermit/bin/hermit-docker bash -c \
+hermit docker bash -c \
   '.claude-code-hermit/bin/hermit-run setup-token-mint status'
 
 # Renew from the terminal instead of over chat
-.claude-code-hermit/bin/hermit-docker setup-token
+hermit docker setup-token
 ```
 
 Notes:

@@ -60,7 +60,7 @@ After setup, follow the printed next steps to start your agent.
 Run in a persistent tmux session:
 
 ```bash
-.claude-code-hermit/bin/hermit-start
+hermit start
 ```
 
 Requires tmux. The watchdog recovers failed sessions while your machine stays on. Claude Code's `/sandbox` is recommended for unattended use. To connect a chat, run `/claude-code-hermit:channel-setup` as directed by the setup handoff.
@@ -247,12 +247,11 @@ You can run separate agents for different responsibilities, each with its own wo
 
 ## Upgrading
 
-From the project folder, run the command for your setup:
+Run `hermit update` from the project folder, or `hermit update <name>` from anywhere. Docker updates refresh the host core first, then the container.
 
-| Setup | Command |
-|-------|---------|
-| On your machine | `.claude-code-hermit/bin/hermit-update` |
-| Docker | `.claude-code-hermit/bin/hermit-docker update` |
+`hermit list` shows registered and discovered hermits on this host, including stopped and missing projects. `hermit status [name]` shows transport, execution and its age, open and waiting tasks, and the first runnable task. Both support `--json`. Listing never removes entries; `hermit prune` removes missing projects.
+
+Use `hermit start|stop|restart|attach [name]` for lifecycle commands, `hermit pause [name] on|off|snooze <duration>|status`, `hermit watchdog [name] run|install|uninstall`, or `hermit run [name] <script> [args]` for maintenance. Names match the project folder or agent name; with no name, the nearest project above the current folder is used.
 
 See the [Upgrade guide](plugins/claude-code-hermit/docs/upgrading.md) for details.
 

@@ -12,14 +12,14 @@ From the project root, run the wrapper for your deployment: it moves the durable
 
 ```bash
 # Docker hermits:
-.claude-code-hermit/bin/hermit-docker update
+hermit update
 # Local / tmux hermits:
-.claude-code-hermit/bin/hermit-update
+hermit update
 ```
 
 Always-on hermits do this on their own: the resident-start upgrade banner triggers `hermit-evolve unattended` automatically.
 
-After a host `.claude-code-hermit/bin/hermit-update`, stop the running resident with `.claude-code-hermit/bin/hermit-stop`, then start it with `.claude-code-hermit/bin/hermit-start --resume` so the launch overlay is rewritten. Both update commands send `/reload-plugins`, which drops `pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify` from the running session while the previous overlay has none. Docker hermits need nothing else.
+After a host `hermit update`, stop the running resident with `hermit stop`, then start it with `hermit start --resume` so the launch overlay is rewritten. Both update commands send `/reload-plugins`, which drops `pause-gate`, `ask-gate`, `component-privacy`, and `permission-denied-notify` from the running session while the previous overlay has none. Docker hermits need nothing else.
 
 ### Manual
 
@@ -57,7 +57,7 @@ If session start reports `---Stale Plugin Runtime---`, the session is running a 
 claude plugin update claude-code-hermit@claude-code-hermit --scope <local|project|user>
 ```
 
-Then restart the session. A scope-less `plugin update` targets the default scope and can leave the stale entry in place. If the notice appears when running `bin/hermit-start` instead, it is the marketplace clone that lags: `claude plugin marketplace update claude-code-hermit`.
+Then restart the session. A scope-less `plugin update` targets the default scope and can leave the stale entry in place. If the notice appears when running `hermit start` instead, it is the marketplace clone that lags: `claude plugin marketplace update claude-code-hermit`.
 
 **Deliberately rolling back to an older core?** The applied-version stamp in `_hermit_versions` only moves forward — `evolve-finalize` refuses to lower it (`core_version_regression`), because lowering it would claim migrations were reversed when nothing reversed them. A genuine rollback needs the stamp edited by hand in `.claude-code-hermit/config.json` to match the version you rolled back to; re-running `hatch` will not do it (it only adds missing keys).
 

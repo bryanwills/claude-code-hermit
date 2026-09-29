@@ -92,7 +92,7 @@ status — the server's TUI redraws continuously and floods any follower.
 
 - **No worktree GC here.** Archiving a spawned session from the Claude app reads
   as a crash to the server and leaves a *locked* worktree behind. The recipe does
-  not clean those up; run `.claude-code-hermit/bin/hermit-run rc-server gc` in
+  not clean those up; run `hermit run rc-server gc` in
   the project, or unlock/remove/prune by hand.
 - **Anyone who can reach your Claude account can spawn sessions into an enrolled
   folder** while its instance is running. Enroll deliberately, and

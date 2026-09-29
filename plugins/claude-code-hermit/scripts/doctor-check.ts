@@ -966,7 +966,7 @@ function checkWatchdogUnitStatus(serviceName: string): { status: 'fail'; detail:
     if (!failed) return null;
     const remedy =
       execStatus === 127
-        ? "the unit cannot resolve `bun` on its environment PATH — re-run `bin/hermit-watchdog install` to bake the installing shell's PATH, then `systemctl --user daemon-reload`"
+        ? "the unit cannot resolve `bun` on its environment PATH — re-run `hermit watchdog install` to bake the installing shell's PATH, then `systemctl --user daemon-reload`"
         : `inspect with \`journalctl --user -u ${serviceName}\``;
     return {
       status: 'fail',
@@ -1001,7 +1001,7 @@ function checkWatchdogUnitPathBaked(serviceName: string): { status: 'warn'; deta
     detail:
       `watchdog: systemd unit ${serviceName}.service predates the PATH fix (no Environment=PATH) — ` +
       'the tick survives via the shim\'s bun fallback, but a restart dies in hermit-start\'s ' +
-      'preflight because `bun`/`claude` are off the unit PATH — re-run `bin/hermit-watchdog install`',
+      'preflight because `bun`/`claude` are off the unit PATH — re-run `hermit watchdog install`',
   };
 }
 
@@ -1073,11 +1073,11 @@ function checkWatchdog(p: DoctorPaths = PATHS) {
         : 'never ran';
       let remedy: string;
       if (mode === 'tmux') {
-        remedy = 'run `bin/hermit-watchdog install`';
+        remedy = 'run `hermit watchdog install`';
       } else if (mode === 'docker') {
         remedy = 'recreate the container (`docker compose up -d --force-recreate`) — containers built before v1.1.11 predate the entrypoint watchdog loop';
       } else {
-        remedy = 'native: run `bin/hermit-watchdog install`; Docker: recreate the container (`docker compose up -d --force-recreate`)';
+        remedy = 'native: run `hermit watchdog install`; Docker: recreate the container (`docker compose up -d --force-recreate`)';
       }
       const staleLabel = wCfg.enabled ? 'enabled but not firing' : "scheduler isn't firing";
       return { id: 'watchdog', status: 'warn', detail: `watchdog: ${staleLabel} (${ageNote}) — ${remedy}` };

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Hatch's host next step uses `hermit start` and requires core 1.4.8 or newer.
+
 ## [0.2.2] - 2026-09-28
 
 ### Fixed

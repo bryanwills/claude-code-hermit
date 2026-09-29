@@ -47,10 +47,10 @@ Set a per-session budget with `/hermit-settings budget`. A typical interactive s
 The hermit stops responding. Re-run `claude /login` inside the container to refresh credentials:
 
 ```bash
-.claude-code-hermit/bin/hermit-docker login
+hermit docker login
 ```
 
-Then restart: `.claude-code-hermit/bin/hermit-docker restart`
+Then restart: `hermit restart`
 
 ---
 
@@ -62,7 +62,7 @@ Yes. Set `ANTHROPIC_API_KEY` in `.env` and choose "apikey" during `/docker-setup
 
 ## Can I use this without Docker?
 
-Yes. Docker is the guided always-on path, not a requirement. Use `hermit-start`/`hermit-stop` for bare tmux; the first always-on boot registers the watchdog scheduler so dead sessions come back (opt out with `bin/hermit-watchdog uninstall`, or `watchdog.scheduler_enabled: false` before the first boot). For interactive-only use, just run `/claude-code-hermit:resident-start`. No tmux or Docker needed.
+Yes. Docker is the guided always-on path, not a requirement. Use `hermit-start`/`hermit-stop` for bare tmux; the first always-on boot registers the watchdog scheduler so dead sessions come back (opt out with `hermit watchdog uninstall`, or `watchdog.scheduler_enabled: false` before the first boot). For interactive-only use, just run `/claude-code-hermit:resident-start`. No tmux or Docker needed.
 
 ---
 
@@ -90,7 +90,7 @@ From the hermit's folder, run:
 curl -fsSL https://gtapps.github.io/claude-code-hermit/uninstall.sh | bash
 ```
 
-This removes the watchdog, stops the session, and uninstalls the folder-scoped plugin. State is kept by default and deleted only when you confirm on an interactive terminal; the script then prints a Claude prompt for cleaning shared-file leftovers. Only this folder is affected, so the marketplace registration and other hermits remain untouched. To deactivate only the watchdog, run `.claude-code-hermit/bin/hermit-watchdog uninstall`; to stop always-on mode but keep the hermit, run `.claude-code-hermit/bin/hermit-stop` or `.claude-code-hermit/bin/hermit-docker down`.
+This removes the watchdog, stops the session, and uninstalls the folder-scoped plugin. State is kept by default and deleted only when you confirm on an interactive terminal; the script then prints a Claude prompt for cleaning shared-file leftovers. Only this folder is affected, so the marketplace registration and other hermits remain untouched. To deactivate only the watchdog, run `hermit watchdog uninstall`; to stop always-on mode but keep the hermit, run `hermit stop` or `hermit stop`.
 
 ---
 

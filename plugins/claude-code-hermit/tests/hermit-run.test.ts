@@ -117,6 +117,16 @@ describe('hermit-run resolver', () => {
 });
 
 describe('hermit-exec.sh name guard', () => {
+  test('bash scripts receive arguments and preserve exit codes', async () => {
+    const dir = tmp('hx-shell-');
+    const script = path.join(dir, 'hermit-exec.sh');
+    fs.copyFileSync(HERMIT_EXEC, script);
+    fs.writeFileSync(path.join(dir, 'x.sh'), 'printf "%s\\n" "$@"\nexit 7\n');
+    const r = await bash(script, ['x', 'two words', '--flag'], {});
+    expect(r.stdout).toBe('two words\n--flag\n');
+    expect(r.exitCode).toBe(7);
+  });
+
   test('path traversal is rejected', async () => {
     const r = await bash(HERMIT_EXEC, ['micro-proposal/../../etc'], {});
     expect(r.exitCode).toBe(1);

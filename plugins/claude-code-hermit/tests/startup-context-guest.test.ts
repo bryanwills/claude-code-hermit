@@ -131,7 +131,7 @@ describe('startup-context.ts — resident vs guest', () => {
       expect(res.exitCode).toBe(0);
       expect(res.stdout).toContain('---Guest Session---');
       expect(res.stdout).not.toContain('---Open tasks---');
-      expect(res.stdout).toContain('.claude-code-hermit/bin/hermit-start');
+      expect(res.stdout).toContain('hermit start');
     } finally {
       wd.cleanup();
     }
@@ -145,7 +145,7 @@ describe('startup-context.ts — resident vs guest', () => {
       expect(res.exitCode).toBe(0);
       expect(res.stdout).toContain('---Guest Session---');
       expect(res.stdout).not.toContain('---Open tasks---');
-      expect(res.stdout).toContain('.claude-code-hermit/bin/hermit-start');
+      expect(res.stdout).toContain('hermit start');
     } finally {
       wd.cleanup();
     }
