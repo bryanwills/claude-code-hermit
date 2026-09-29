@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-- Doctor and the routine anchor no longer report heartbeat and routine-monitor `command-drift` when the plugin runs from Claude Code's identical `<version>-<sha>` cache copy
-- Doctor warns to restart the resident on `command-drift` with a live supervisor, instead of failing with re-arm advice the verbs refuse
 ### Added
 - The host `hermit` command provides `start`, `stop`, `restart`, `attach`, `update`, `docker`, `pause`, `watchdog`, and `run` from any folder with an optional registered project or agent name.
 - `hermit list` shows registered and Docker- or tmux-discovered projects, including stopped and missing entries; `list` and `status` support `--json`.
@@ -20,6 +17,8 @@
 - Missing-script guidance names `hermit update` to refresh the host copy.
 - Attach guidance for a project without runtime state points to `hermit start`.
 - Docker setup explains transport and execution status separately instead of treating absent session state as healthy.
+- Doctor and the routine anchor no longer report heartbeat and routine-monitor `command-drift` when the plugin runs from Claude Code's identical `<version>-<sha>` cache copy
+- Doctor warns to restart the resident on `command-drift` with a live supervisor, instead of failing with re-arm advice the verbs refuse
 
 ### Upgrade Instructions
 1. On Docker hosts, rerun `.claude-code-hermit/bin/hermit-docker update` once from the project root on the host. The refreshed wrapper bootstraps the host core if needed and installs `hermit` after the update.
