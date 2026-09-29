@@ -9,6 +9,7 @@
 
 import path from 'node:path';
 import { readJson } from '../cli';
+import { pidAlive } from '../lockfile';
 import { bootMismatch, heartbeatPredatesGraceSecs, monitorFreshness, STARTUP_GRACE_SECS } from '../monitor-health';
 import { readBootId } from '../routines/registry';
 import { parseDuration } from '../time';
@@ -38,6 +39,15 @@ export function hasStartedRegistration(runtime: Json): boolean {
  */
 export function livenessReason(reason: string): string {
   return reason.startsWith('liveness-') ? reason : `liveness-${reason}`;
+}
+
+/**
+ * Command drift under a live supervisor cannot be re-armed: the arming verbs answer
+ * RESTART_REQUIRED, so every consumer reads `restart-required` instead of re-checking.
+ */
+export function commandDriftReason(hermitDir: string, livenessFile: string): string {
+  const live = readJson(path.join(hermitDir, 'state', livenessFile));
+  return typeof live?.pid === 'number' && pidAlive(live.pid) ? 'restart-required' : 'command-drift';
 }
 
 /** Poll interval in whole seconds, floored at 1 so a `0m` config can't spin. */
@@ -80,7 +90,7 @@ export function heartbeatHealth(hermitDir: string, config: Json, nowMs: number):
   const interval = heartbeatInterval(config);
   if (runtime.interval !== interval) return { healthy: false, reason: 'interval-drift' };
   if (!sameMonitorCommand(runtime.command, heartbeatCommand(hermitDir, config)) || runtime.launch !== 'native') {
-    return { healthy: false, reason: 'command-drift' };
+    return { healthy: false, reason: commandDriftReason(hermitDir, 'heartbeat-liveness.json') };
   }
   const live = readJson(path.join(hermitDir, 'state', 'heartbeat-liveness.json'));
   const freshness = monitorFreshness(

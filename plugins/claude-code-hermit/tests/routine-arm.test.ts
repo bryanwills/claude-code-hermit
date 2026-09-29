@@ -95,14 +95,30 @@ test('begin preserves native liveness', async () => {
   expect(fs.readFileSync(file, 'utf8')).toBe(before);
 });
 
-test('command drift with a live supervisor requires restart', async () => {
-  const f = fixture();
+function driftRoutineLeg(f: ReturnType<typeof fixture>, pid: number) {
   const file = path.join(f.state, 'routine-monitor.runtime.json');
   const runtime = JSON.parse(fs.readFileSync(file, 'utf8'));
   runtime.command = 'bash /old/plugin/scripts/monitor-supervisor.sh';
   fs.writeFileSync(file, JSON.stringify(runtime));
-  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ pid: process.pid }));
+  fs.writeFileSync(path.join(f.state, 'routine-monitor-liveness.json'), JSON.stringify({ pid }));
+}
+
+test('command drift with a live supervisor requires restart', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, process.pid);
   expect((await arm(f.hermit, ['begin'])).stdout).toBe('RESTART_REQUIRED|command-drift\n');
+});
+
+test('anchor skips instead of arming when a restart is required', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, process.pid);
+  expect((await arm(f.hermit, ['anchor'])).stdout).toBe('SKIP|restart-required:routines\n');
+});
+
+test('command drift with a dead supervisor still arms', async () => {
+  const f = fixture();
+  driftRoutineLeg(f, 2147483647);
+  expect((await arm(f.hermit, ['check'])).stdout).toBe('ARM|routines|routines:command-drift\n');
 });
 
 test('both legs registered from the sha-suffixed sibling cache dir check healthy', async () => {
