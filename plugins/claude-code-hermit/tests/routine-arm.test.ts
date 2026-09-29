@@ -105,6 +105,18 @@ test('command drift with a live supervisor requires restart', async () => {
   expect((await arm(f.hermit, ['begin'])).stdout).toBe('RESTART_REQUIRED|command-drift\n');
 });
 
+test('both legs registered from the sha-suffixed sibling cache dir check healthy', async () => {
+  const f = fixture();
+  for (const name of ['routine-monitor.runtime.json', 'heartbeat-monitor.runtime.json']) {
+    const file = path.join(f.state, name);
+    const runtime = JSON.parse(fs.readFileSync(file, 'utf8'));
+    runtime.command = runtime.command.replace('"/scripts/', '-5954e0f6849a"/scripts/');
+    fs.writeFileSync(file, JSON.stringify(runtime));
+  }
+  const result = await arm(f.hermit, ['check']);
+  expect(result.stdout).toMatch(/^HEALTHY\|.*\|heartbeat=ok$/m);
+});
+
 test('guest begin only reports the guest verdict', async () => {
   const f = fixture();
   fs.writeFileSync(path.join(f.state, '.guest-test-guest'), iso());

@@ -282,6 +282,15 @@ describe('heartbeat start-check', () => {
     expect(lines(await run('start-check', [hermit]))).toEqual(['FRESH|interval=1800']);
   });
 
+  test('a registration from the sha-suffixed sibling cache dir reads FRESH', async () => {
+    const hermit = fixture();
+    seedMonitor(hermit);
+    const file = path.join(hermit, 'state/heartbeat-monitor.runtime.json');
+    write(hermit, 'state/heartbeat-monitor.runtime.json',
+      { ...read(file), command: monitorCommand(hermit).replace('"/scripts/', '-5954e0f6849a"/scripts/') });
+    expect(lines(await run('start-check', [hermit]))).toEqual(['FRESH|interval=1800']);
+  });
+
   test('interval drift plans activation with the config interval', async () => {
     const hermit = fixture({ config: { timezone: 'UTC', heartbeat: { every: '10m', active_hours: ALWAYS_ON } } });
     seedMonitor(hermit); // registered at 1800s, config now says 600s

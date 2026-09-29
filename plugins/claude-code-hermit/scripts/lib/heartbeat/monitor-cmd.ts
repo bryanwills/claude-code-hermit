@@ -52,6 +52,16 @@ export function heartbeatCommand(hermitDir: string, config: Json): string {
 }
 
 /**
+ * Does a registered monitor command match the one this checkout would register?
+ * Claude Code can cache one release as both `<ver>` and `<ver>-<sha12>`, and a
+ * session may run skills from either copy, so the root's hash suffix is ignored.
+ */
+export function sameMonitorCommand(registered: unknown, expected: string): boolean {
+  const canonical = (cmd: string) => cmd.replace(/-[0-9a-f]{12}(?="\/scripts\/)/, '');
+  return typeof registered === 'string' && canonical(registered) === canonical(expected);
+}
+
+/**
  * Is the registered heartbeat monitor current and ticking? `disabled` is reported
  * healthy so the daily anchor leaves a deliberately-off heartbeat alone; `start`
  * is an explicit operator act and treats that reason as a re-arm instead.
@@ -65,7 +75,7 @@ export function heartbeatHealth(hermitDir: string, config: Json, nowMs: number):
   }
   const interval = heartbeatInterval(config);
   if (runtime.interval !== interval) return { healthy: false, reason: 'interval-drift' };
-  if (runtime.command !== heartbeatCommand(hermitDir, config) || runtime.launch !== 'native') {
+  if (!sameMonitorCommand(runtime.command, heartbeatCommand(hermitDir, config)) || runtime.launch !== 'native') {
     return { healthy: false, reason: 'command-drift' };
   }
   const live = readJson(path.join(hermitDir, 'state', 'heartbeat-liveness.json'));

@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Doctor and the routine anchor no longer report heartbeat and routine-monitor `command-drift` when the plugin runs from Claude Code's identical `<version>-<sha>` cache copy, and real drift with a live supervisor warns to restart the resident instead of failing with re-arm advice the verbs refuse
+
 ## [1.4.7] - 2026-09-28
 
 ### Changed

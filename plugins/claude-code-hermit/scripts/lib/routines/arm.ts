@@ -8,7 +8,7 @@ import { readJson } from '../cli';
 import { readConfigRaw } from '../config-read';
 import { isGuest } from '../guest-marker';
 import { pidAlive } from '../lockfile';
-import { heartbeatHealth, PLUGIN_ROOT, livenessReason, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
+import { heartbeatHealth, PLUGIN_ROOT, livenessReason, sameMonitorCommand, STARTUP_GRACE_SECS, type LegHealth } from '../heartbeat/monitor-cmd';
 import { commitHeartbeatArm, prepareHeartbeatArm } from '../heartbeat/start';
 import { bootMismatch, monitorFreshness, waitForFirstTick } from '../monitor-health';
 import { isPaused } from '../pause';
@@ -118,7 +118,7 @@ function monitorHealth(ctx: Context): LegHealth {
   if (bootMismatch(runtime.boot_id, ctx.bootId)) {
     return { healthy: false, reason: 'boot-mismatch' };
   }
-  if (runtime.command !== routineCommand(ctx.hermitDir) && ctx.scheduled.length > 0) {
+  if (!sameMonitorCommand(runtime.command, routineCommand(ctx.hermitDir)) && ctx.scheduled.length > 0) {
     return { healthy: false, reason: 'command-drift' };
   }
   if (ctx.scheduled.length > 0 && runtime.launch !== 'native') {
