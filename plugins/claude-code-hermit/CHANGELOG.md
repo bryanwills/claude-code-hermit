@@ -2,8 +2,6 @@
 
 ## [Unreleased]
 
-### Fixed
-- Claude Sonnet 5.5 turns are costed at its own rates and no longer flagged as an unpriced model; the `sonnet` alias prices as Sonnet 5.5
 ### Added
 - The host `hermit` command provides `start`, `stop`, `restart`, `attach`, `update`, `docker`, `pause`, `watchdog`, and `run` from any folder with an optional registered project or agent name.
 - `hermit list` shows registered and Docker- or tmux-discovered projects, including stopped and missing entries; `list` and `status` support `--json`.
@@ -14,6 +12,7 @@
 - `hermit update` refreshes a Docker project's host core before using the fresh implementation to update the container; shared user-scope host installs are left unchanged.
 
 ### Fixed
+- Claude Sonnet 5.5 turns are costed at its own rates and no longer flagged as an unpriced model; the `sonnet` alias prices as Sonnet 5.5
 - Status shows a human table with all open tasks, waiting counts, execution age, and the first runnable task instead of raw task-list JSON.
 - Docker status checks the exact `hermit` service, reports failed inspections as unknown, and does not use the host session registry for execution.
 - Missing-script guidance names `hermit update` to refresh the host copy.
