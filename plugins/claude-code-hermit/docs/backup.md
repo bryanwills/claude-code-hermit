@@ -7,7 +7,7 @@ It runs from the watchdog tick, not from a session. No model turn, no tokens, an
 Ships off. Enable it from a terminal:
 
 ```
-.claude-code-hermit/bin/hermit-run backup setup
+hermit run backup setup
 ```
 
 ## Modes
@@ -86,7 +86,7 @@ There is no restore command yet — do it by hand, and read what you are copying
 
 1. Clone the backup repository.
 2. **Workspace mode:** copy the clone's contents over a freshly hatched project directory. **Mirror mode:** copy `.claude-code-hermit/`, `.claude/`, `CLAUDE.md` and `CLAUDE.local.md` back into the project.
-3. Copy `.claude-code-hermit/memory-mirror/memory/` to the directory `.claude-code-hermit/bin/hermit-run memory-dir` prints for the restored project. The path is keyed off the project's absolute path, so **restoring to a different path means a different directory** — run the verb from the new location rather than reusing the old path.
+3. Copy `.claude-code-hermit/memory-mirror/memory/` to the directory `hermit run memory-dir` prints for the restored project. The path is keyed off the project's absolute path, so **restoring to a different path means a different directory** — run the verb from the new location rather than reusing the old path.
 4. Delete the runtime leftovers, which describe a machine that no longer exists: `state/*.lock`, `state/runtime.json`, `state/.heartbeat`, and any `*-liveness.json`.
 5. Restore the secrets the backup refused: `.env`, `.claude.local/`, and anything else you keep outside the repo.
 6. Run `/claude-code-hermit:hermit-evolve` to reconcile the plugin version, then `/claude-code-hermit:hermit-doctor`.

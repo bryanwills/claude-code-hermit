@@ -68,7 +68,7 @@ claude plugin install claude-code-homeassistant-hermit@claude-code-hermit --scop
 
 The wizard triggers `claude-code-hermit:hatch` if the core hermit isn't ready, prompts for your `.env` (HA URL + Long-Lived Access Token), wires up the official Home Assistant MCP server, and registers the routines.
 
-> **Just trying it?** After `hatch`, run `.claude-code-hermit/bin/hermit-start --no-tmux` for sessions, routines, heartbeat, and the learning loop without 24/7 autonomy. Ctrl+C exits cleanly. Run `/claude-code-hermit:channel-setup` first if you want Discord or Telegram.
+> **Just trying it?** After `hatch`, run `hermit start --no-tmux` for sessions, routines, heartbeat, and the learning loop without 24/7 autonomy. Ctrl+C exits cleanly. Run `/claude-code-hermit:channel-setup` first if you want Discord or Telegram.
 
 ### 3. Go Always-On
 

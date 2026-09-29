@@ -83,9 +83,9 @@ describe('en catalog byte-identity (pre-refactor literals)', () => {
   // chat-side alternative to point at. Pinned in both locales because a translation
   // that drops or garbles the command leaves the operator with no way back in.
   test('WATCHDOG lapsed-login fix lines carry a runnable command in both locales', () => {
-    expect(WATCHDOG.en.lapsedLoginFixDocker()).toContain('hermit-docker login');
+    expect(WATCHDOG.en.lapsedLoginFixDocker()).toContain('hermit docker login');
     expect(WATCHDOG.en.lapsedLoginFixHost()).toContain('/login');
-    expect(WATCHDOG['pt-PT'].lapsedLoginFixDocker()).toContain('hermit-docker login');
+    expect(WATCHDOG['pt-PT'].lapsedLoginFixDocker()).toContain('hermit docker login');
     expect(WATCHDOG['pt-PT'].lapsedLoginFixHost()).toContain('/login');
     expect(WATCHDOG['pt-PT'].lapsedLogin('08:30', 'FIX')).toContain('(08:30). FIX');
   });

@@ -3110,7 +3110,7 @@ test('doctor checkWatchdog: enabled + stale last_run + tmux → warn, install hi
   const w = await doctorWatchdogCheck(h);
   expect(w.status).toBe('warn');
   expect(w.detail).toContain('not firing');
-  expect(w.detail).toContain('hermit-watchdog install');
+  expect(w.detail).toContain('hermit watchdog install');
 }));
 
 test('doctor checkWatchdog: enabled + missing last_run + docker → warn, recreate hint', withHermit(async (h) => {
@@ -3129,7 +3129,7 @@ test('doctor checkWatchdog: enabled + stale last_run + unknown runtime → warn,
   setLastRun(h, isoAgo(1));
   const w = await doctorWatchdogCheck(h);
   expect(w.status).toBe('warn');
-  expect(w.detail).toContain('hermit-watchdog install');
+  expect(w.detail).toContain('hermit watchdog install');
   expect(w.detail).toContain('force-recreate');
 }));
 
@@ -3168,7 +3168,7 @@ test('doctor checkWatchdog: scheduler_enabled false → ok, opted out, no instal
     const w = await doctorWatchdogCheck(h);
     expect(w.status).toBe('ok');
     expect(w.detail).toContain('scheduler opted out');
-    expect(w.detail).not.toContain('hermit-watchdog install');
+    expect(w.detail).not.toContain('hermit watchdog install');
   }));
 
 // scheduler_enabled only gates hermit-start's OS-timer install. Docker's tick comes

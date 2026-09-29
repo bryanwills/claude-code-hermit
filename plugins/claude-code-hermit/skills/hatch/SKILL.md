@@ -149,7 +149,7 @@ questions: [
   > **Channel preference saved.** Activation depends on how you run hermit:
   >
   > - **Docker (always-on):** `/claude-code-hermit:docker-setup` pairs during first run. Afterwards run `/claude-code-hermit:channel-setup` from the host to pair or re-pair. A channel or token added later needs `hermit-docker restart` first (the bot is offline until then). For pairing, use `/claude-code-hermit:channel-setup` from the host.
-  > - **tmux (always-on, host):** boot with `.claude-code-hermit/bin/hermit-start` (passes `--channels` automatically), then run `/claude-code-hermit:channel-setup` to set the token and pair.
+  > - **tmux (always-on, host):** boot with `hermit start` (passes `--channels` automatically), then run `/claude-code-hermit:channel-setup` to set the token and pair.
   > - **Interactive (just trying it):** run `/claude-code-hermit:channel-setup` for token + pairing, then restart with `claude --channels plugin:<channel>@claude-plugins-official` so the channel is active in your session.
   > - Full guide: https://code.claude.com/docs/en/channels
 
@@ -631,7 +631,7 @@ questions: [
     header: "Deployment",
     question: "How will you run the agent?",
     options: [
-      { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via .claude-code-hermit/bin/hermit-start; the watchdog scheduler installs on first boot (opt out with watchdog.scheduler_enabled: false)" },
+      { label: "tmux always-on", description: "Runs on the host as you, no image build. Boots via hermit start; the watchdog scheduler installs on first boot (opt out with watchdog.scheduler_enabled: false)" },
       { label: "Docker always-on", description: "Isolated container that restarts itself; guided end to end by /docker-setup" },
       { label: "Interactive", description: "Just trying it, right here in your terminal" }
     ]
@@ -711,6 +711,12 @@ Quick replaces Step 4 entirely and applies these defaults silently at the shared
 | Step 9c | Artifact publish permission | same as Advanced — `artifact-allow` applied silently (skip entirely if all three `artifacts.*` are `false`) and `artifacts.publish_authorized` set to `true` in config |
 
 ### 10. Report results
+
+On the host, install the operator command after setup, from the project root:
+
+```bash
+.claude-code-hermit/bin/hermit-run hermit-cli install
+```
 
 ```bash
 bun ${CLAUDE_PLUGIN_ROOT}/scripts/hatch-report.ts final <PROJECT_ROOT> --deployment <docker|tmux|interactive>

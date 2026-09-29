@@ -244,7 +244,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   ```
   Then ask each field in sequence.
 - Write each changed field through `settings-edit ... set watchdog.<field> <value>` (`watchdog.scheduler_enabled`, `watchdog.enabled`, `watchdog.stale_factor`, `watchdog.wedge_floor`, `watchdog.escalate_after`, `watchdog.operator_grace`). Per-field dotted sets preserve any untouched siblings. `set` JSON-parses its argument, so a bare `0` for `wedge_floor` would be written as a number and read back as the `4h` default — pass `0s` to disable the floor.
-  - Note: "Changes take effect on the next watchdog run. `scheduler_enabled` (default true) is the OS-timer policy a tmux always-on boot reads: every `hermit-start` registers the timer unless it is false. Setting it false by hand only stops future boots from re-registering — to remove a timer that is already installed run `bin/hermit-watchdog uninstall`, which deletes the unit and sets both `scheduler_enabled` and `enabled` false. `bin/hermit-watchdog install` re-registers it, and a first registration also sets `enabled: true`; a later re-install leaves `enabled` as you set it. Docker hermits run the watchdog from the entrypoint loop — no install step needed, and `scheduler_enabled` does not apply there."
+  - Note: "Changes take effect on the next watchdog run. `scheduler_enabled` (default true) is the OS-timer policy a tmux always-on boot reads: every `hermit-start` registers the timer unless it is false. Setting it false by hand only stops future boots from re-registering — to remove a timer that is already installed run `hermit watchdog uninstall`, which deletes the unit and sets both `scheduler_enabled` and `enabled` false. `hermit watchdog install` re-registers it, and a first registration also sets `enabled: true`; a later re-install leaves `enabled` as you set it. Docker hermits run the watchdog from the entrypoint loop — no install step needed, and `scheduler_enabled` does not apply there."
 - **Context hygiene compact** (`context_hygiene.compact` — runs independently of the "Enable watchdog?" answer above): ask "Enable routine-hygiene compaction? (yes / no) [current: <value>]". If yes, show the sub-fields:
   ```
   Context hygiene compact sub-fields (press Enter to keep current value):
@@ -331,7 +331,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
 
   (or "No packages configured" if empty)
   ```
-- Note: this list is read only when `/docker-setup` renders the templates. To install something now, add it inside the operator block of `Dockerfile.hermit` (or run `/docker-customize`) and rebuild with `.claude-code-hermit/bin/hermit-docker restart --build`. Do not prompt to add or remove packages and do not `set docker.packages`.
+- Note: this list is read only when `/docker-setup` renders the templates. To install something now, add it inside the operator block of `Dockerfile.hermit` (or run `/docker-customize`) and rebuild with `hermit restart --build`. Do not prompt to add or remove packages and do not `set docker.packages`.
 
 - Then show current `docker.recommended_plugins`:
   ```
@@ -350,7 +350,7 @@ Note: "Channel changes take effect on next `hermit-start` run. `channels.primary
   - `remove <PLUGIN>`: read the list, drop that entry, `set docker.recommended_plugins '<remaining array>'`
   - `add <PLUGIN> [<MARKETPLACE>]`: append an entry with `scope: "project"`, `enabled: true` and write the whole list back with `set docker.recommended_plugins '<array>'`. `<MARKETPLACE>` is an `org/repo` (e.g. `obra/superpowers-marketplace`) or omitted (defaults to `anthropics/claude-plugins-official`). If `<MARKETPLACE>` is provided but not registered locally, prompt: "Marketplace `<MARKETPLACE>` is not registered locally. Add it with `claude plugin marketplace add <MARKETPLACE>` first, then re-try." Abort the add. **Dedupe rule:** refuse the add if an existing entry has the same `(plugin, marketplace)` pair (scope is NOT part of the key) — operator should `enable` or `remove` first.
   - If input is just a plugin name without a verb: treat as `enable` if it exists, `add` if it doesn't
-- After changes, note: "Restart container to install new plugins: `.claude-code-hermit/bin/hermit-docker restart`"
+- After changes, note: "Restart container to install new plugins: `hermit restart`"
 
 **If argument is "scheduled-checks":**
 - Read `state/reflection-state.json` for last run dates. If missing, show "(no runs yet)".
@@ -389,7 +389,7 @@ Ask: "This hermit publishes status/proposal/weekly-review pages via Claude Code'
   1. Authorize — grant applied automatically at next boot
   2. Bank first publishes — you publish the first version of each page now; refreshes then reuse the same URL
 [current: <artifacts.publish_authorized value>]"
-On answer "Authorize" (or "on"/"yes"): run `settings-edit ... set artifacts.publish_authorized true`. Reply: "Recorded: artifact publish authorized. The grant (permissions.allow `Artifact`) is applied automatically at next boot — `.claude-code-hermit/bin/hermit-stop` then `hermit-start` to apply now. No settings files were modified from this session."
+On answer "Authorize" (or "on"/"yes"): run `settings-edit ... set artifacts.publish_authorized true`. Reply: "Recorded: artifact publish authorized. The grant (permissions.allow `Artifact`) is applied automatically at next boot — `hermit stop` then `hermit-start` to apply now. No settings files were modified from this session."
 On answer "Bank first publishes" (or "off"/"no"/"decline"): run `settings-edit ... set artifacts.publish_authorized false`. Reply: "Recorded: publishing declined. The standing permission is removed at the next boot from every settings file this install wrote it to, not from this session. An undecided (`null`) flag leaves an existing entry alone. First publish of each enabled page must happen in an attended session (`docs/artifacts.md` § refresh procedure); refreshes then reuse the same URL without prompting."
 **Channel-tagged turn:** send the same prompt via the channel reply tool with the two options numbered, AND queue a pending micro-proposal entry per `reflect` § Queuing procedure: `options: ["authorize", "bank first publishes"]`, `tier: 1`, `on_resolve: "/claude-code-hermit:hermit-settings artifact-authorization --answer {answer}"`. Note in the message that "Bank first publishes" still needs a terminal session later to do the banking itself — only the decision travels over the channel.
 **Channel re-entry:** if invoked as `artifact-authorization --answer "<label>"` (channel-responder resolving a micro-proposal queued by `hermit-evolve`'s Step 10 deferred-migration relay), skip the Ask above and match `<label>` case-insensitively by prefix against `Authorize` / `Bank first publishes`, then run the matching `settings-edit` command and reply exactly as above. This branch is deliberately channel-reachable — the flag is a decision record, not a permission — so it does not raise the native prompt the rest of `artifacts.*` policy sits behind.

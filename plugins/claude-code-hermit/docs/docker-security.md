@@ -55,7 +55,7 @@ The wizard makes the container *meaningfully harder to abuse*. It does not make 
 The wizard runs verification automatically. To re-verify later from the host:
 
 ```bash
-.claude-code-hermit/bin/hermit-docker bash -c 'sh -s' <<'VERIFY_EOF'
+hermit docker bash -c 'sh -s' <<'VERIFY_EOF'
 echo "=== Baseline ==="
 grep -E '^Cap(Eff|Bnd)' /proc/self/status            # both 0000000000000000
 grep NoNewPrivs /proc/self/status                    # NoNewPrivs: 1

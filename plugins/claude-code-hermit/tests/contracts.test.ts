@@ -1494,10 +1494,10 @@ describe('channel setup ownership', () => {
     expect(channelSetup).toContain('liveOwner');
   });
 
-  test('names the hermit-docker command for each Docker host state', () => {
-    expect(channelSetup).toContain('hermit-docker restart');
-    expect(channelSetup).toContain('hermit-docker up');
-    expect(channelSetup).toContain('hermit-docker logs');
+  test('names the hermit command for each Docker host state', () => {
+    expect(channelSetup).toContain('hermit restart');
+    expect(channelSetup).toContain('hermit start');
+    expect(channelSetup).toContain('hermit docker logs');
   });
 
   test('docker-setup pairing notes the bot may take up to 1 min', () => {

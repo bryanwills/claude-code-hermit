@@ -290,9 +290,9 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
     lapsedLogin: (hhmm, howToFix) =>
       `Your Claude login has expired, so your agent can't do any work until you sign in again (${hhmm}). ${howToFix}`,
     lapsedLoginFixDocker: () =>
-      'This one needs the machine it runs on: `.claude-code-hermit/bin/hermit-docker login`, then `hermit-docker restart`.',
+      'This one needs the machine it runs on: `hermit docker login`, then `hermit restart`.',
     lapsedLoginFixHost: () =>
-      'This one needs the machine it runs on: run `claude` in its project folder, type `/login`, then restart it with `.claude-code-hermit/bin/hermit-stop` and `hermit-start`.',
+      'This one needs the machine it runs on: run `claude` in its project folder, type `/login`, then restart it with `hermit stop` and `hermit start`.',
     envAuthFailure: (hhmm) =>
       `Your agent's API credential is being rejected, so it can't do any work until that key is valid again (${hhmm}). This isn't a sign-in you can renew from chat — check the key where you set it: it may have been revoked or rotated, or the account may be out of credit. I've left the session alone rather than restarting it, because a restart would lose the key entirely.`,
     usageLimit: (hhmm, resetAt) =>
@@ -321,9 +321,9 @@ export const WATCHDOG: Localized<WatchdogMessages> = {
     lapsedLogin: (hhmm, howToFix) =>
       `A sua sessão Claude expirou, por isso o seu agente não consegue trabalhar até voltar a autenticar-se (${hhmm}). ${howToFix}`,
     lapsedLoginFixDocker: () =>
-      'Isto tem de ser feito na máquina onde ele corre: `.claude-code-hermit/bin/hermit-docker login` e depois `hermit-docker restart`.',
+      'Isto tem de ser feito na máquina onde ele corre: `hermit docker login` e depois `hermit restart`.',
     lapsedLoginFixHost: () =>
-      'Isto tem de ser feito na máquina onde ele corre: corra `claude` na pasta do projeto, escreva `/login` e reinicie-o com `.claude-code-hermit/bin/hermit-stop` e `hermit-start`.',
+      'Isto tem de ser feito na máquina onde ele corre: corra `claude` na pasta do projeto, escreva `/login` e reinicie-o com `hermit stop` e `hermit start`.',
     envAuthFailure: (hhmm) =>
       `A credencial de API do seu agente está a ser rejeitada, por isso não consegue trabalhar até essa chave voltar a ser válida (${hhmm}). Não é uma autenticação que possa renovar pelo chat — verifique a chave onde a definiu: pode ter sido revogada ou rodada, ou a conta pode estar sem crédito. Deixei a sessão como está em vez de a reiniciar, porque um reinício perderia a chave por completo.`,
     usageLimit: (hhmm, resetAt) =>

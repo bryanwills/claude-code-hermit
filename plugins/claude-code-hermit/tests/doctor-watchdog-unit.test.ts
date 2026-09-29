@@ -99,7 +99,7 @@ describe('watchdog unit status', () => {
     const check = await watchdogCheck();
     expect(check.status).toBe('fail');
     expect(check.detail).toContain('127');
-    expect(check.detail).toContain('hermit-watchdog install');
+    expect(check.detail).toContain('hermit watchdog install');
   });
 
   test.serial.if(isLinux)('a non-127 failure points at the journal, not at re-installing', async () => {
@@ -107,7 +107,7 @@ describe('watchdog unit status', () => {
     const check = await watchdogCheck();
     expect(check.status).toBe('fail');
     expect(check.detail).toContain('journalctl');
-    expect(check.detail).not.toContain('hermit-watchdog install');
+    expect(check.detail).not.toContain('hermit watchdog install');
   });
 
   test.serial.if(isLinux)('a healthy unit falls through to the existing staleness logic', async () => {
@@ -146,7 +146,7 @@ describe('watchdog unit status', () => {
       expect(check.status).toBe('warn');
       // Not the staleness warn, which also names install — this is the unit-file read.
       expect(check.detail).toContain('no Environment=PATH');
-      expect(check.detail).toContain('hermit-watchdog install');
+      expect(check.detail).toContain('hermit watchdog install');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -174,7 +174,7 @@ describe('watchdog unit status', () => {
     const check = await watchdogCheck();
     expect(check.status).toBe('ok');
     expect(check.detail).toContain('scheduler opted out');
-    expect(check.detail).not.toContain('hermit-watchdog install');
+    expect(check.detail).not.toContain('hermit watchdog install');
   });
 
   test.serial.if(isLinux)('the unit name comes from the hermit dir, not the working directory', async () => {

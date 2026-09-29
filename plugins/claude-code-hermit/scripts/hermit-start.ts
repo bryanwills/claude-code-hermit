@@ -30,6 +30,7 @@ import { sanitizeLanguage } from './lib/operator-language';
 import { outputStyleFor } from './lib/voice';
 import { automodeAllowEntry, AUTOMODE_ENV_ENTRIES, AUTOMODE_SOFT_DENY_ENTRY, SEALED_SETTINGS_OPS } from './lib/settings/automode-entries';
 import { overlayHooks } from './lib/settings/overlay-hooks';
+import { registerProject } from './lib/host-registry';
 import { writeFileAtomic } from './lib/md-write';
 import { renderTemplate } from './lib/render-template';
 import { transcriptDirFor } from './lib/cc-compat';
@@ -411,7 +412,7 @@ function checkPrerequisites(): Json {
   if (!Bun.which('claude')) {
     errors.push(
       'claude: Claude Code CLI not on PATH. Install from https://claude.ai/download, ' +
-        'or re-run `bin/hermit-watchdog install` if this started from a systemd unit.',
+        'or re-run `hermit watchdog install` if this started from a systemd unit.',
     );
   }
 
@@ -423,7 +424,7 @@ function checkPrerequisites(): Json {
   if (!hasBun) {
     errors.push(
       'bun: required runtime not on PATH. Install with `curl -fsSL https://bun.sh/install | bash`, ' +
-        'or re-run `bin/hermit-watchdog install` if this started from a systemd unit.',
+        'or re-run `hermit watchdog install` if this started from a systemd unit.',
     );
   } else {
     // Already running under bun, so Bun.version is a free in-process probe.
@@ -1297,7 +1298,7 @@ export function shouldRefuseBoot(bootMode: BootMode): string[] | null {
   if (dockerHermitRunning()) {
     return [
       "This project's Docker hermit is running — a second host instance would fight it for state and channels.",
-      'Stop it first: .claude-code-hermit/bin/hermit-docker down   (attach: .claude-code-hermit/bin/hermit-docker attach)',
+      'Stop it first: hermit stop   (attach: hermit attach)',
       'Override (split-state recovery only): HERMIT_FORCE_BOOT=1',
     ];
   }
@@ -1307,7 +1308,7 @@ export function shouldRefuseBoot(bootMode: BootMode): string[] | null {
   if (age !== null) {
     return [
       `A ${rt!.runtime_mode} instance appears to be alive for this project (state activity ${Math.round(age)}s ago).`,
-      'Stop it first (bin/hermit-stop or hermit-docker down), or override with HERMIT_FORCE_BOOT=1.',
+      'Stop it first (hermit stop), or override with HERMIT_FORCE_BOOT=1.',
     ];
   }
   return null;
@@ -1402,8 +1403,8 @@ export function duplicateSessionRefusal(sessionName: string): string[] | null {
     'Lifecycle state cannot be rebuilt from a session already in flight — attach,',
     'the watchdog and session recovery stay degraded until the session restarts.',
     'Recover:',
-    '  .claude-code-hermit/bin/hermit-stop',
-    '  .claude-code-hermit/bin/hermit-start',
+    '  hermit stop',
+    '  hermit start',
     `To inspect it first: tmux attach -t ${sessionName}`,
   ];
 }
@@ -1428,6 +1429,10 @@ export function resolveResumeTarget(
     try { return JSON.parse(line).type === 'user'; } catch { return false; }
   });
   return hasUserTurn ? { id } : { skip: 'no-user-turn' };
+}
+
+export function registerHostProjectOnBoot(project = process.cwd(), root = PLUGIN_ROOT): void {
+  try { registerProject(project, root); } catch { /* Registry failure must never prevent startup. */ }
 }
 
 async function main(): Promise<void> {
@@ -1642,8 +1647,8 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       console.log(`[hermit] Session "${sessionName}" already running (always-on).`);
-      console.log(`[hermit] Attach: .claude-code-hermit/bin/hermit-attach  (or: tmux attach -t ${sessionName})`);
-      console.log('[hermit] Send tasks via channel, or run hermit-stop to shut down.');
+      console.log(`[hermit] Attach: hermit attach  (or: tmux attach -t ${sessionName})`);
+      console.log('[hermit] Send tasks via channel, or run hermit stop to shut down.');
       process.exit(0);
     } else {
       console.log('[hermit] ERROR: tmux new-session failed.');
@@ -1656,6 +1661,7 @@ async function main(): Promise<void> {
 
   // Detect runtime mode
   const runtimeMode = isContainer() ? 'docker' : 'tmux';
+  if (runtimeMode === 'tmux') registerHostProjectOnBoot();
 
   // Fresh boot marker for hermit-routines' cron-registry diff (see helper).
   writeBootId();
@@ -1751,8 +1757,8 @@ async function main(): Promise<void> {
   }
 
   console.log('[hermit] Mode: always-on (session stays open between tasks)');
-  console.log(`[hermit] Attach: .claude-code-hermit/bin/hermit-attach  (or: tmux attach -t ${sessionName})`);
-  console.log('[hermit] Stop: .claude-code-hermit/bin/hermit-stop');
+  console.log(`[hermit] Attach: hermit attach  (or: tmux attach -t ${sessionName})`);
+  console.log('[hermit] Stop: hermit stop');
 }
 
 export {

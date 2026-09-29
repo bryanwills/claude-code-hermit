@@ -5,7 +5,7 @@
 #
 # Apply via the hermit-docker wrapper, which auto-detects this file and
 # chains it with the base compose:
-#   .claude-code-hermit/bin/hermit-docker up
+#   hermit start
 #
 # Or manually:
 #   docker compose -f docker-compose.hermit.yml \

@@ -135,7 +135,7 @@ export function preflight(input: PreflightInput): Preflight {
   let remedy: string | undefined;
   if (!satisfiesFloor(coreInstalled, floor)) {
     action = 'upgrade-core-package';
-    remedy = `Installed core is ${coreInstalled ?? 'unknown'} but ${pluginId} requires ${floor}. Update the plugin first (Docker: .claude-code-hermit/bin/hermit-docker update; host: claude plugin update claude-code-hermit), then run /claude-code-hermit:hermit-evolve, then re-run this hatch.`;
+    remedy = `Installed core is ${coreInstalled ?? 'unknown'} but ${pluginId} requires ${floor}. Update the plugin first with hermit update, then run /claude-code-hermit:hermit-evolve, then re-run this hatch.`;
   } else if (!satisfiesFloor(coreApplied, floor)) {
     action = 'upgrade-core-applied';
     remedy = `Core code is current (${coreInstalled}) but this project is still migrated to ${coreApplied ?? 'none'}, below the required ${floor}. Run /claude-code-hermit:hermit-evolve, then re-run this hatch.`;

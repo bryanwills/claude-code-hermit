@@ -52,13 +52,13 @@ if [ "$_CLAUDE_VER" = "0.0.0" ]; then
     _CLAUDE_VER="${_CLAUDE_VER:-0.0.0}"
     if [ "$_CLAUDE_VER" = "0.0.0" ]; then
       echo "[docker-entrypoint] ERROR: claude still reports 0.0.0 after reinstall."
-      echo "[docker-entrypoint] Recreate the container: .claude-code-hermit/bin/hermit-docker down && .claude-code-hermit/bin/hermit-docker up"
+      echo "[docker-entrypoint] Recreate the container: hermit stop && hermit start"
       exit 1
     fi
     echo "[docker-entrypoint] Reinstall succeeded (v${_CLAUDE_VER})."
   else
     echo "[docker-entrypoint] ERROR: npm install failed — cannot recover the claude binary."
-    echo "[docker-entrypoint] Recreate the container: .claude-code-hermit/bin/hermit-docker down && .claude-code-hermit/bin/hermit-docker up"
+    echo "[docker-entrypoint] Recreate the container: hermit stop && hermit start"
     exit 1
   fi
 fi
@@ -81,7 +81,7 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
   echo "  No auth credentials found."
   echo "  From another terminal, run:"
   echo ""
-  echo "    .claude-code-hermit/bin/hermit-docker login"
+  echo "    hermit docker login"
   echo ""
   echo "  Do NOT attach to tmux and run claude while waiting"
   echo "  — use hermit-docker login only."
@@ -349,7 +349,7 @@ if [ "$NEEDS_OFFICIAL" = true ] && ! marketplace_registered claude-plugins-offic
     echo "[docker-entrypoint] ERROR: failed to add claude-plugins-official marketplace."
     echo "[docker-entrypoint]        Channel and recommended plugins will NOT be installed."
     echo "[docker-entrypoint]        Fix: shell into the container and run the command manually:"
-    echo "[docker-entrypoint]          .claude-code-hermit/bin/hermit-docker bash"
+    echo "[docker-entrypoint]          hermit docker bash"
     echo "[docker-entrypoint]          claude plugin marketplace add anthropics/claude-plugins-official"
     NEEDS_OFFICIAL=false
   fi
@@ -386,7 +386,7 @@ if [ "$NEEDS_OFFICIAL" = true ] && [ -n "$CHANNELS" ]; then
       echo "[docker-entrypoint]        Current plugin list:"
       claude plugin list | sed 's/^/[docker-entrypoint]          /' || true
       echo "[docker-entrypoint]        Fix: shell in and reinstall manually:"
-      echo "[docker-entrypoint]          .claude-code-hermit/bin/hermit-docker bash"
+      echo "[docker-entrypoint]          hermit docker bash"
       echo "[docker-entrypoint]          claude plugin install ${target} --scope local"
     fi
   done

@@ -213,7 +213,7 @@ Suggested HEARTBEAT check (add to HEARTBEAT.md if you run heartbeats):
 
 Go always-on (recommended):
   - Docker:     /claude-code-hermit:docker-setup
-  - Bare tmux:  .claude-code-hermit/bin/hermit-start
+  - Bare tmux:  hermit start
   Interactive test drive: /claude-code-hermit:hermit-routines load
 
 Installed skills:

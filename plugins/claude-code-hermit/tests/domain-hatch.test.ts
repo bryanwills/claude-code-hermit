@@ -166,7 +166,7 @@ describe('preflight', () => {
     const r = run(scaffold({ coreInstalled: '1.2.28', coreApplied: '1.2.28' }));
     expect(r.action).toBe('upgrade-core-package');
     expect(r.core_floor).toBe('>=1.2.30');
-    expect(r.remedy).toContain('claude plugin update');
+    expect(r.remedy).toContain('hermit update');
     expect(r.remedy).not.toContain('Run /claude-code-hermit:hermit-evolve, then re-run');
   });
 
@@ -176,7 +176,7 @@ describe('preflight', () => {
     const r = run(scaffold({ coreInstalled: '1.2.33', coreApplied: '1.2.28' }));
     expect(r.action).toBe('upgrade-core-applied');
     expect(r.remedy).toContain('hermit-evolve');
-    expect(r.remedy).not.toContain('claude plugin update');
+    expect(r.remedy).not.toContain('hermit update');
   });
 
   test('full on a first run, verify when the stamped version already matches', () => {
