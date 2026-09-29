@@ -12,6 +12,7 @@
 - `hermit update` refreshes a Docker project's host core before using the fresh implementation to update the container; shared user-scope host installs are left unchanged.
 
 ### Fixed
+- Claude Sonnet 5.5 turns are costed at its own rates and no longer flagged as an unpriced model; the `sonnet` alias prices as Sonnet 5.5
 - Status shows a human table with all open tasks, waiting counts, execution age, and the first runnable task instead of raw task-list JSON.
 - Docker status checks the exact `hermit` service, reports failed inspections as unknown, and does not use the host session registry for execution.
 - Missing-script guidance names `hermit update` to refresh the host copy.

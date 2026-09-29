@@ -16,10 +16,16 @@ describe('resolvePricing', () => {
     expect(r.rates).toEqual(PRICING['claude-haiku-4-5']);
   });
 
-  test('tier alias sonnet → sonnet-5, not exact', () => {
+  test('claude-sonnet-5-5 is exact', () => {
+    const r = resolvePricing('claude-sonnet-5-5');
+    expect(r.exact).toBe(true);
+    expect(r.rates).toEqual(PRICING['claude-sonnet-5-5']);
+  });
+
+  test('tier alias sonnet → sonnet-5-5, not exact', () => {
     const r = resolvePricing('sonnet');
     expect(r.exact).toBe(false);
-    expect(r.rates).toEqual(PRICING['claude-sonnet-5']);
+    expect(r.rates).toBe(PRICING['claude-sonnet-5-5']);
   });
 
   test('claude-opus-5-5 is exact', () => {
